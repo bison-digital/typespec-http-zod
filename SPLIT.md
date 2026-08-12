@@ -15,8 +15,8 @@ Measured, after an earlier claim in the other direction was found to be made up:
   clients — is strictly larger than the audience for a Hono server generator.
 
 ⚠️ **The `@typespec/openapi3` precedent does NOT argue against this, and it was cited as though it
-did.** openapi3 keeps its schema emitters internal because they emit *OpenAPI schema objects*, which
-are meaningless outside an OpenAPI document. This emits *runtime validators*, useful in any server.
+did.** openapi3 keeps its schema emitters internal because they emit _OpenAPI schema objects_, which
+are meaningless outside an OpenAPI document. This emits _runtime validators_, useful in any server.
 The thing openapi3 does factor out — `@typespec/asset-emitter` — is precisely the part with value
 beyond one emitter. Read properly, it argues for the split.
 
@@ -44,17 +44,17 @@ Everything below is a top-level declaration of the un-split `index.ts` unless no
 
 **Public API the Hono package consumes:**
 
-| export                                                            | why it is public                                 |
-| ----------------------------------------------------------------- | ------------------------------------------------ |
-| `collectRoutes(program, registry, service) → EmittedRoute[]`      | **the shared intermediate representation**       |
-| `EmittedRoute`, `StatusKey`                                       | its type                                         |
-| `SchemaRegistry` — `expressionFor`, `declarations`                | identifier naming; the coupling above            |
-| `namedSchema`, `schemaConst`, `isIdentifier`                      | how a per-route validator gets its name          |
+| export                                                                              | why it is public                             |
+| ----------------------------------------------------------------------------------- | -------------------------------------------- |
+| `collectRoutes(program, registry, service) → EmittedRoute[]`                        | **the shared intermediate representation**   |
+| `EmittedRoute`, `StatusKey`                                                         | its type                                     |
+| `SchemaRegistry` — `expressionFor`, `declarations`                                  | identifier naming; the coupling above        |
+| `namedSchema`, `schemaConst`, `isIdentifier`                                        | how a per-route validator gets its name      |
 | `renderSchemas`, `renderRequestTypes`, `renderVocabularies`, `renderWireAssertions` | the artefacts, so Hono re-emits none of them |
-| `renderExternalImports`, `collectExternalImports`                 | import collection during a walk                  |
-| `withContractsPackage`, `withSealedObjects`, `withVisibility`     | scoped emission settings                         |
-| `serviceSnapshots`, `resolveVersioningModule`                     | which service/version is emitted                 |
-| the option types for `seal-object-schemas`, `contracts-*`, `key-vocabularies` | so Hono forwards rather than restates |
+| `renderExternalImports`, `collectExternalImports`                                   | import collection during a walk              |
+| `withContractsPackage`, `withSealedObjects`, `withVisibility`                       | scoped emission settings                     |
+| `serviceSnapshots`, `resolveVersioningModule`                                       | which service/version is emitted             |
+| the option types for `seal-object-schemas`, `contracts-*`, `key-vocabularies`       | so Hono forwards rather than restates        |
 
 **Internal:** `zod.ts`, `registry.ts`, `constraints.ts`, `types.ts`, `versioning.ts`, `streams.ts`,
 and from `index.ts`: `errorBodyOf`, `bodyTypeOf`, `successBodyOf`, `multipartSchemaOf`,
@@ -94,14 +94,14 @@ the bulk. Neither `$lib` has a `state` key: **there are no decorators in either 
 Both need their own gold standard. The oracles do **not** divide cleanly, and pretending they do is
 how one half ends up ungraded.
 
-| oracle                   | goes to                | note                                                              |
-| ------------------------ | ---------------------- | ----------------------------------------------------------------- |
-| conformance differential | **split**              | components, parameters and response BODIES are the library's; route paths, mounted-route counts and response ARMS need the Hono emitter |
-| round-trip               | library                | it compares documents and components                              |
-| Hono equivalence         | Hono                   | `reference-app.ts` is written in `@hono/zod-openapi`'s idiom      |
-| wiring                   | Hono                   | needs a running server                                            |
-| vocabulary (Zod calls)   | **both**               | each asserts its own emitted output                                |
-| packaging                | **both**               | each declares its own peers                                       |
+| oracle                   | goes to   | note                                                                                                                                    |
+| ------------------------ | --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| conformance differential | **split** | components, parameters and response BODIES are the library's; route paths, mounted-route counts and response ARMS need the Hono emitter |
+| round-trip               | library   | it compares documents and components                                                                                                    |
+| Hono equivalence         | Hono      | `reference-app.ts` is written in `@hono/zod-openapi`'s idiom                                                                            |
+| wiring                   | Hono      | needs a running server                                                                                                                  |
+| vocabulary (Zod calls)   | **both**  | each asserts its own emitted output                                                                                                     |
+| packaging                | **both**  | each declares its own peers                                                                                                             |
 
 ⚠️ **The library needs a differential of its own, and it cannot be the current one unchanged.** The
 current one imports `app.gen.ts` and mounts a real Hono app to count routes. The library's version

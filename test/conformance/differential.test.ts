@@ -234,8 +234,9 @@ function throughDecode(def: ZodShapeDef | undefined): ZodShapeDef | undefined {
 function requestBodySchema(
 	operation: DocumentOperation,
 ): { readonly schema: JsonSchema; readonly component: string | undefined } | undefined {
-	const content = (operation as { requestBody?: { content?: Record<string, { schema?: unknown }> } })
-		.requestBody?.content;
+	const content = (
+		operation as { requestBody?: { content?: Record<string, { schema?: unknown }> } }
+	).requestBody?.content;
 	for (const media of Object.values(content ?? {})) {
 		const schema = media.schema;
 		if (schema === undefined) continue;
@@ -260,8 +261,9 @@ function requestMediaTypes(operation: DocumentOperation): readonly string[] {
 
 /** Every media type the document names across an operation's RESPONSES. */
 function responseMediaTypes(operation: DocumentOperation): readonly string[] {
-	const responses = (operation as { responses?: Record<string, { content?: Record<string, unknown> }> })
-		.responses;
+	const responses = (
+		operation as { responses?: Record<string, { content?: Record<string, unknown> }> }
+	).responses;
 	const found = new Set<string>();
 	for (const response of Object.values(responses ?? {})) {
 		for (const type of Object.keys(response.content ?? {})) found.add(type);

@@ -94,17 +94,17 @@ reporting agreement, for the whole life of its predecessor.
 
 ## What the oracles are
 
-| oracle | proves | catches |
-| --- | --- | --- |
-| **Conformance differential** (`test/conformance/`) | the validators say what the document says | keys, openness, constraints, required, nullability, property and element types, parameters, declared statuses, response bodies |
-| **Round-trip** (`test/reference/roundtrip*`) | it can serve an API nobody here designed | operations lost between the converter and this emitter; shapes that disagree with a document derived from somebody else's API |
-| **Acceptance** (`test/acceptance.test.ts`) | the validators accept what the document permits and reject what it forbids | a schema that agrees with the document and throws when a value reaches it |
-| **Vocabulary** (`test/vocabulary.test.ts`) | the validator says only what the document can say | a `.transform()`/`.refine()` smuggled in; a decorator shipped for a spec to depend on |
-| **Emitted-output compile** (`test/emit.test.ts`) | the output is loadable TypeScript | unquoted keys, duplicate declarations, recursion that throws during module initialisation |
-| **Reference service** (`test/reference/`) | question 1 — Zod alone | every construct that has broken an emitter, annotated with which |
-| **Provenance** (`test/provenance.test.ts`) | the package names and obeys no codebase but its own | a rule keyed on a name the spec author chose |
-| **Packaging** (`test/packaging.test.ts`) | what a stranger gets | an entry point outside `files`; test material shipped; a path dependency |
-| **Documentation** (`test/documentation.test.ts`) | a refusal is findable, not discoverable | a diagnostic or option nobody wrote down; a declared diagnostic with no call site |
+| oracle                                             | proves                                                                     | catches                                                                                                                        |
+| -------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **Conformance differential** (`test/conformance/`) | the validators say what the document says                                  | keys, openness, constraints, required, nullability, property and element types, parameters, declared statuses, response bodies |
+| **Round-trip** (`test/reference/roundtrip*`)       | it can serve an API nobody here designed                                   | operations lost between the converter and this emitter; shapes that disagree with a document derived from somebody else's API  |
+| **Acceptance** (`test/acceptance.test.ts`)         | the validators accept what the document permits and reject what it forbids | a schema that agrees with the document and throws when a value reaches it                                                      |
+| **Vocabulary** (`test/vocabulary.test.ts`)         | the validator says only what the document can say                          | a `.transform()`/`.refine()` smuggled in; a decorator shipped for a spec to depend on                                          |
+| **Emitted-output compile** (`test/emit.test.ts`)   | the output is loadable TypeScript                                          | unquoted keys, duplicate declarations, recursion that throws during module initialisation                                      |
+| **Reference service** (`test/reference/`)          | question 1 — Zod alone                                                     | every construct that has broken an emitter, annotated with which                                                               |
+| **Provenance** (`test/provenance.test.ts`)         | the package names and obeys no codebase but its own                        | a rule keyed on a name the spec author chose                                                                                   |
+| **Packaging** (`test/packaging.test.ts`)           | what a stranger gets                                                       | an entry point outside `files`; test material shipped; a path dependency                                                       |
+| **Documentation** (`test/documentation.test.ts`)   | a refusal is findable, not discoverable                                    | a diagnostic or option nobody wrote down; a declared diagnostic with no call site                                              |
 
 Corpus: `@typespec/http-specs@0.1.0-alpha.41`, **pinned exactly**, 61 scenarios differentiated. Both
 emitters run from **one program** — recompiling would make disagreements ambiguous.
@@ -127,20 +127,20 @@ fails as stale — deleting it is part of the fix.
 
 ### In the emitter
 
-| what | how it was found |
-| --- | --- |
+| what                                                                                                                                                                                                                                                                     | how it was found                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **`types.ts` had no `@discriminator` handling at all.** `zod.ts` emitted a discriminated union; `types.ts` emitted the base's own properties. The contract type could not be narrowed, admitted every string the validator rejects, and the subtypes got no declaration. | `wire-contract.gen.ts`, whose whole purpose is catching the emitter disagreeing with itself across its two walks. Second defect of that class it has caught. |
-| **A hardcoded `companyId` filter** dropped any parameter of that name from the emitted input type while the validator went on requiring it — two artefacts describing different shapes, from a rule no document states. | Reading every line of prose for the de-extraction sweep. It was code, not a comment. |
-| **The wire assertion's failure message named one repository's architecture**, in every consumer's build output. | The same sweep. |
+| **A hardcoded `companyId` filter** dropped any parameter of that name from the emitted input type while the validator went on requiring it — two artefacts describing different shapes, from a rule no document states.                                                  | Reading every line of prose for the de-extraction sweep. It was code, not a comment.                                                                         |
+| **The wire assertion's failure message named one repository's architecture**, in every consumer's build output.                                                                                                                                                          | The same sweep.                                                                                                                                              |
 
 ### In the oracle — all four accusing the emitter falsely
 
-| what | how it was found |
-| --- | --- |
+| what                                                                                                                                                                                                                             | how it was found                                                            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | **The constraint reader stopped at an `anyOf`**, so a nullable-and-constrained property read as unconstrained in the document. `documentKindOf` already peeled that wrapper; the two describers disagreed about the same schema. | The constraint arm firing for the first time, once a depth fixture existed. |
-| **The Zod describer could not see optionality through `z.preprocess`** (a `pipe` in Zod 4, whose `out` carries the schema), so a flattened collection parameter read as required. | The same run. Settled by measuring the runtime. |
-| **A test asserted `"$select"` quoted.** `$` is a valid identifier start; the emitter was right. | Its own first run. |
-| **Two suites compiled one fixture to one directory with different options, in parallel.** The same request answered 400, 200 and 204 across runs of an unchanged emitter. | Question 3 disagreeing with itself. |
+| **The Zod describer could not see optionality through `z.preprocess`** (a `pipe` in Zod 4, whose `out` carries the schema), so a flattened collection parameter read as required.                                                | The same run. Settled by measuring the runtime.                             |
+| **A test asserted `"$select"` quoted.** `$` is a valid identifier start; the emitter was right.                                                                                                                                  | Its own first run.                                                          |
+| **Two suites compiled one fixture to one directory with different options, in parallel.** The same request answered 400, 200 and 204 across runs of an unchanged emitter.                                                        | Question 3 disagreeing with itself.                                         |
 
 ---
 

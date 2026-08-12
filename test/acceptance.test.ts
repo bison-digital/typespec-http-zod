@@ -207,7 +207,10 @@ describe("constraints", () => {
 	it("enforces minItems and maxItems", () => {
 		expect(accepts(constraints["collectionBoundsSchema"], collections({ tags: [] }))).toBe(false);
 		expect(
-			accepts(constraints["collectionBoundsSchema"], collections({ tags: ["a", "b", "c", "d", "e", "f"] })),
+			accepts(
+				constraints["collectionBoundsSchema"],
+				collections({ tags: ["a", "b", "c", "d", "e", "f"] }),
+			),
 		).toBe(true);
 		expect(
 			accepts(
@@ -219,13 +222,13 @@ describe("constraints", () => {
 
 	it("leaves an open element open, without letting the array itself go unchecked", () => {
 		// `payloads: unknown[]` — the document says `items: {}`, so anything goes INSIDE the array.
-		expect(accepts(constraints["collectionBoundsSchema"], collections({ payloads: [1, "a", null] }))).toBe(
-			true,
-		);
+		expect(
+			accepts(constraints["collectionBoundsSchema"], collections({ payloads: [1, "a", null] })),
+		).toBe(true);
 		// But it is still an array.
-		expect(accepts(constraints["collectionBoundsSchema"], collections({ payloads: "not-an-array" }))).toBe(
-			false,
-		);
+		expect(
+			accepts(constraints["collectionBoundsSchema"], collections({ payloads: "not-an-array" })),
+		).toBe(false);
 	});
 
 	it("enforces an element's own constraint through the scalar it names", () => {

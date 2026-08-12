@@ -78,7 +78,9 @@ describe("the README documents everything this package can do to you", () => {
 			negotiatedResponseBodies: number;
 			unreadableResponseBodies: number;
 		};
-		expect(readme).toMatch(new RegExp(`\\b${baseline.unenforcedFormats}\\b.{0,40}annotations`, "s"));
+		expect(readme).toMatch(
+			new RegExp(`\\b${baseline.unenforcedFormats}\\b.{0,40}annotations`, "s"),
+		);
 		expect(readme).toMatch(
 			new RegExp(`\\b${baseline.negotiatedResponseBodies}\\b negotiated response bodies`, "s"),
 		);
@@ -91,6 +93,8 @@ describe("the README documents everything this package can do to you", () => {
 		 * wrong model, and the stale direction is the one nobody goes looking for.
 		 */
 		expect(readme).not.toMatch(/`content-type` and `accept` request validators are not graded/);
-		expect(readme).not.toMatch(/response bodies are read by status but not resolved to a component/);
+		expect(readme).not.toMatch(
+			/response bodies are read by status but not resolved to a component/,
+		);
 	});
 });

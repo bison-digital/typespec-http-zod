@@ -27,9 +27,6 @@
 		"type/property/value-types :: typespec-http-zod/unsupported-type",
 		"type/union/discriminated :: typespec-http-zod/undeclared-discriminator"
 	],
-	"oracleFailures": [
-		"routes :: @typespec/openapi3/path-query",
-		"special-words :: emitter-crashed"
-	],
+	"oracleFailures": ["routes :: @typespec/openapi3/path-query", "special-words :: emitter-crashed"],
 	"divergences": {}
 }
