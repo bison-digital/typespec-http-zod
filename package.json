@@ -68,6 +68,7 @@
 	},
 	"devDependencies": {
 		"@types/node": "^26.0.0",
+		"typespec-http-zod": "link:.",
 		"@typespec/compiler": "1.14.0",
 		"@typespec/events": "0.84.0",
 		"@typespec/http": "1.14.0",
