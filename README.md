@@ -87,7 +87,7 @@ stated limitation once a package is published. Each is re-measured by the suite.
 
 - **`format` is deliberately not enforced, and that is now CHECKED rather than counted.** Under JSON
   Schema 2020-12 `format` is an annotation, not a validation keyword, so turning one into a check
-  would enforce something the document does not assert. 133 annotations go unenforced, and
+  would enforce something the document does not assert. 136 annotations go unenforced, and
   `test/vocabulary.test.ts` refuses any format-derived Zod call as a class — so turning it on breaks a
   test rather than moving a number.
 - **4 negotiated response bodies cannot be attributed to a single arm.** OpenAPI lists one
@@ -111,6 +111,7 @@ Nothing here is judged by fixtures we wrote alone.
   **22 operations, none lost, no shape disagreements.** Every other suite measures this emitter
   against material that already knows about it; this one asks what a first adopter asks. The
   documents are vendored with digests the suite asserts, never fetched.
+- **Request bodies are compared, and were compared by nothing at all** — 21 by shape and 36 by kind. Parameters were graded and responses were graded; what a caller may SEND, the largest surface of most APIs, had no arm.
 - **Response bodies are compared, not counted** — 24 inline bodies by SHAPE and
   44 non-object bodies by KIND. This surface was a bare number for a long time, and closing it
   immediately found three positions where the emitter required a string for a raw binary body the

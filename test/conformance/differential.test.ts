@@ -195,6 +195,35 @@ interface ZodShapeDef {
 	readonly options?: readonly unknown[];
 }
 
+/**
+ * The request body's schema, and whether it names a component.
+ *
+ * ⚠️ **The request body was compared by NOTHING.** The parameter arm grades `path`, `query` and
+ * `header`; the response arms grade what an operation answers with. What a caller may SEND — the
+ * body, the largest surface of most APIs — had no arm at all. Measured: 28 scalar or array request
+ * bodies in the corpus alone, none of them compared, and the symmetry with the response side is
+ * exactly what made it visible.
+ */
+function requestBodySchema(
+	operation: DocumentOperation,
+): { readonly schema: JsonSchema; readonly component: string | undefined } | undefined {
+	const content = (operation as { requestBody?: { content?: Record<string, { schema?: unknown }> } })
+		.requestBody?.content;
+	for (const media of Object.values(content ?? {})) {
+		const schema = media.schema;
+		if (schema === undefined) continue;
+		const ref = (schema as { $ref?: unknown }).$ref;
+		return {
+			schema: schema as JsonSchema,
+			component:
+				typeof ref === "string" && ref.startsWith("#/components/schemas/")
+					? ref.replace("#/components/schemas/", "")
+					: undefined,
+		};
+	}
+	return undefined;
+}
+
 /** Every media type the document names for an operation's REQUEST body. */
 function requestMediaTypes(operation: DocumentOperation): readonly string[] {
 	const content = (operation as { requestBody?: { content?: Record<string, unknown> } }).requestBody
@@ -419,6 +448,10 @@ interface Comparison {
 	readonly divergences: readonly Divergence[];
 	readonly ourFailures: readonly string[];
 	readonly oracleFailures: readonly string[];
+	/** Request bodies compared by SHAPE, and by top-level KIND where neither side is an object. */
+	readonly requestBodiesCompared: number;
+	readonly requestBodyKindsCompared: number;
+	readonly unreadableRequestBodies: number;
 }
 
 /**
@@ -460,6 +493,9 @@ async function compareEverything(): Promise<Comparison> {
 	let inlineResponseBodiesCompared = 0;
 	let unreadableResponseBodies = 0;
 	let responseBodyKindsCompared = 0;
+	let requestBodiesCompared = 0;
+	let requestBodyKindsCompared = 0;
+	let unreadableRequestBodies = 0;
 	const contentHeaders = { compared: 0, skipped: 0 };
 	let unreachableComponents = 0;
 	const constraintsSeen = { document: 0, validator: 0 };
@@ -650,6 +686,59 @@ async function compareEverything(): Promise<Comparison> {
 						elementCounter,
 						kindCounter,
 					);
+				}
+
+				/**
+				 * **What a caller may SEND, compared against the validator that guards it.**
+				 *
+				 * ⚠️ **This surface had no arm at all.** Parameters were graded, responses were graded, and
+				 * the request body — the largest surface of most APIs — was compared by nothing. A body
+				 * the document publishes as a string and the validator requires as an object rejects every
+				 * conformant caller, and would have passed here.
+				 *
+				 * The same two readings as the response side: a shape where both sides reduce to an
+				 * object, a top-level kind where they do not, and a count where neither can be read.
+				 */
+				const requestBody = requestBodySchema(operation);
+				const bodyValidator = validatorFor(emitted, operationId, "Body");
+				if (requestBody !== undefined && bodyValidator !== undefined) {
+					const target =
+						requestBody.component === undefined
+							? requestBody.schema
+							: (schemas[requestBody.component] ?? requestBody.schema);
+					const fromDocument = describeDocumentObject(target, resolve);
+					const fromZod = describeZodObject(bodyValidator, nameOf);
+					if (fromDocument !== undefined && fromZod !== undefined) {
+						requestBodiesCompared++;
+						compareShapes(
+							scenario.name,
+							`${operationId}.requestBody`,
+							target,
+							fromDocument,
+							fromZod,
+							add,
+							constraintsSeen,
+							resolve,
+							formatCounter,
+							elementCounter,
+							kindCounter,
+						);
+					} else {
+						const documentKind = topLevelKindOfDocument(target, resolve);
+						const zodKind = topLevelKindOfZod(bodyValidator);
+						if (documentKind === undefined || zodKind === undefined) {
+							unreadableRequestBodies++;
+						} else {
+							requestBodyKindsCompared++;
+							if (documentKind !== zodKind) {
+								add(
+									"request-body-kind",
+									`${scenario.name}:${operationId}`,
+									`document=${documentKind} emitted=${zodKind}`,
+								);
+							}
+						}
+					}
 				}
 
 				/**
@@ -960,6 +1049,9 @@ async function compareEverything(): Promise<Comparison> {
 		inlineResponseBodiesCompared,
 		unreadableResponseBodies,
 		responseBodyKindsCompared,
+		requestBodiesCompared,
+		requestBodyKindsCompared,
+		unreadableRequestBodies,
 		contentHeaders,
 		unreachableComponents,
 		unionsCompared,
@@ -1119,6 +1211,9 @@ interface Baseline {
 	readonly unreadableResponseBodies: number;
 	/** Non-object response bodies whose top-level KIND is compared. Coverage — may only grow. */
 	readonly responseBodyKindsCompared: number;
+	readonly requestBodiesCompared: number;
+	readonly requestBodyKindsCompared: number;
+	readonly unreadableRequestBodies: number;
 }
 
 let comparison: Comparison;
@@ -1142,6 +1237,9 @@ beforeAll(async () => {
 					inlineResponseBodiesCompared: comparison.inlineResponseBodiesCompared,
 					unreadableResponseBodies: comparison.unreadableResponseBodies,
 					responseBodyKindsCompared: comparison.responseBodyKindsCompared,
+					requestBodiesCompared: comparison.requestBodiesCompared,
+					requestBodyKindsCompared: comparison.requestBodyKindsCompared,
+					unreadableRequestBodies: comparison.unreadableRequestBodies,
 					emitterWarnings: comparison.emitterWarnings,
 					versionedSourcesNarrowed: [...comparison.versionedSourcesNarrowed].toSorted(),
 					operations: comparison.operations,
@@ -1366,6 +1464,16 @@ describe("the validator and the document agree, over a corpus we did not write",
 		expect(comparison.responseBodyKindsCompared).toBeGreaterThanOrEqual(
 			baseline.responseBodyKindsCompared,
 		);
+		/**
+		 * ⚠️ **The request body had no arm at all until now, so it gets a floor like every other
+		 * counting arm.** An arm without one reports agreement about nothing the day its predicate
+		 * stops firing — which is how the content-header arm compared zero positions and passed.
+		 */
+		expect(comparison.requestBodiesCompared).toBeGreaterThanOrEqual(baseline.requestBodiesCompared);
+		expect(comparison.requestBodyKindsCompared).toBeGreaterThanOrEqual(
+			baseline.requestBodyKindsCompared,
+		);
+		expect(comparison.unreadableRequestBodies).toBe(baseline.unreadableRequestBodies);
 		expect([...comparison.versionedSourcesNarrowed].toSorted()).toEqual(
 			[...baseline.versionedSourcesNarrowed].toSorted(),
 		);
