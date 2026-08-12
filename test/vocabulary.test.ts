@@ -86,8 +86,20 @@ describe("the generated validator says only what the document can say", () => {
 	}, 600_000);
 
 	it("has emitted output to inspect at all", () => {
+		/**
+		 * ⚠️ **Every floor in this file was recalibrated once against a NARROWED sweep and left there
+		 * after the breadth was restored.** For a while these suites compiled a handful of local
+		 * fixtures — 46 files — instead of the whole corpus, and the floors were lowered to fit; the
+		 * split floor was cut from 5 to 3. Restoring the corpus took the sweep back to 277 files and
+		 * nobody put the numbers back, so four floors sat an order of magnitude under what was actually
+		 * being measured and would have gone on passing through almost any regression.
+		 *
+		 * They are now set at roughly half the measured value, which is this repository's convention:
+		 * loose enough to survive a corpus bump that removes scenarios, tight enough to fail a real
+		 * reduction in coverage.
+		 */
 		// Now a real floor rather than a hope: this suite compiled these files itself, moments ago.
-		expect(files.length).toBeGreaterThanOrEqual(20);
+		expect(files.length).toBeGreaterThanOrEqual(100);
 	});
 
 	it("uses no Zod call that enforces something the document cannot state", () => {
@@ -118,7 +130,7 @@ describe("the generated validator says only what the document can say", () => {
 			(total, file) => total + (readFileSync(file, "utf8").match(DELIMITER_SPLIT) ?? []).length,
 			0,
 		);
-		expect(splits).toBeGreaterThanOrEqual(3);
+		expect(splits).toBeGreaterThanOrEqual(8);
 	});
 
 	it("finds the scalar decodes it is meant to permit", () => {
@@ -132,7 +144,7 @@ describe("the generated validator says only what the document can say", () => {
 			(total, file) => total + countOf(readFileSync(file, "utf8"), SCALAR_DECODE),
 			0,
 		);
-		expect(decodes).toBeGreaterThanOrEqual(8);
+		expect(decodes).toBeGreaterThanOrEqual(20);
 	});
 
 	it("finds the media type decodes it is meant to permit", () => {
@@ -146,7 +158,7 @@ describe("the generated validator says only what the document can say", () => {
 			(total, file) => total + countOf(readFileSync(file, "utf8"), MEDIA_TYPE_DECODE),
 			0,
 		);
-		expect(decodes).toBeGreaterThanOrEqual(5);
+		expect(decodes).toBeGreaterThanOrEqual(40);
 	});
 
 	it("enforces no `format`, which is a DECISION and is now checked rather than counted", () => {
