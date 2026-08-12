@@ -105,6 +105,11 @@ Nothing here is judged by fixtures we wrote alone.
   [`@typespec/http-specs`](https://www.npmjs.com/package/@typespec/http-specs), Microsoft's own
   scenario corpus, and the assertion is that the validators say what the document says. Components,
   request parameters, declared statuses and response bodies. **0 divergences.**
+- **Round-trip against APIs nobody here designed** — the OpenAPI Initiative's teaching example and the
+  Swagger Petstore, converted to TypeSpec and compiled back out, then compared against the originals.
+  **22 operations, none lost, no shape disagreements.** Every other suite measures this emitter
+  against material that already knows about it; this one asks what a first adopter asks. The
+  documents are vendored with digests the suite asserts, never fetched.
 - **Depth fixtures** for what a protocol corpus does not contain: it declares **no constraints at
   all**, so `test/reference/constraints.tsp` exercises every constraint keyword once, on the type it
   is legal on.

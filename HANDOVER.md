@@ -4,7 +4,7 @@ Working record. Everything here is measured; where a number appears, it came fro
 
 ## START HERE
 
-**State, 2026-08-12.** Extracted from a single un-split emitter and standing alone. **68 tests, 8
+**State, 2026-08-12.** Extracted from a single un-split emitter and standing alone. **77 tests, 9
 files, typecheck clean, lint clean.**
 
 **Three numbers to lead every report with: divergences · emitter warnings · named refusals. Today
@@ -92,6 +92,7 @@ reporting agreement, for the whole life of its predecessor.
 | oracle | proves | catches |
 | --- | --- | --- |
 | **Conformance differential** (`test/conformance/`) | the validators say what the document says | keys, openness, constraints, required, nullability, property and element types, parameters, declared statuses, response bodies |
+| **Round-trip** (`test/reference/roundtrip*`) | it can serve an API nobody here designed | operations lost between the converter and this emitter; shapes that disagree with a document derived from somebody else's API |
 | **Emitted-output compile** (`test/emit.test.ts`) | the output is loadable TypeScript | unquoted keys, duplicate declarations, recursion that throws during module initialisation |
 | **Reference service** (`test/reference/`) | question 1 — Zod alone | every construct that has broken an emitter, annotated with which |
 | **Provenance** (`test/provenance.test.ts`) | the package names and obeys no codebase but its own | a rule keyed on a name the spec author chose |
@@ -142,9 +143,8 @@ fails as stale — deleting it is part of the fix.
    the nearest — the response arm already reads `content`, so the machinery exists.
 2. **Publishing.** Needs explicit approval, and the GitHub repositories do not exist yet — which also
    means the sibling package's CI cannot pass, because it checks this one out.
-3. **A round-trip oracle.** The un-split package had one: a published OpenAPI document converted to
-   TypeSpec, re-emitted, and compared against the original. It proves the emitter can serve an API
-   nobody here designed, which is a different question from agreeing with openapi3 about one we did.
+3. **A second differential axis.** Everything is currently compared against `@typespec/openapi3`. A
+   defect the two emitters share is invisible to that, by construction.
 
 ### Done, and worth not redoing
 
