@@ -35,6 +35,14 @@ export interface FixtureOptions {
 	 */
 	readonly contractsPackage?: string;
 	readonly keyVocabularies?: readonly string[];
+	/**
+	 * The output directory's name, when it must differ from the spec's.
+	 *
+	 * ⚠️ **Two suites compiling one fixture to one directory with DIFFERENT options overwrite each
+	 * other, and vitest runs test files in parallel.** A suite that races itself is not evidence, and
+	 * the failure looks exactly like a flaky emitter.
+	 */
+	readonly outName?: string;
 }
 
 /**
@@ -69,7 +77,7 @@ export async function compileFixture(
 	name: string,
 	options: FixtureOptions = {},
 ): Promise<CompiledFixture> {
-	const outDir = join(dir, ".out", name);
+	const outDir = join(dir, ".out", options.outName ?? name);
 	const program = await compile(NodeHost, join(dir, `${name}.tsp`), {
 		outputDir: outDir,
 		emit: ["typespec-http-zod"],

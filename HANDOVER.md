@@ -4,7 +4,7 @@ Working record. Everything here is measured; where a number appears, it came fro
 
 ## START HERE
 
-**State, 2026-08-12.** Extracted from a single un-split emitter and standing alone. **77 tests, 9
+**State, 2026-08-12.** Extracted from a single un-split emitter and standing alone. **101 tests, 11
 files, typecheck clean, lint clean.**
 
 **Three numbers to lead every report with: divergences · emitter warnings · named refusals. Today
@@ -78,6 +78,12 @@ so, not because a test failed.
 terms absent, emitted import surfaces — all asserted as sets. A hand-kept list stops covering what the
 code does, silently.
 
+⚠️ **A claim in a README is not a guard, and this package shipped one that was not.** The README said
+the zero-decorator class was "asserted rather than trusted" while nothing asserted it —
+`vocabulary.test.ts` was never carried across in the extraction. That is the exact failure the rule
+exists to prevent, reintroduced by the person enforcing it. When a document claims something is
+checked, go and find the check.
+
 **Non-vacuity floors on every counting arm.** An arm that stops firing otherwise reports agreement
 about nothing. The constraint arm measured **zero** constraints across the entire corpus while
 reporting agreement, for the whole life of its predecessor.
@@ -92,6 +98,8 @@ reporting agreement, for the whole life of its predecessor.
 | --- | --- | --- |
 | **Conformance differential** (`test/conformance/`) | the validators say what the document says | keys, openness, constraints, required, nullability, property and element types, parameters, declared statuses, response bodies |
 | **Round-trip** (`test/reference/roundtrip*`) | it can serve an API nobody here designed | operations lost between the converter and this emitter; shapes that disagree with a document derived from somebody else's API |
+| **Acceptance** (`test/acceptance.test.ts`) | the validators accept what the document permits and reject what it forbids | a schema that agrees with the document and throws when a value reaches it |
+| **Vocabulary** (`test/vocabulary.test.ts`) | the validator says only what the document can say | a `.transform()`/`.refine()` smuggled in; a decorator shipped for a spec to depend on |
 | **Emitted-output compile** (`test/emit.test.ts`) | the output is loadable TypeScript | unquoted keys, duplicate declarations, recursion that throws during module initialisation |
 | **Reference service** (`test/reference/`) | question 1 — Zod alone | every construct that has broken an emitter, annotated with which |
 | **Provenance** (`test/provenance.test.ts`) | the package names and obeys no codebase but its own | a rule keyed on a name the spec author chose |
