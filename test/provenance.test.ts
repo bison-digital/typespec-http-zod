@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -21,7 +21,8 @@ import { describe, expect, it } from "vitest";
  * than in a review that may not happen.
  */
 
-const src = fileURLToPath(new URL("../src", import.meta.url));
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+const src = join(packageRoot, "src");
 
 /**
  * Terms belonging to the codebase this was extracted from.
@@ -51,18 +52,39 @@ const FOREIGN = [
 	/\bthe spike\b/,
 ];
 
-function sourceFiles(): string[] {
-	return readdirSync(src)
-		.filter((entry) => entry.endsWith(".ts"))
-		.map((entry) => join(src, entry));
+/**
+ * Every hand-written file in the package — `src/` AND `test/`.
+ *
+ * ⚠️ **This guard scanned `src/` only, and a stale `@cm/typespec-hono` sat in a ported test file
+ * until an unrelated assertion failed on it.** A test naming a foreign package is exactly as wrong as
+ * source doing so: it is the same claim about the same codebase, and it is the file a reader reaches
+ * for when they want to know what a rule means.
+ *
+ * Generated output under `.out/` is excluded — it is not hand-written, and its content is graded by
+ * `vocabulary.test.ts` against a different rule.
+ */
+function handWrittenFiles(): string[] {
+	const found: string[] = [];
+	const walk = (dir: string): void => {
+		for (const entry of readdirSync(dir)) {
+			if (entry === ".out" || entry === "node_modules" || entry === "dist") continue;
+			const full = join(dir, entry);
+			if (statSync(full).isDirectory()) walk(full);
+			else if (entry.endsWith(".ts") || entry.endsWith(".tsp")) found.push(full);
+		}
+	};
+	walk(src);
+	walk(join(packageRoot, "test"));
+	// This file names every forbidden term by definition; scanning it would make the rule unsatisfiable.
+	return found.filter((file) => !file.endsWith("provenance.test.ts"));
 }
 
 describe("the package names no codebase but its own", () => {
-	const files = sourceFiles();
+	const files = handWrittenFiles();
 
 	it("has source to inspect at all", () => {
 		// Without this the arm below passes the day the glob stops matching.
-		expect(files.length).toBeGreaterThanOrEqual(9);
+		expect(files.length).toBeGreaterThanOrEqual(25);
 	});
 
 	it("mentions no term belonging to the codebase it was extracted from", () => {

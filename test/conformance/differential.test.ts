@@ -1277,7 +1277,7 @@ describe("the validator and the document agree, over a corpus we did not write",
 		 *
 		 * The previous guard — skips fewer than objects — could not have caught it, because it says
 		 * nothing about whether a single constraint was ever read. This one names the quantity the arm
-		 * depends on. The material comes from the spike; if that stops supplying it, this fails rather
+		 * depends on. The material comes from the depth fixtures; if they stop supplying it, this fails rather
 		 * than the comparison quietly going hollow.
 		 */
 		expect(comparison.constraintsSeen.document).toBeGreaterThanOrEqual(10);
