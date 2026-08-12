@@ -117,3 +117,42 @@ describe("the package names no codebase but its own", () => {
 		expect(offenders).toEqual([]);
 	});
 });
+
+/**
+ * **The emitter entry point uses nothing this package does not export.**
+ *
+ * ⚠️ **This is the only mechanical proof that the published API is sufficient to build an emitter
+ * on.** `typespec-hono` is written against `api.ts` and cannot reach past it — the `exports` map
+ * forbids a deep import — so if this package's own `$onEmit` quietly reaches into `zod.ts` or
+ * `registry.ts`, it is doing something no consumer could, and the API looks complete while being
+ * short by exactly that much.
+ *
+ * Asserted over every specifier the file names, so a new import cannot slip in unexamined.
+ */
+describe("the emitter is written against the published API", () => {
+	const emitter = join(src, "emitter.ts");
+	const source = readFileSync(emitter, "utf8");
+
+	it("imports only the public barrel, the library definition, and external packages", () => {
+		const specifiers = [...source.matchAll(/^import\s[^"']*from\s*"([^"]+)"/gm)].map(
+			(match) => match[1] ?? "",
+		);
+		// Non-vacuity: a regex that stops matching would report perfect compliance.
+		expect(specifiers.length).toBeGreaterThanOrEqual(2);
+		const permitted = (specifier: string): boolean =>
+			specifier === "./api.js" || specifier === "./lib.js" || !specifier.startsWith(".");
+		expect(specifiers.filter((specifier) => !permitted(specifier))).toEqual([]);
+	});
+
+	it("is thin enough that a consumer could have written it", () => {
+		/**
+		 * Not a style rule. The whole claim of the split is that everything this package does is
+		 * reachable through one published call; an entry point that grows logic is logic a consumer
+		 * building on the library would have to reimplement, and would get subtly different.
+		 */
+		const statements = source
+			.split("\n")
+			.filter((line) => /^\t/.test(line) && !/^\s*[*/]/.test(line.trim()));
+		expect(statements.length).toBeLessThanOrEqual(3);
+	});
+});
