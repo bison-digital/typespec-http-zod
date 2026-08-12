@@ -1529,6 +1529,30 @@ export interface ResolvedServiceOptions {
 export const DEFAULT_RUNTIME_MODULE = "typespec-http-zod/runtime";
 
 /**
+ * What a WRAPPING emitter may change about this one, without changing what a consumer may set.
+ *
+ * ⚠️ **`defaultRuntimeModule` is a default, not an override.** A consumer's `runtime-module` still
+ * wins; this only decides what `schemas.gen.ts` and any file a wrapper emits beside it import from
+ * when the consumer says nothing.
+ *
+ * ⚠️ **It exists because this package's own default is wrong for a wrapper, and shipped that way.**
+ * `typespec-hono` emits `import type { AppEnv, Awaitable, Ctx, Result, RouteDeps }` and
+ * `import { selectContentType }` from whatever this resolves to. None of those six is exported here —
+ * this module exports `ResponseArm` and `armFor`, and nothing else. Worse, `typespec-http-zod` is a
+ * TRANSITIVE dependency of a `typespec-hono` consumer, so under a strict `node_modules` the specifier
+ * does not resolve at all whatever it exports. Measured in a fresh project installed from tarballs:
+ * `tsp compile` succeeded with zero diagnostics and `tsc` then reported **two `TS2307`s**, one in each
+ * generated file.
+ *
+ * Nothing in either suite saw it, because every compile in both harnesses sets `runtime-module`
+ * explicitly. The default branch was ungraded across 240 tests.
+ */
+export interface EmitHttpZodOptions {
+	/** The specifier generated files import their runtime contract from when the consumer sets none. */
+	readonly defaultRuntimeModule?: string;
+}
+
+/**
  * Emit this library's artefacts for every `@service` in the program, and hand back what was emitted.
  *
  * ⚠️ **The whole orchestration lives here, once.** The nesting below is load-bearing — a walk that
@@ -1541,8 +1565,10 @@ export const DEFAULT_RUNTIME_MODULE = "typespec-http-zod/runtime";
  */
 export async function emitHttpZod(
 	context: EmitContext,
+	wrapper: EmitHttpZodOptions = {},
 ): Promise<readonly EmittedService[]> {
 	const options = context.options as EmitterOptions;
+	const defaultRuntimeModule = wrapper.defaultRuntimeModule ?? DEFAULT_RUNTIME_MODULE;
 	/**
 	 * Each service already projected to the version it currently serves — see `versioning.ts`.
 	 *
@@ -1580,7 +1606,7 @@ export async function emitHttpZod(
 				perService?.["seal-object-schemas"] ?? options["seal-object-schemas"] ?? false,
 			keyVocabularies: perService?.["key-vocabularies"] ?? options["key-vocabularies"] ?? [],
 			runtimeModule:
-				perService?.["runtime-module"] ?? options["runtime-module"] ?? DEFAULT_RUNTIME_MODULE,
+				perService?.["runtime-module"] ?? options["runtime-module"] ?? defaultRuntimeModule,
 		};
 
 		const registry = new SchemaRegistry(context.program);
