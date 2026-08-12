@@ -4,7 +4,7 @@ Working record. Everything here is measured; where a number appears, it came fro
 
 ## START HERE
 
-**State, 2026-08-12.** Extracted from a single un-split emitter and standing alone. **139 tests, 17
+**State, 2026-08-12.** Extracted from a single un-split emitter and standing alone. **156 tests, 19
 files, typecheck clean, lint clean.**
 
 **Three numbers to lead every report with: divergences · emitter warnings · named refusals. Today
