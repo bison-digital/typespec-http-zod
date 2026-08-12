@@ -1,0 +1,19 @@
+{
+	"$schema": "https://json.schemastore.org/tsconfig",
+	"_comment": "Typecheck config. `tsconfig.build.json` emits `dist/` from `src/` alone; this one checks the tests too, which is where the emitter's evidence lives. It sets flags the build config deliberately does not — `noUnusedLocals`, `noUnusedParameters`, `allowUnreachableCode: false` — so `pnpm typecheck` catches what a green `pnpm test` does not. Run it LAST, before every commit.",
+	"extends": "./tsconfig.build.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"types": ["node"],
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noImplicitOverride": true,
+		"noFallthroughCasesInSwitch": true,
+		"allowUnreachableCode": false,
+		"verbatimModuleSyntax": true,
+		"isolatedModules": true,
+		"resolveJsonModule": true
+	},
+	"_include_comment": "No `exclude` for `*.fixture.ts`. The un-split package excluded them because `test/wiring/` held a hand-written application importing the gitignored `.out/`, which would have made `pnpm typecheck` depend on a build step and fail on a fresh clone. Those fixtures are the Hono package's; this one has none, and an exclude guarding nothing is a rule nobody can check.",
+	"include": ["src/**/*.ts", "test/**/*.ts"]
+}

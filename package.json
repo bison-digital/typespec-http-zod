@@ -1,0 +1,89 @@
+{
+	"name": "typespec-http-zod",
+	"version": "0.1.0",
+	"description": "TypeSpec emitter and library: turn an HTTP service definition into Zod validators and framework-free contract types that agree, keyword for keyword, with the OpenAPI document @typespec/openapi3 publishes from the same source.",
+	"keywords": [
+		"codegen",
+		"json-schema",
+		"openapi",
+		"typespec",
+		"typespec-emitter",
+		"validation",
+		"zod"
+	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/bison-digital/typespec-http-zod.git"
+	},
+	"bugs": {
+		"url": "https://github.com/bison-digital/typespec-http-zod/issues"
+	},
+	"homepage": "https://github.com/bison-digital/typespec-http-zod#readme",
+	"type": "module",
+	"main": "dist/src/index.js",
+	"tspMain": "lib/main.tsp",
+	"exports": {
+		".": {
+			"typespec": "./lib/main.tsp",
+			"types": "./dist/src/index.d.ts",
+			"default": "./dist/src/index.js"
+		},
+		"./runtime": {
+			"types": "./dist/src/runtime.d.ts",
+			"default": "./dist/src/runtime.js"
+		}
+	},
+	"files": [
+		"dist",
+		"lib",
+		"!dist/test/**"
+	],
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"test": "tsc -p tsconfig.build.json && vitest run",
+		"typecheck": "tsc -p tsconfig.json",
+		"lint": "oxlint src/ test/",
+		"format": "oxfmt",
+		"format:check": "oxfmt --check"
+	},
+	"peerDependencies": {
+		"@typespec/compiler": "^1.14.0",
+		"@typespec/http": "^1.14.0",
+		"@typespec/openapi": "^1.14.0",
+		"@typespec/streams": "^0.84.0",
+		"@typespec/versioning": "^0.84.0",
+		"zod": "^4.0.0"
+	},
+	"peerDependenciesMeta": {
+		"@typespec/streams": {
+			"optional": true
+		},
+		"@typespec/versioning": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@types/node": "^26.0.0",
+		"@typespec/compiler": "1.14.0",
+		"@typespec/events": "0.84.0",
+		"@typespec/http": "1.14.0",
+		"@typespec/http-specs": "0.1.0-alpha.40",
+		"@typespec/openapi": "1.14.0",
+		"@typespec/openapi3": "1.14.0",
+		"@typespec/rest": "0.84.0",
+		"@typespec/sse": "0.84.0",
+		"@typespec/streams": "0.84.0",
+		"@typespec/versioning": "0.84.0",
+		"@typespec/xml": "0.84.0",
+		"oxfmt": "^0.63.0",
+		"oxlint": "^1.78.0",
+		"typescript": "~6.0.3",
+		"vitest": "^4.1.9",
+		"yaml": "^2.9.0",
+		"zod": "^4.4.3"
+	}
+}
