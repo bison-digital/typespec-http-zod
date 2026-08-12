@@ -43,6 +43,15 @@ export interface FixtureOptions {
 	 * the failure looks exactly like a flaky emitter.
 	 */
 	readonly outName?: string;
+	/**
+	 * The full output directory, when a suite owns one of its own rather than sharing `dir/.out/`.
+	 *
+	 * ⚠️ **Added for `vocabulary.test.ts`, which used to grade whatever `.gen.ts` files other suites
+	 * had left on disk.** Nothing ordered those suites — vitest runs test files in parallel — so on a
+	 * fresh checkout it graded nothing and failed, and on a second run it graded the PREVIOUS build and
+	 * passed. Both measured. A suite whose input is produced by other suites has to produce its own.
+	 */
+	readonly outDir?: string;
 }
 
 /**
@@ -77,7 +86,7 @@ export async function compileFixture(
 	name: string,
 	options: FixtureOptions = {},
 ): Promise<CompiledFixture> {
-	const outDir = join(dir, ".out", options.outName ?? name);
+	const outDir = options.outDir ?? join(dir, ".out", options.outName ?? name);
 	const program = await compile(NodeHost, join(dir, `${name}.tsp`), {
 		outputDir: outDir,
 		emit: ["typespec-http-zod"],

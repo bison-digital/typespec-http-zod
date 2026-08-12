@@ -26,7 +26,10 @@ const referenceDir = join(here, "reference");
 let compiled: CompiledFixture;
 
 beforeAll(async () => {
-	compiled = await compileFixture(referenceDir, "service");
+	// ⚠️ Its own output directory. This and `reference.test.ts` both compiled `service` into
+	// `reference/.out/service/`, in parallel, and the loser's options decided what the winner
+	// graded — measured as TS2305s against a `schemas.gen.ts` written under different options.
+	compiled = await compileFixture(referenceDir, "service", { outName: "service-emit" });
 });
 
 describe("the emitted output compiles", () => {

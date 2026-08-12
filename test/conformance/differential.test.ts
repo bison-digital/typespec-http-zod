@@ -164,7 +164,9 @@ function mediaTypesAccepted(validator: unknown, header: string): readonly string
 	const property = key === undefined ? undefined : def?.shape?.[key];
 	if (property === undefined) return undefined;
 	const literals = (node: unknown): readonly string[] | undefined => {
-		const inner = (node as { _zod?: { def?: ZodShapeDef } } | undefined)?._zod?.def;
+		// A `content-type` validator now decodes the media type out of the header before matching, so
+		// the literal it compares against sits behind a `pipe`. See `throughDecode`.
+		const inner = throughDecode((node as { _zod?: { def?: ZodShapeDef } } | undefined)?._zod?.def);
 		if (inner === undefined) return undefined;
 		// `.optional()` / `.nullable()` / `.default()` wrap the thing that carries the values.
 		if (inner.innerType !== undefined) return literals(inner.innerType);
@@ -193,6 +195,31 @@ interface ZodShapeDef {
 	readonly values?: readonly unknown[];
 	readonly entries?: Record<string, unknown>;
 	readonly options?: readonly unknown[];
+	/**
+	 * The schema a `z.preprocess` applies AFTER decoding — see {@link throughDecode}.
+	 *
+	 * `z.preprocess(fn, schema)` is a `pipe` in Zod 4, and `out` is where the real schema lives.
+	 */
+	readonly out?: unknown;
+}
+
+/**
+ * Look through a wire decode to the schema the document actually published.
+ *
+ * ⚠️ **This is the SECOND describer in this file to be blinded by `z.preprocess`, and the first one
+ * is recorded in the handover.** A flattened collection parameter read as required because optionality
+ * sits outside the wrapper; the fix taught that walker about `pipe.out`, and this walker was never
+ * told. When `content-type` validators gained a decode that strips media type parameters, this arm
+ * fell from 70+ comparisons to **zero** and only its floor said so.
+ *
+ * The lesson is not "add `out` here": it is that a decode wrapper is now an ordinary part of what this
+ * emitter produces, and every reader of emitted Zod has to see through it. Any walker added later
+ * starts by calling this.
+ */
+function throughDecode(def: ZodShapeDef | undefined): ZodShapeDef | undefined {
+	if (def?.type !== "pipe" || def.out === undefined) return def;
+	const inner = (def.out as { _zod?: { def?: ZodShapeDef } })._zod?.def;
+	return throughDecode(inner);
 }
 
 /**

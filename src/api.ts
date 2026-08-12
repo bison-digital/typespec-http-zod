@@ -731,6 +731,55 @@ function wireDecoded(declared: string): string {
 	return declared;
 }
 
+/**
+ * Decode a `content-type` header down to the media type the document names.
+ *
+ * ⚠️ **A media type is a type PLUS parameters, and the document states only the type.** `@header
+ * contentType: "multipart/form-data"` becomes `z.literal("multipart/form-data")`, which refuses
+ * `multipart/form-data; boundary=…` — and RFC 2046 §5.1.1 makes that boundary MANDATORY, so the
+ * validator rejected **every syntactically valid multipart request**. Measured under `wrangler dev`:
+ *
+ * ```
+ * expected "multipart/form-data"
+ * received "multipart/form-data; boundary=------------------------IQFk2KVVVwrsWuOSm212u0"
+ * ```
+ *
+ * Across the corpus this emitter writes **78 `z.literal` header validators, every one of them on
+ * `content-type`**, in 12 scenarios. Seventeen are `multipart/form-data` and fail 100% of the time;
+ * the remaining 61 refuse any caller sending the entirely legal `; charset=utf-8`.
+ *
+ * ⚠️ **Enforcing "no parameters" is enforcing something the document does not say**, which is the
+ * governing rule read in the direction that is easy to miss: the rule forbids inventing constraints
+ * just as much as it forbids dropping them. Stripping the parameters before comparing is the same
+ * move as decoding `"1"` to `1` — undo the transport form, then apply the document's schema to the
+ * result.
+ *
+ * Lowercased because RFC 9110 §8.3.1 makes media type comparison case-insensitive — but ONLY when the
+ * declared literal is itself lowercase, so a document that published an oddly-cased type keeps
+ * matching exactly rather than silently never matching. Every literal openapi3 publishes across the
+ * corpus is lowercase; this costs one condition and removes the way that fact could stop being true.
+ */
+function mediaTypeDecoded(declared: string): string {
+	/**
+	 * ⚠️ **One accepted media type is a literal; several are an ENUM, and the second form is the one a
+	 * real document produces.** The corpus writes 78 `content-type` validators and every one is a
+	 * single literal, so a decoder that handled only `z.literal` looked complete against it. The
+	 * Swagger Petstore's `addPet` accepts three media types and openapi3 publishes
+	 * `z.enum(["application/json", "application/xml", "application/x-www-form-urlencoded"])` — which
+	 * went on refusing `application/json; charset=utf-8` after the literal case was fixed. Measured:
+	 * with the charset parameter **400**, without it **200**, same body.
+	 */
+	const values = /^z\.literal\("([^"]+)"\)/.exec(declared)?.slice(1, 2) ??
+		/^z\.enum\(\[([^\]]+)\]\)/
+			.exec(declared)?.[1]
+			?.split(",")
+			.map((entry) => entry.trim().replace(/^"|"$/g, ""));
+	if (values === undefined || values.length === 0) return declared;
+	// Lowercased only when every declared value already is, so an oddly-cased one keeps matching.
+	const normalise = values.every((value) => value === value.toLowerCase()) ? ".toLowerCase()" : "";
+	return `z.preprocess((raw) => (typeof raw === "string" ? (raw.split(";")[0] ?? "").trim()${normalise} : raw), ${declared})`;
+}
+
 function parameterSchemasOf(
 	program: Program,
 	operation: HttpOperation,
@@ -776,7 +825,10 @@ function parameterSchemasOf(
 		 * the document's schema then validates the result. Wrapping the other way round would hand the
 		 * element decoder an unsplit string.
 		 */
-		const decoded = wireDecoded(declared);
+		const decoded =
+			parameter.type === "header" && parameter.name.toLowerCase() === "content-type"
+				? mediaTypeDecoded(declared)
+				: wireDecoded(declared);
 		const expression =
 			delimiter === undefined
 				? decoded

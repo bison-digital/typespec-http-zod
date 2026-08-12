@@ -21,13 +21,13 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 
 describe("the reference service emits", () => {
 	it("compiles with no diagnostic of any severity", async () => {
-		const compiled = await compileFixture(here, "service");
+		const compiled = await compileFixture(here, "service", { outName: "service-reference" });
 		// Named, not counted: a refusal here is a claim about the reference spec and has to be read.
 		expect(compiled.diagnostics.map((d) => `${d.severity}: ${d.code}`)).toEqual([]);
 	});
 
 	it("declares a validator for every operation the service publishes", async () => {
-		const compiled = await compileFixture(here, "service");
+		const compiled = await compileFixture(here, "service", { outName: "service-reference" });
 		const schemas = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
 
 		/**
@@ -57,7 +57,7 @@ describe("the reference service emits", () => {
 	});
 
 	it("names the request validators the document's own wire names imply", async () => {
-		const compiled = await compileFixture(here, "service");
+		const compiled = await compileFixture(here, "service", { outName: "service-reference" });
 		const schemas = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
 
 		/**
@@ -83,7 +83,7 @@ describe("the reference service emits", () => {
 	});
 
 	it("emits the response arms as a checked literal, not a bare array", async () => {
-		const compiled = await compileFixture(here, "service");
+		const compiled = await compileFixture(here, "service", { outName: "service-reference" });
 		const schemas = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
 
 		/**
@@ -98,7 +98,7 @@ describe("the reference service emits", () => {
 	});
 
 	it("gives the overlapping-status operation all four of its declared arms", async () => {
-		const compiled = await compileFixture(here, "service");
+		const compiled = await compileFixture(here, "service", { outName: "service-reference" });
 		const schemas = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
 
 		/**

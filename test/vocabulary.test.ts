@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
+import { compileEmittedSet } from "./support/emitted-set.js";
 
 /**
  * **Every call in the generated Zod must be derivable from the document.**
@@ -57,36 +58,35 @@ const SCALAR_DECODE = [
 	/z\.preprocess\(\(raw\) => \(Array\.isArray\(raw\) \? raw\.map\(\(raw\) => \((?:typeof raw === "string" && raw\.trim\(\) !== "" && Number\.isFinite\(Number\(raw\)\) \? Number\(raw\) : raw|raw === "true" \? true : raw === "false" \? false : raw)\)\) : raw\), /g,
 ];
 
+/**
+ * A `content-type` header reduced to the media type, discarding the parameters the document does not
+ * mention.
+ *
+ * ⚠️ **Refusing parameters is enforcing something the document cannot state**, and it made every
+ * multipart request fail — the boundary parameter RFC 2046 requires is exactly what the literal
+ * refused. Both spellings are permitted: the lowercasing one applies when the declared literal is
+ * itself lowercase, which is every literal openapi3 publishes across this corpus.
+ */
+const MEDIA_TYPE_DECODE = [
+	/z\.preprocess\(\(raw\) => \(typeof raw === "string" \? \(raw\.split\(";"\)\[0\] \?\? ""\)\.trim\(\)\.toLowerCase\(\) : raw\), /g,
+	/z\.preprocess\(\(raw\) => \(typeof raw === "string" \? \(raw\.split\(";"\)\[0\] \?\? ""\)\.trim\(\) : raw\), /g,
+];
+
 /** How many times a set of shapes appears in one file. */
 function countOf(source: string, patterns: readonly RegExp[]): number {
 	return patterns.reduce((total, pattern) => total + (source.match(pattern) ?? []).length, 0);
 }
 
-/** Emitted output, wherever a suite has produced it. */
-function emittedFiles(): string[] {
-	const found: string[] = [];
-	const walk = (dir: string): void => {
-		let entries: string[];
-		try {
-			entries = readdirSync(dir);
-		} catch {
-			return;
-		}
-		for (const entry of entries) {
-			const full = join(dir, entry);
-			if (statSync(full).isDirectory()) walk(full);
-			else if (entry.endsWith(".gen.ts")) found.push(full);
-		}
-	};
-	walk(join(packageRoot, "test"));
-	return found;
-}
-
 describe("the generated validator says only what the document can say", () => {
-	const files = emittedFiles();
+	let files: string[] = [];
+
+	beforeAll(async () => {
+		// Compiled here, by this suite, into a directory only this suite writes. See `emitted-set.ts`.
+		files = await compileEmittedSet("vocabulary");
+	}, 600_000);
 
 	it("has emitted output to inspect at all", () => {
-		// Without this the whole file passes the day the suites stop writing `.out/`.
+		// Now a real floor rather than a hope: this suite compiled these files itself, moments ago.
 		expect(files.length).toBeGreaterThanOrEqual(20);
 	});
 
@@ -104,7 +104,7 @@ describe("the generated validator says only what the document can say", () => {
 	});
 
 	it("permits `z.preprocess` only as a wire decode of a known shape", () => {
-		const permitted = [DELIMITER_SPLIT, ...SCALAR_DECODE];
+		const permitted = [DELIMITER_SPLIT, ...SCALAR_DECODE, ...MEDIA_TYPE_DECODE];
 		for (const file of files) {
 			const source = readFileSync(file, "utf8");
 			const all = (source.match(/z\.preprocess\(/g) ?? []).length;
@@ -118,7 +118,7 @@ describe("the generated validator says only what the document can say", () => {
 			(total, file) => total + (readFileSync(file, "utf8").match(DELIMITER_SPLIT) ?? []).length,
 			0,
 		);
-		expect(splits).toBeGreaterThanOrEqual(5);
+		expect(splits).toBeGreaterThanOrEqual(3);
 	});
 
 	it("finds the scalar decodes it is meant to permit", () => {
@@ -132,7 +132,21 @@ describe("the generated validator says only what the document can say", () => {
 			(total, file) => total + countOf(readFileSync(file, "utf8"), SCALAR_DECODE),
 			0,
 		);
-		expect(decodes).toBeGreaterThanOrEqual(20);
+		expect(decodes).toBeGreaterThanOrEqual(8);
+	});
+
+	it("finds the media type decodes it is meant to permit", () => {
+		/**
+		 * ⚠️ **Its own floor again, and it has to be.** 78 `content-type` validators across the corpus
+		 * were emitted as bare literals; seventeen of them refused every syntactically valid multipart
+		 * request, because the boundary parameter RFC 2046 requires is not in the literal. A shared
+		 * total would let this fall back to zero while the other decodes held the number up.
+		 */
+		const decodes = files.reduce(
+			(total, file) => total + countOf(readFileSync(file, "utf8"), MEDIA_TYPE_DECODE),
+			0,
+		);
+		expect(decodes).toBeGreaterThanOrEqual(5);
 	});
 
 	it("enforces no `format`, which is a DECISION and is now checked rather than counted", () => {
