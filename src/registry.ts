@@ -133,7 +133,7 @@ function declaredNameOf(type: Type): string | undefined {
 	 * inlines instantiations for the same reason (the public document has no `PublicSuccess*`
 	 * component), so both artefacts agree about what has a name and what does not.
 	 *
-	 * Invisible until a spec used a template; `/public/v1`'s envelope is the first.
+	 * Invisible until a spec uses a template; a paged-response envelope is the usual first one.
 	 */
 	if (type.templateMapper !== undefined) return undefined;
 	return type.name;
@@ -419,7 +419,7 @@ export class TypeRegistry {
 			/**
 			 * ⚠️ **A vocabulary alias is NOT exported.**
 			 *
-			 * It restates a vocabulary enum's members from the spec, and `@cm/contracts` already
+			 * It restates a vocabulary enum's members from the spec, and the vocabularies artefact already
 			 * exports the same 27 names derived from the runtime tuples — exporting both collides on
 			 * every one of them the moment the package re-exports this file.
 			 *
@@ -428,7 +428,7 @@ export class TypeRegistry {
 			 * *declares*, so the two disagreeing is exactly the lie the document is telling. Referencing
 			 * the contracts type instead would make every assertion pass and publish the lie unchecked —
 			 * which is how `FilingState` came to advertise a `failed` state that cannot occur while
-			 * omitting the `generated` one the domain actually uses.
+			 * omitting the generated one a consumer actually uses.
 			 */
 			isVocabulary: type.kind === "Enum",
 			source,

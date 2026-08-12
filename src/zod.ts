@@ -48,7 +48,7 @@ const UNREPRESENTABLE = "z.never()";
  *
  * ⚠️ **Scoped to one emission, not module-global-and-cleared.** The previous shape was a module
  * `Map` emptied by whoever read it first, which is correct only while there is exactly one service
- * and one read. A second `@service` namespace — which is how `/public/v1` joins this spec — would
+ * and one read. A second `@service` namespace — a public surface beside an internal one — would
  * have merged one surface's imports into the other's file: an unused import if lucky, a missing one
  * if not. Neither is discoverable while there is only one service, so it is fixed before there are
  * two rather than found by them. Same save/restore idiom as {@link withRefResolver}.
@@ -58,7 +58,7 @@ let externalImports: Map<string, Set<string>> | undefined;
 /**
  * Enum name → its declared members, for every vocabulary the surface actually reaches.
  *
- * The spec is the single source for these. `@cm/contracts` used to hold them as hand-written tuples
+ * The spec is the single source for these. A consumer's shared package used to hold them as tuples
  * and the spec merely *described* them for the document's benefit — two lists that agreed only by
  * inspection, and by the time this flipped, two of them did not: `PersonalAttribute` published four
  * of six values wrong (the charge-authentication answers an MR01 cannot be filed without) and
@@ -133,7 +133,7 @@ export function withSealedObjects<T>(sealed: boolean, run: () => T): T {
  * positions therefore still loses the header property where the document keeps it.
  *
  * That shape is rare rather than theoretical: it raises `metadata-ignored` from `@typespec/http`,
- * which fires **zero** times across all 65 `@typespec/http-specs` scenarios and never in `cm.tsp`,
+ * which fires **zero** times across all 65 `@typespec/http-specs` scenarios,
  * and one variant of it makes openapi3 itself fail with `duplicate-type-name`. It is a real gap with
  * no known occurrence — recorded here rather than described as an incident, because it has not been
  * one.
@@ -196,7 +196,7 @@ function includeDerivedModel(model: Model): boolean {
 	);
 }
 
-/** Record an enum's members so `@cm/contracts` can be generated from them. */
+/** Record an enum's members so the vocabularies artefact can be generated from them. */
 function noteVocabulary(name: string, values: readonly string[]): void {
 	vocabularies?.set(name, values);
 }
@@ -206,7 +206,7 @@ function noteVocabulary(name: string, values: readonly string[]): void {
  *
  * ⚠️ **A vocabulary is a fact about the contract, not about a code path.** Collecting them during the
  * Zod walk meant an enum reachable only through an ERROR body was never emitted — which is exactly
- * what happened to `/public/v1`'s `PublicErrorCode`: declared in the spec, published on every
+ * what happened to one surface's error-code enum: declared in the spec, published on every
  * operation's failure responses, and absent from the generated vocabularies, so the one list a
  * consumer branches on had to be hand-written beside the generated ones. Walking declarations removes
  * the whole class rather than the instance.
@@ -226,9 +226,9 @@ export function noteDeclaredVocabularies(enums: Iterable<Enum>): void {
  * ⚠️ **This exists because "a `Record` keyed by an enum" is inexpressible, and the workaround was
  * about to cost a duplicated list.** `ProfileAttributes` is 150-odd known keys; naming them in the
  * spec is what makes the published document state the constraint instead of hiding it behind a
- * hand-written predicate. But a *type* cannot be iterated, and both the gateway and the backend need
+ * hand-written predicate. But a *type* cannot be iterated, and more than one layer usually needs
  * the set at RUN time — so without this the keys would live in the spec AND as a hand-maintained
- * tuple in `@cm/contracts`, which is the only duplicated vocabulary in the repo and precisely the
+ * tuple in a shared package — one vocabulary stated twice, which is precisely the
  * drift the deleted predicate existed to prevent.
  *
  * ⚠️ **Selected by an emitter OPTION, deliberately not by a decorator.** A decorator would put a
@@ -260,7 +260,7 @@ export function noteKeyVocabularies(
 export function noteExternalImport(module: string, name: string): void {
 	if (externalImports === undefined) {
 		throw new Error(
-			"@cm/typespec-hono: an external import was noted outside `collectExternalImports`. " +
+			"typespec-http-zod: an external import was noted outside `collectExternalImports`. " +
 				"Every walk must run inside one, or its imports land in another surface's file.",
 		);
 	}
@@ -277,7 +277,7 @@ export function noteExternalImport(module: string, name: string): void {
  * does not export. Scoped the same way the strict-model set is, so a nested emission cannot leak
  * into its parent.
  *
- * ⚠️ **It used to default to `@cm/contracts`, and that is a name only one repository has.** A
+ * ⚠️ **It used to default to one repository's own package name.** A
  * consumer who configured nothing got validators importing `SPEC_VOCABULARIES` from a package they
  * had never heard of — output that looks right and does not resolve. There is no honest default for
  * "the caller's own package", so the absence is the answer: with no package named, an enum is
@@ -357,9 +357,9 @@ const SCALARS: Readonly<Record<string, string>> = {
 	/**
 	 * Dates cross the wire as strings and are validated as strings.
 	 *
-	 * Not `z.iso.datetime()`: the gateway's response schemas are permissive on purpose, and a
-	 * stricter format check here would turn a backend emitting a legal-but-unexpected instant into a
-	 * 502 for a caller who could have parsed it perfectly well.
+	 * Not `z.iso.datetime()`: response schemas are permissive on purpose, and a
+	 * stricter format check here would turn a producer emitting a legal-but-unexpected instant into a
+	 * failed response for a caller who could have parsed it perfectly well.
 	 */
 	utcDateTime: "z.string()",
 	offsetDateTime: "z.string()",
@@ -409,7 +409,7 @@ function enumToZod(_program: Program, target: Enum): string {
 	/**
 	 * Every string vocabulary resolves through the generated constant rather than being restated.
 	 *
-	 * The members are declared once, here in the spec, and `@cm/contracts` is generated from them —
+	 * The members are declared once, in the spec, and the vocabularies artefact is generated from them —
 	 * so the document and the runtime cannot describe different vocabularies. This replaces the
 	 * `@externalValues` decorator, which pointed the arrow the other way: the spec deferred to a
 	 * hand-written TypeScript constant, which is the opposite of a spec being a source of truth.
@@ -418,7 +418,7 @@ function enumToZod(_program: Program, target: Enum): string {
 	/**
 	 * Inline unless the consumer named a package to share the tuple through.
 	 *
-	 * The indirection exists so a SECOND package — the domain, a client — can branch on the same
+	 * The indirection exists so a SECOND package — another layer, a client — can branch on the same
 	 * values without restating them. A consumer who has no such package wants a self-contained
 	 * validator, and emitting a reference to one they never configured is the only way to get output
 	 * that cannot resolve.
@@ -501,7 +501,7 @@ function discriminatedVariant(
 	const inner = typeToZod(program, variant);
 	const tag = `${objectKey(options.discriminatorPropertyName)}: z.literal(${JSON.stringify(variantName)})`;
 	// The variant already carries the discriminator, so the document publishes it and there is
-	// nothing to add — this is the shape `cm.tsp` writes, and it needs no help.
+	// nothing to add.
 	if (options.envelope === "none") return inner;
 	const wrapper = `${sealObjectSchemas ? "z.strictObject" : "z.object"}({ ${tag}, ${objectKey(options.envelopePropertyName)}: ${inner} })`;
 	const name = `${union.name ?? ""}${capitalise(variantName)}`;
@@ -608,7 +608,8 @@ function isUnknownType(type: Type): boolean {
  * conformance scenario's own documented request body would have been rejected with a 400 naming a key
  * the contract requires.
  *
- * Invisible for two reasons at once. `cm.tsp` declares no `extends` at all, and the differential
+ * Invisible for two reasons at once. The spec it was first built against declared no `extends` at
+ * all, and the differential
  * skipped every schema carrying an `allOf` — so 28 of 226 components were not divergent, they were
  * never compared.
  *
@@ -905,7 +906,7 @@ export function propertyToZod(program: Program, property: ModelProperty): string
 	 * `z.string().nullable().min(1)` does not compile — `.min` is not on `ZodNullable` — so a property
 	 * typed `string | null` with `@minLength(1)` has to emit `z.string().min(1).nullable()`. The
 	 * nullability is peeled off here, the constraints applied to what is underneath, and the wrapper
-	 * put back. Found by the gateway's own typecheck on `validUntil`, which is exactly this shape.
+	 * put back. Found by a consumer's own typecheck on a nullable-and-constrained property.
 	 *
 	 * `.optional()` stays outermost: a constraint after it would apply to the optionality rather than
 	 * to the value.
@@ -949,7 +950,7 @@ function defaultOf(program: Program, property: ModelProperty): string | undefine
 		const member = value.value as { value?: string | number; name: string };
 		return JSON.stringify(member.value ?? member.name);
 	}
-	// `attendees?: string[] = #[]` — the empty-collection defaults the gateway writes as `.default([])`.
+	// `attendees?: string[] = #[]` — an empty-collection default, emitted as `.default([])`.
 	// Only empty ones: a populated literal default would need each element rendered, and no schema here
 	// has one, so it stays unsupported rather than half-implemented.
 	if (value.valueKind === "ArrayValue") {

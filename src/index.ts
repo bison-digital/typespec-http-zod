@@ -94,11 +94,9 @@ export function successStatusOf(operation: HttpOperation): number | undefined {
 /**
  * **Every** success status the operation declares, ascending.
  *
- * Six of the gateway's submits answer `202` when the registrar only acknowledged and the saga will
- * poll for the verdict later, and `200` when it resolved immediately. Today's document claims one
- * status for those, which is a promise the runtime does not keep — so the spec declares both and the
- * binding's `statusFor` picks. A route with two declared statuses and no `statusFor` would always
- * answer the first, publishing a status that can never occur; `test/unit/generated-routes.test.ts`
+ * An operation that answers `202` when the work was merely accepted and `200` when it completed
+ * inline declares both, and something has to choose. A route with two declared statuses and no way to
+ * choose would always answer the first, publishing a status that can never occur; the arm carrying
  * asserts the two stay in step.
  */
 export function successStatusesOf(operation: HttpOperation): number[] {
@@ -185,9 +183,9 @@ function isSuccessKey(status: StatusKey): boolean {
 /**
  * Every FAILURE arm the operation declares, each with the schema for ITS OWN body.
  *
- * ⚠️ **None of these reached the generated server at all, and the count is the proof.** On the spike
- * the document declares `200`x9, `201`x3, `202`x1, `401`x1 and `default`x2; `respond` was handed
- * only the first three. So the schema for a failure never arrived, and no application could have
+ * ⚠️ **None of these reached the generated output at all, and a census is the proof.** Measured on one
+ * service, the document declared `200`x9, `201`x3, `202`x1, `401`x1 and `default`x2, and only the
+ * first three were emitted. So the schema for a failure never arrived, and no application could have
  * checked what it sends when something goes wrong even if it wanted to.
  *
  * ⚠️ **Then every arm that did arrive carried the SERVICE-WIDE error schema.** The spike declares
@@ -294,11 +292,11 @@ export function errorBodyOf(program: Program, service: HttpService): Type | unde
 			/**
 			 * ⚠️ `@error` sits on the RESPONSE type, which is not always the body type.
 			 *
-			 * Two declaration styles are both idiomatic and both in use here. `cm.tsp` returns the error
-			 * model bare (`op x(): Foo | ProblemDetails`), so response type and body type are the same;
-			 * `public.tsp` wraps it (`@error model PublicErrorResponse { @statusCode …; @body body:
-			 * PublicError }`), so the `@error` is on the wrapper and the body is a plain model. Testing
-			 * the body missed the second style entirely — measured: `/public/v1` declares an error on all
+			 * Two declaration styles are both idiomatic and both occur. One returns the error model bare
+			 * (`op x(): Foo | ProblemDetails`), so response type and body type are the same; the other wraps
+			 * it (`@error model ErrorResponse { @statusCode …; @body body: Problem }`), so the `@error` is
+			 * on the wrapper and the body is a plain model. Testing the body missed the second style
+			 * entirely — measured on a surface declaring an error on all
 			 * eleven operations and this found none of them.
 			 */
 			if (!isErrorModel(program, response.type)) continue;
@@ -328,8 +326,8 @@ export function errorBodyOf(program: Program, service: HttpService): Type | unde
 	const [body] = canonical;
 	if (body !== undefined) return body;
 	/**
-	 * A service can decline to declare a catch-all and still have one error shape — `/public/v1`
-	 * declares ten specific statuses and one `PublicError` for all of them. That is a service-wide
+	 * A service can decline to declare a catch-all and still have one error shape — ten specific
+	 * statuses carrying one problem model between them. That is a service-wide
 	 * body by any honest reading. Two different ones is not, and picking the first would be naming a
 	 * contract fact by iteration order.
 	 */
@@ -409,10 +407,10 @@ function isArrayType(type: Type): boolean {
  * ⚠️ **A discriminator, not a trial-parse.** "Try the 200 schema, and if it fails use the 202" is the
  * banned fallback wearing a different hat: a genuine validation failure on the first arm would be
  * reported as the second arm's shape. Each arm pins a **required literal** property instead —
- * `awaiting: true` on the acknowledged one — and the registrar reads that one property.
+ * `awaiting: true` on the accepted one — and a consumer reads that one property.
  *
- * This replaces seven hand-written `statusFor` closures, which existed only because the spec declared
- * the SAME body model for both statuses and so could not say which was which.
+ * This replaces hand-written per-operation closures, which existed only because a spec declaring the
+ * SAME body model for both statuses could not say which was which.
  */
 function statusDiscriminatorOf(
 	operation: HttpOperation,
@@ -535,7 +533,7 @@ export interface EmittedRoute {
 	 * against seventeen declared operations and compiled clean. Even `parameters/path` lost both of
 	 * its operations, because they answer `NoContentResponse`.
 	 *
-	 * A bodyless success is ordinary HTTP, not an edge case. The route is emitted; the registrar
+	 * A bodyless success is ordinary HTTP, not an edge case. The route is emitted; a server
 	 * answers the declared status with no body.
 	 */
 	readonly responseSchema: string | undefined;
@@ -555,7 +553,7 @@ export interface EmittedRoute {
 	 * No caller is established, so the operation receives no `ServiceContext`.
 	 *
 	 * Whether a tenant exists follows from whether the request was authenticated — there is no user,
-	 * account or membership to build one from otherwise. Reading it here is what lets the registrar
+	 * account or membership to build one from otherwise. Reading it here is what lets a server
 	 * derive an operation's call shape rather than a hand-written table restating it per row.
 	 */
 	readonly noAuth: boolean;
@@ -565,7 +563,7 @@ export interface EmittedRoute {
 	 * ⚠️ **Per operation, never per surface.** A resource-wide list means either one scope for
 	 * everything (a read-only grant could write) or the union of them (a read-only grant could not
 	 * read), and neither is a grant a human would recognise from the consent screen. Emitted into the
-	 * row so the registrar applies the gate the DOCUMENT publishes, rather than a hand-written
+	 * row so a server applies the gate the DOCUMENT publishes, rather than a hand-written
 	 * `requireScopes(...)` repeated per route that nothing checks against it.
 	 */
 	readonly scopes: readonly string[];
@@ -580,7 +578,7 @@ export interface EmittedRoute {
  *
  * They are emitted as their **own** schema rather than folded into the body, because the two are
  * separate things in HTTP and in OpenAPI — but they are equally part of the operation's input, and
- * `?state=nonsense` must be a 400 rather than something the domain has to defend against. Leaving
+ * `?state=nonsense` must be a 400 rather than something the application has to defend against. Leaving
  * them undescribed would document a constraint the runtime does not enforce, which is the same
  * failure the vocabulary tuples exist to prevent one level down.
  */
@@ -663,7 +661,7 @@ function parameterSchemasOf(
 		 * used to be keyed on the second, and it made every header validator reject every conformant
 		 * request: `@header("webhook-id") id: string` produced `z.object({ id })`, while `zValidator`
 		 * reads what actually arrived — a header called `webhook-id`. Measured: **400 against the
-		 * emitted schema, 200 against the documented one**, on the AgentBooks webhook's own headers.
+		 * emitted schema, 200 against the documented one**, on a webhook's signed headers.
 		 *
 		 * The wire name is also the right answer for path and query where the two differ
 		 * (`@query("$select") select`), and it is what `propertyKey` already does for body properties
@@ -728,7 +726,7 @@ function parametersSchemaOf(
 			 *
 			 * `@header("webhook-id") id: string` arrives as `webhook-id` and reaches the use-case as
 			 * `id`; the schema describes the input, so it uses the latter. Path and query keep the wire
-			 * name because that is what the registrar reads them by (`c.req.param`, `c.req.query`).
+			 * name because that is what a server reads them by.
 			 *
 			 * ⚠️ **Either can be an illegal identifier, so both go through {@link objectKey}.** This
 			 * docblock used to claim the property name was inherently safe. It is not:
@@ -781,8 +779,8 @@ export function collectRoutes(
 			/**
 			 * A `bytes` body means the BYTES are the contract.
 			 *
-			 * The AgentBooks webhook's MAC covers exactly what arrived, so a parsed-and-re-serialised
-			 * object would verify a different string and every delivery would fail authentication.
+			 * A webhook's MAC covers exactly what arrived, so a parsed-and-re-serialised object would
+			 * verify a different string and every delivery would fail authentication.
 			 */
 			const bodyParameter = operation.parameters.body;
 			const rawBodyProperty =
@@ -813,10 +811,10 @@ export function collectRoutes(
 				 * `@summary` first, `@doc` as the fallback.
 				 *
 				 * OpenAPI distinguishes them — `summary` is the short line, `description` the verbose
-				 * explanation — and `@typespec/openapi3` maps them to exactly those. `cm.tsp`'s operation
-				 * strings are one-liners, so they belong in `summary`; they had been written as `@doc`,
-				 * which put every one of them in `description` and left `summary` empty on all 120
-				 * operations. The fallback keeps a spec that uses `@doc` (the spike does) working.
+				 * explanation — and `@typespec/openapi3` maps them to exactly those. A spec whose operation
+				 * strings are one-liners means `summary`; written as `@doc` they land in `description`
+				 * instead and leave `summary` empty on every operation. The fallback keeps a spec that
+				 * uses `@doc` working.
 				 */
 				summary: getSummary(program, operation.operation) ?? getDoc(program, operation.operation),
 				/**
@@ -877,7 +875,7 @@ export function collectRoutes(
 				/**
 				 * ⚠️ **Each arm is validated against its OWN shape.**
 				 *
-				 * `respond()` checks the backend's value against the row's schema, and with one schema
+				 * A consumer checks its value against the arm's schema, and with one schema
 				 * for two statuses the acknowledged response was checked against the resolved arm's
 				 * shape — a 502 on a perfectly good 202.
 				 */
@@ -1141,7 +1139,7 @@ function responseArmsOf(
 	return `[${arms.join(", ")}]`;
 }
 
-/** One operation's success response — the shape the gateway pins and lets the rest through. */
+/** One operation's success response — the shape a producer must contain, and may exceed. */
 interface ResponseTypeEntry {
 	readonly operationId: string;
 	readonly ref: string;
@@ -1157,12 +1155,18 @@ interface RequestTypeEntry {
 const upperFirst = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1);
 
 /**
- * The effective input of every registrar-mounted operation, as TypeScript.
+ * The effective input of every operation, as TypeScript: its body, with the path, query and header
+ * parameters merged over it.
  *
- * ⚠️ **`companyId` is excluded, exactly as the registrar excludes it.** It identifies the tenant and
- * travels in the `ServiceContext`, not in the payload — so a type that included it would describe a
- * shape no caller ever sends and no use-case ever validates. `inputFor()` in `routes/registrar.ts` is
- * the definition this mirrors; the two must not drift.
+ * ⚠️ **This used to drop any parameter literally named `companyId`.** One application carried its
+ * tenant identifier in a context object rather than in the payload, and the emitter was taught to
+ * match — so for every consumer, a path parameter with that name vanished from the generated input
+ * type while the Zod validator went on requiring it. Two artefacts describing different shapes, from
+ * a rule no document states.
+ *
+ * It is the same defect class this emitter exists to delete, and it hid better than most: the
+ * emitted assertions pair the validator against the contract types for MODELS, so a disagreement
+ * about a merged input type is not among the things they compare.
  */
 function collectRequestTypes(
 	program: Program,
@@ -1179,19 +1183,18 @@ function collectRequestTypes(
 			 *
 			 * The webhook's three Standard-Webhooks headers are inside the MAC — they are not metadata
 			 * beside the payload, they are arguments to the verification. Leaving them out of the wire
-			 * type would describe an input the domain cannot act on.
+			 * type would describe an input the application cannot act on.
 			 */
 			const extraProperties = operation.parameters.parameters
 				.filter(
 					(parameter) =>
 						parameter.type === "path" || parameter.type === "query" || parameter.type === "header",
 				)
-				.filter((parameter) => parameter.name !== "companyId")
 				.map((parameter) => registry.expressionForProperty(parameter.param));
 			if (body === undefined && extraProperties.length === 0) continue;
 			/**
 			 * A `bytes` body reaches the use-case as a NAMED property holding the unparsed text, not as
-			 * a bare string — so the wire type is `{ rawBody: string }`, matching what the registrar
+			 * a bare string — so the wire type is `{ rawBody: string }`, matching what a server
 			 * actually builds. Referencing the scalar directly would type the whole input as `string`
 			 * and quietly drop the headers beside it.
 			 */
@@ -1215,12 +1218,12 @@ function collectRequestTypes(
 }
 
 /**
- * The success response every operation declares, so the domain can be held to producing it.
+ * The success response every operation declares, so a producer can be held to producing it.
  *
  * ⚠️ **Pinned fields only — these are PERMISSIVE shapes.** The gateway names the fields it depends on
- * and lets the backend's richer view through untouched, so this is a floor and not an equality: the
+ * and lets a richer view through untouched, so this is a floor and not an equality: the
  * domain's result must CONTAIN what the document promises, and may contain more. Asserting equality
- * would turn every field the domain legitimately adds into a build failure, which is the same mistake
+ * would turn every field a producer legitimately adds into a build failure, which is the same mistake
  * as making a response schema strict.
  */
 function collectResponseTypes(
@@ -1245,13 +1248,13 @@ function collectResponseTypes(
 }
 
 /**
- * `packages/contracts/src/requests.gen.ts` — the shape both validators are checked against.
+ * `requests.gen.ts` — the shape both sides are checked against.
  *
- * Plain TypeScript with no imports at all, so `@cm/contracts` stays framework-free and the ArchUnitTS
- * ban on `zod` in the domain is untouched. The gateway asserts its emitted Zod infers exactly this;
- * the domain asserts this is assignable to what its own schema accepts. Neither package imports the
- * other, and the disagreement that made `POST /companies/{companyId}/officers` answer 400 on every
- * request becomes a typecheck failure.
+ * Plain TypeScript with no imports at all, so the contract types stay framework-free and a layering
+ * rule banning a validation library from the rest of the codebase is untouched. `wire-contract.gen.ts`
+ * asserts the emitted Zod infers exactly this; a consumer asserts its own code produces it. Neither
+ * imports the other, and a disagreement that would otherwise answer 400 on every request becomes a
+ * typecheck failure.
  */
 function renderRequestTypes(
 	entries: readonly RequestTypeEntry[],
@@ -1259,8 +1262,8 @@ function renderRequestTypes(
 	registry: TypeRegistry,
 ): string {
 	const declarations = registry.declarations().map((declaration) => {
-		// A vocabulary alias stays module-local: `@cm/contracts` already exports all 27 of these
-		// names from the runtime tuples, and exporting both collides on every one.
+		// A vocabulary alias stays module-local: the vocabularies artefact already exports these names
+		// as runtime tuples, and exporting both collides on every one.
 		if (declaration.isVocabulary) return `\ntype ${declaration.name} = ${declaration.source};\n`;
 		return declaration.isObject
 			? `\nexport interface ${declaration.name} ${declaration.source}\n`
@@ -1308,11 +1311,11 @@ type Simplify<T> = { [K in keyof T]: T[K] } & {};
 /**
  * The same shape, tolerant of \`readonly\`.
  *
- * A producer's result is asserted assignable to its published shape, and the domain declares its
+ * A producer's result is asserted assignable to its published shape, and a codebase commonly declares
  * views with \`readonly\` properties and \`readonly T[]\` arrays — neither of which is assignable to a
  * mutable one. Mutability is not a fact about a wire shape: it says nothing about what a caller
  * receives. Making the TARGET readonly accepts both, which is the permissive direction; the reverse
- * would reject every view the domain actually returns.
+ * would reject every view a producer actually returns.
  */
 type Produced<T> = T extends readonly (infer Element)[]
 	? readonly Produced<Element>[]
@@ -1328,11 +1331,10 @@ ${lookup}
 /**
  * Every operation's success response, keyed by operation id.
  *
- * ⚠️ **A floor, not an equality.** These shapes are permissive: the gateway pins the fields it
- * depends on and lets the backend's richer view through, so a domain result must CONTAIN what the
- * document promises and may contain more. This is what makes a published response checkable — the
- * webhook advertised a \`received\` field it has never returned, on the one route with no response
- * validation at all, and nothing in the repository could see it.
+ * ⚠️ **A floor, not an equality.** These shapes are permissive: a caller pins the fields it depends
+ * on and lets a richer view through, so a producer's result must CONTAIN what the document promises
+ * and may contain more. This is what makes a published response checkable at all — measured once, a
+ * route advertised a field it had never returned, and nothing anywhere could see it.
  */
 export interface WireOutputs {
 ${responseLookup}
@@ -1415,13 +1417,12 @@ ${assertions.join("\n")}
 }
 
 /**
- * `packages/contracts/src/vocabularies.gen.ts` — every vocabulary the surface reaches, from the spec.
+ * `vocabularies.gen.ts` — every vocabulary the surface reaches, as runtime tuples.
  *
- * Keyed by enum name rather than emitted as individually-named tuples, because the names
- * `@cm/contracts` publishes (`FILING_STATES`, `CONTROL_CAPACITIES`, `RESOLUTION_FILING_BASES`) are
- * English plurals and three of the twenty-eight are irregular. An emitter that pluralises is an
- * emitter that will one day invent `CONTROL_CAPACITYS` and silently create a second constant beside
- * the real one. So the emitter states the fact and the package owns the naming.
+ * Keyed by enum name rather than emitted as individually-named tuples, because the constant names a
+ * consumer wants are English plurals and some of them are irregular. An emitter that pluralises is an
+ * emitter that will one day invent `CAPACITYS` and silently create a second constant beside the real
+ * one. So the emitter states the fact and the consumer owns the naming.
  */
 function renderVocabularies(vocabularies: ReadonlyMap<string, readonly string[]>): string {
 	const entries = [...vocabularies.entries()]
@@ -1429,7 +1430,7 @@ function renderVocabularies(vocabularies: ReadonlyMap<string, readonly string[]>
 		.map(([name, values]) => `\t${name}: [${values.map((v) => JSON.stringify(v)).join(", ")}],`);
 	return `${GENERATED_BANNER}
 /**
- * The spec's vocabularies. \`@cm/contracts\` names them; this states what they contain.
+ * The spec's vocabularies — every enum the surface reaches, and what each one contains.
  *
  * \`as const\` so each is a readonly tuple of literals — the type every consumer derives with
  * \`(typeof X)[number]\` keeps working unchanged.

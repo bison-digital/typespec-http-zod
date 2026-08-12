@@ -71,7 +71,7 @@ export function applyConstraints(program: Program, expression: string, target: T
  * intent forbids. 153 of the 227 emitted `.regex()` calls came from that one scalar.
  *
  * A pattern that means to match the whole string says so in the spec — `^\S(?:[\s\S]*\S)?$`, which
- * is what `cm.tsp` already uses in two other places. That way the document and the validator carry
+ * is the standard construct for it. That way the document and the validator carry
  * the identical expression, and the conformance differential can assert it character for character
  * instead of guessing at an equivalence.
  */

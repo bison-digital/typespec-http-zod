@@ -1,0 +1,119 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+/**
+ * **Nothing in this package may name the codebase it was extracted from.**
+ *
+ * ⚠️ **This is not tidiness, and one of these was a live defect rather than a comment.** The emitter
+ * carried `.filter((parameter) => parameter.name !== "companyId")` — one application's tenant
+ * identifier, dropped from every consumer's generated input type while the validator went on
+ * requiring it. Behaviour derived from nothing any document states, which is the exact class this
+ * emitter exists to delete, sitting in the emitter itself.
+ *
+ * The rest were prose, and prose matters here more than usual: these docblocks are the record of WHY
+ * each rule exists, and a reader who cannot see the repository they cite gets an explanation that
+ * explains nothing. One of them shipped — `"the gateway's validator and the shared wire type describe
+ * different shapes"` was the failure message in every consumer's build output.
+ *
+ * Asserted as a CLASS over the whole of `src/`, so a term reintroduced anywhere fails here rather
+ * than in a review that may not happen.
+ */
+
+const src = fileURLToPath(new URL("../src", import.meta.url));
+
+/**
+ * Terms belonging to the codebase this was extracted from.
+ *
+ * Two kinds, and both matter: proper nouns nobody else has (`@cm/…`, `cm.tsp`, a registrar), and
+ * ordinary words used as if they named a specific component (`the gateway`, `the domain`). The second
+ * kind is the one that reads as generic and is not — a docblock saying "the domain asserts this"
+ * describes an arrangement the reader has no reason to have.
+ */
+const FOREIGN = [
+	/@cm\//,
+	/\bcm\.tsp\b/,
+	/\bpublic\.tsp\b/,
+	/\bCmApi\b/,
+	/\bCmPublicApi\b/,
+	/\bapi-spec\b/,
+	/\bCompanies House\b/,
+	/\bAgentBooks\b/,
+	/\/public\/v1\b/,
+	/\bregistrar\b/,
+	/\bArchUnit/,
+	/\bFILING_STATES\b/,
+	/\bthe gateway\b/,
+	/\bgateway's\b/,
+	/\bthe domain\b/,
+	/\bthe backend\b/,
+	/\bthe spike\b/,
+];
+
+function sourceFiles(): string[] {
+	return readdirSync(src)
+		.filter((entry) => entry.endsWith(".ts"))
+		.map((entry) => join(src, entry));
+}
+
+describe("the package names no codebase but its own", () => {
+	const files = sourceFiles();
+
+	it("has source to inspect at all", () => {
+		// Without this the arm below passes the day the glob stops matching.
+		expect(files.length).toBeGreaterThanOrEqual(9);
+	});
+
+	it("mentions no term belonging to the codebase it was extracted from", () => {
+		const offenders: string[] = [];
+		for (const file of files) {
+			const lines = readFileSync(file, "utf8").split("\n");
+			lines.forEach((line, index) => {
+				for (const term of FOREIGN) {
+					/**
+					 * One deliberate exception, and it is stated as a SHAPE rather than a line number: a
+					 * docblock may name a term while recording that the behaviour naming it was removed.
+					 * Losing that history to satisfy this rule would be the worse trade — the reason a rule
+					 * exists is the part that stops it being reintroduced.
+					 */
+					if (/\bused to\b|\bwas removed\b|\bno longer\b/.test(line)) continue;
+					if (term.test(line)) offenders.push(`${file}:${index + 1}: ${line.trim()}`);
+				}
+			});
+		}
+		expect(offenders).toEqual([]);
+	});
+
+	it("keys no behaviour on a name the spec AUTHOR chose", () => {
+		/**
+		 * ⚠️ **The prose arm above would not have caught the defect that prompted this file.** A filter
+		 * on a literal property name is code, not a comment, and it read as ordinary.
+		 *
+		 * The class, stated precisely: **`.kind` is TypeSpec's vocabulary and `.name` is the spec
+		 * author's.** Branching on `type.kind === "Model"` is reading the language; branching on
+		 * `parameter.name === "companyId"` is deciding that one word means something in every spec that
+		 * uses it. The first is how an emitter is written. The second is a rule no document states.
+		 *
+		 * The exception is a name TypeSpec itself decides — `bytes`, `Record`, `never`, the empty name
+		 * an anonymous model carries. That is a closed first-party set, not a list this package
+		 * maintains, which is why it can be written down without becoming the thing it guards against.
+		 */
+		const TYPESPEC_BUILT_IN =
+			/^(|null|unknown|void|never|bytes|integer|string|boolean|numeric|Array|Record|File)$/;
+		const offenders: string[] = [];
+		for (const file of files) {
+			const lines = readFileSync(file, "utf8").split("\n");
+			lines.forEach((line, index) => {
+				if (line.trim().startsWith("*") || line.trim().startsWith("//")) return;
+				for (const match of line.matchAll(/\.name\s*[=!]==\s*"([^"]*)"/g)) {
+					const literal = match[1] ?? "";
+					if (!TYPESPEC_BUILT_IN.test(literal)) {
+						offenders.push(`${file}:${index + 1}: keyed on the author-chosen name "${literal}"`);
+					}
+				}
+			});
+		}
+		expect(offenders).toEqual([]);
+	});
+});

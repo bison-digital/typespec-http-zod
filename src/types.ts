@@ -21,11 +21,12 @@ import {
 /**
  * TypeSpec type → plain TypeScript type text.
  *
- * **Why a second walker rather than `z.infer` of the emitted Zod.** `@cm/contracts` is framework-free
- * and must stay that way — the ArchUnitTS rule bans `zod` from the domain, and contracts is what the
- * domain imports. So the shared type cannot be inferred from a schema; it has to be emitted as
- * ordinary TypeScript. That is the whole point: one declaration both validators are checked against,
- * with neither package importing the other.
+ * **Why a second walker rather than `z.infer` of the emitted Zod.** The contract types are meant to
+ * be framework-free: a codebase passes them between layers that have no business importing a
+ * validation library, and layering rules commonly forbid exactly that. A type inferred from a schema
+ * drags the schema — and `zod` — everywhere it goes, so the shared type has to be emitted as ordinary
+ * TypeScript. That is the whole point: one declaration both sides are checked against, with neither
+ * importing the other.
  *
  * **It must agree with `zod.ts` exactly**, because the emitted assertion compares them. Every rule
  * here has a counterpart there: `utcDateTime` is a string on both sides, `?` becomes
@@ -198,12 +199,11 @@ function modelToTs(program: Program, model: Model): string {
 
 /** A property line, including its optionality marker. */
 export function propertyToTs(program: Program, property: ModelProperty): string {
-	// The WIRE name, resolved exactly as `zod.ts` resolves it — the gateway asserts its emitted Zod
-	// infers this type, so the two must name every property identically or that assertion fails.
+	// The WIRE name, resolved exactly as `zod.ts` resolves it — `wire-contract.gen.ts` asserts the
+	// emitted Zod infers this type, so the two must name every property identically or it fails.
 	const key = objectKey(resolveEncodedName(program, property, "application/json"));
-	// `@encode` changes the wire TYPE, resolved exactly as `zod.ts` resolves it — the gateway asserts
-	// its emitted Zod infers this type, so a property encoded as a string on one side and an array on
-	// the other fails that assertion, and would deserve to.
+	// `@encode` changes the wire TYPE, resolved exactly as `zod.ts` resolves it — a property encoded as
+	// a string on one side and an array on the other fails the emitted assertion, and deserves to.
 	const encoded = getEncode(program, property)?.type;
 	const value = typeToTs(program, encoded ?? property.type);
 	/**
