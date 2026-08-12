@@ -534,7 +534,7 @@ function isBinaryPart(type: Type): boolean {
  * binary BODY stayed `z.string()`. Found by grading response-body kinds, a surface that had been
  * counted and never compared — three positions in `encode/bytes`.
  */
-function isRawBinaryMediaType(contentTypes: readonly string[]): boolean {
+export function isRawBinaryMediaType(contentTypes: readonly string[]): boolean {
 	if (contentTypes.length === 0) return false;
 	return contentTypes.every((type) => !/^application\/(json|.*\+json)$/.test(type));
 }
@@ -553,6 +553,26 @@ export interface EmittedRoute {
 	readonly statusCodes: readonly number[];
 	/** Media types the success body can be served as — the basis for `Accept` negotiation. */
 	readonly responseContentTypes: readonly string[];
+	/**
+	 * Media types the request body may be SENT as.
+	 *
+	 * ⚠️ **This was missing entirely, and its absence was two live defects in the generated server.**
+	 * The response side has carried `responseContentTypes` from the beginning; the request side carried
+	 * nothing, so a server built on this library had no way to ask what the incoming body actually is.
+	 * Both consequences were measured against a Petstore server under `wrangler dev`:
+	 *
+	 * - every request body was validated as JSON, so a `multipart/form-data` upload was handed to
+	 *   `c.req.json()` — 17 such registrations in `payload/multipart` alone, and 11 of the 17 request
+	 *   bodies in the Swagger Petstore are not JSON;
+	 * - a `bytes` body was read with `c.req.text()` whatever it was sent as, which UTF-8-decodes. An
+	 *   18-byte binary upload arrived at the handler as 23 code points with five bytes replaced by
+	 *   U+FFFD — silently corrupted, answering **200**.
+	 *
+	 * A server emitter needs the document's own answer to "what is on the wire", and this is it.
+	 * What to DO about it — which validator target, which body reader — belongs to the emitter that
+	 * writes the server, exactly as `responseContentTypes` leaves negotiation to it.
+	 */
+	readonly requestContentTypes: readonly string[];
 	readonly summary: string | undefined;
 	readonly requestSchema: string | undefined;
 	readonly paramsSchema: string | undefined;
@@ -960,6 +980,7 @@ export function collectRoutes(
 				statusCode,
 				statusCodes,
 				responseContentTypes: responseContentTypesOf(operation, statusCode),
+				requestContentTypes: [...(operation.parameters.body?.contentTypes ?? [])],
 				/**
 				 * `@summary` first, `@doc` as the fallback.
 				 *
