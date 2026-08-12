@@ -14,6 +14,8 @@ import {
 	describeZodDiscriminatedUnion,
 	describeZodObject,
 	namesFromModule,
+	topLevelKindOfDocument,
+	topLevelKindOfZod,
 	isUnresolvable,
 	propertySchemaOf,
 	type JsonSchema,
@@ -297,6 +299,24 @@ function responseComponentOf(response: DocumentResponse): string | undefined {
 	return undefined;
 }
 
+/**
+ * The response's body schema when it names no component — an INLINE shape.
+ *
+ * ⚠️ **These were counted and skipped, and the count was 76.** The arm above compares by NAME, and an
+ * inline schema has none, so the status-to-body mapping was graded while the body's own shape was
+ * not. An inline response schema is a real shape this emitter still has to get right; the machinery
+ * to compare one is the same machinery the component arm already uses.
+ */
+function responseInlineSchema(response: DocumentResponse): JsonSchema | undefined {
+	for (const media of Object.values(response.content ?? {})) {
+		const schema = media.schema;
+		if (schema === undefined) continue;
+		if (typeof (schema as { $ref?: unknown }).$ref === "string") return undefined;
+		return schema as JsonSchema;
+	}
+	return undefined;
+}
+
 /** Whether the document's response carries a body at all — an empty `content` is a bodyless arm. */
 function responseHasBody(response: DocumentResponse): boolean {
 	return Object.keys(response.content ?? {}).length > 0;
@@ -362,7 +382,13 @@ interface Comparison {
 	/** Status→body pairs compared by declared component name. Zero means only the statuses were read. */
 	readonly responseBodiesCompared: number;
 	/** Responses whose body names no component, or whose entry merges several operations. Counted. */
-	readonly inlineResponseBodies: number;
+	readonly negotiatedResponseBodies: number;
+	/** Inline response bodies whose SHAPE is compared, not merely counted. */
+	readonly inlineResponseBodiesCompared: number;
+	/** Bodies neither side reduces to an object shape — a scalar, a stream, a union. */
+	readonly unreadableResponseBodies: number;
+	/** Non-object response bodies whose top-level KIND is compared. */
+	readonly responseBodyKindsCompared: number;
 	/** `content-type`/`accept` validators set aside: stated via `content` keys, not as parameters. */
 	/**
 	 * Content-negotiation headers the parameter arm sets aside, split into the two honest answers.
@@ -430,7 +456,10 @@ async function compareEverything(): Promise<Comparison> {
 	let parametersCompared = 0;
 	let responsesCompared = 0;
 	let responseBodiesCompared = 0;
-	let inlineResponseBodies = 0;
+	let negotiatedResponseBodies = 0;
+	let inlineResponseBodiesCompared = 0;
+	let unreadableResponseBodies = 0;
+	let responseBodyKindsCompared = 0;
 	const contentHeaders = { compared: 0, skipped: 0 };
 	let unreachableComponents = 0;
 	const constraintsSeen = { document: 0, validator: 0 };
@@ -730,11 +759,67 @@ async function compareEverything(): Promise<Comparison> {
 								continue;
 							}
 							const component = responseComponentOf(response);
-							// An inline response schema names no component, and a negotiated entry lists one
-							// body per media type against members that each carry their own. Counted, not
-							// guessed at — the status arm above still covers both.
-							if (component === undefined || emittedArms.merged) {
-								inlineResponseBodies++;
+							/**
+							 * ⚠️ **A NEGOTIATED entry genuinely cannot be attributed here** — openapi3 lists
+							 * one body per media type against members that each carry their own, so there is
+							 * no single arm to compare it to. That stays counted, and the status arm above
+							 * still covers it.
+							 */
+							if (emittedArms.merged) {
+								negotiatedResponseBodies++;
+								continue;
+							}
+							/**
+							 * An INLINE body names no component, so there is no name to compare — but there is
+							 * a shape, and comparing shapes is what the component walk already does. This was
+							 * counted and skipped for 76 positions; comparing them is what closes it.
+							 */
+							if (component === undefined) {
+								const inline = responseInlineSchema(response);
+								const fromDocument =
+									inline === undefined ? undefined : describeDocumentObject(inline, resolve);
+								const fromZod =
+									arm.schema === undefined ? undefined : describeZodObject(arm.schema, nameOf);
+								if (inline === undefined || fromDocument === undefined || fromZod === undefined) {
+									/**
+									 * Not an object on one side or both — a scalar body, a stream, a union. The
+									 * shape walk has nothing to say, but the KIND does: a body the document
+									 * publishes as `{"type": "string"}` and the emitter validates as a number
+									 * is a defect nothing else here would see.
+									 */
+									const documentKind =
+										inline === undefined ? undefined : topLevelKindOfDocument(inline, resolve);
+									const zodKind =
+										arm.schema === undefined ? undefined : topLevelKindOfZod(arm.schema);
+									if (documentKind === undefined || zodKind === undefined) {
+										// Unreadable on one side. Counted, never silently passed.
+										unreadableResponseBodies++;
+										continue;
+									}
+									responseBodyKindsCompared++;
+									if (documentKind !== zodKind) {
+										add(
+											"response-body-kind",
+											`${scenario.name}:${operationId}.${status}`,
+											`document=${documentKind} emitted=${zodKind}`,
+										);
+									}
+									continue;
+								}
+								inlineResponseBodiesCompared++;
+								compareShapes(
+									scenario.name,
+									`${operationId}.${status}`,
+									inline,
+									fromDocument,
+									fromZod,
+									add,
+									constraintsSeen,
+									resolve,
+									formatCounter,
+									elementCounter,
+									kindCounter,
+								);
 								continue;
 							}
 							const expected = component.split(".").at(-1) ?? component;
@@ -767,7 +852,7 @@ async function compareEverything(): Promise<Comparison> {
 								describeDocumentObject(target, resolve) !== undefined ||
 								describeDocumentDiscriminator(target) !== undefined;
 							if (emitted[identifierFor(component)] === undefined && !owedDeclaration) {
-								inlineResponseBodies++;
+								negotiatedResponseBodies++;
 								continue;
 							}
 							responseBodiesCompared++;
@@ -871,7 +956,10 @@ async function compareEverything(): Promise<Comparison> {
 		parametersCompared,
 		responsesCompared,
 		responseBodiesCompared,
-		inlineResponseBodies,
+		negotiatedResponseBodies,
+		inlineResponseBodiesCompared,
+		unreadableResponseBodies,
+		responseBodyKindsCompared,
 		contentHeaders,
 		unreachableComponents,
 		unionsCompared,
@@ -1019,16 +1107,18 @@ interface Baseline {
 	readonly emitterWarnings?: readonly string[];
 	/** Document `format` annotations the validator does not enforce. Not a defect; a decision owed. */
 	readonly unenforcedFormats: number;
-	/**
-	 * Response bodies read by STATUS but not by component — an inline schema, or a negotiated entry
-	 * whose members each answer their own media type. Counted for the same reason
-	 * `unreachableComponents` is: a number that grows is the arm quietly checking less.
-	 */
-	readonly inlineResponseBodies: number;
 	/** Versioned sources compared against their latest document only. */
 	readonly versionedSourcesNarrowed: readonly string[];
 	/** Operations declared vs mounted. Must move toward equality and never away from it. */
 	readonly operations: { document: number; emitted: number };
+	/** Negotiated response bodies, which no single arm can be attributed to. Pinned. */
+	readonly negotiatedResponseBodies: number;
+	/** Inline response bodies whose SHAPE is compared. Coverage — may only grow. */
+	readonly inlineResponseBodiesCompared: number;
+	/** Bodies neither side reduces to an object OR a readable kind. Pinned. */
+	readonly unreadableResponseBodies: number;
+	/** Non-object response bodies whose top-level KIND is compared. Coverage — may only grow. */
+	readonly responseBodyKindsCompared: number;
 }
 
 let comparison: Comparison;
@@ -1048,7 +1138,10 @@ beforeAll(async () => {
 				{
 					note: "Generated by UPDATE_CONFORMANCE_BASELINE=1. This file may only SHRINK — an addition needs a named reason in the commit message. See differential.test.ts.",
 					unenforcedFormats: comparison.unenforcedFormats,
-					inlineResponseBodies: comparison.inlineResponseBodies,
+					negotiatedResponseBodies: comparison.negotiatedResponseBodies,
+					inlineResponseBodiesCompared: comparison.inlineResponseBodiesCompared,
+					unreadableResponseBodies: comparison.unreadableResponseBodies,
+					responseBodyKindsCompared: comparison.responseBodyKindsCompared,
 					emitterWarnings: comparison.emitterWarnings,
 					versionedSourcesNarrowed: [...comparison.versionedSourcesNarrowed].toSorted(),
 					operations: comparison.operations,
@@ -1259,8 +1352,20 @@ describe("the validator and the document agree, over a corpus we did not write",
 		 * carry their own — neither is a defect, and neither is coverage. Pinned rather than bounded,
 		 * because a change in either direction means the arm is reading a different set of responses
 		 * than it was.
+		 *
+		 * ⚠️ **The inline half of this used to be counted and is now COMPARED.** 76 positions named no
+		 * component, so a name comparison had nothing to say about them — and an inline response schema
+		 * is a real shape the emitter still has to get right. They go through the same shape walk the
+		 * components do, and the number below is coverage rather than a gap.
 		 */
-		expect(comparison.inlineResponseBodies).toBe(baseline.inlineResponseBodies);
+		expect(comparison.negotiatedResponseBodies).toBe(baseline.negotiatedResponseBodies);
+		expect(comparison.unreadableResponseBodies).toBe(baseline.unreadableResponseBodies);
+		expect(comparison.inlineResponseBodiesCompared).toBeGreaterThanOrEqual(
+			baseline.inlineResponseBodiesCompared,
+		);
+		expect(comparison.responseBodyKindsCompared).toBeGreaterThanOrEqual(
+			baseline.responseBodyKindsCompared,
+		);
 		expect([...comparison.versionedSourcesNarrowed].toSorted()).toEqual(
 			[...baseline.versionedSourcesNarrowed].toSorted(),
 		);

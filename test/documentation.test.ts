@@ -73,14 +73,24 @@ describe("the README documents everything this package can do to you", () => {
 		 */
 		const baseline = JSON.parse(
 			readFileSync(join(packageRoot, "test", "conformance", "baseline.json"), "utf8"),
-		) as { unenforcedFormats: number; inlineResponseBodies: number };
+		) as {
+			unenforcedFormats: number;
+			negotiatedResponseBodies: number;
+			unreadableResponseBodies: number;
+		};
 		expect(readme).toMatch(new RegExp(`\\b${baseline.unenforcedFormats}\\b.{0,40}annotations`, "s"));
-		expect(readme).toMatch(new RegExp(`\\b${baseline.inlineResponseBodies}\\b.{0,40}response bodies`, "s"));
+		expect(readme).toMatch(
+			new RegExp(`\\b${baseline.negotiatedResponseBodies}\\b negotiated response bodies`, "s"),
+		);
+		expect(readme).toMatch(
+			new RegExp(`\\b${baseline.unreadableResponseBodies}\\b response bodies reduce`, "s"),
+		);
 		/**
 		 * ⚠️ **A limit that has been CLOSED must stop being listed.** A README describing a gap that no
 		 * longer exists is the same defect as one omitting a gap that does: both leave the reader with a
 		 * wrong model, and the stale direction is the one nobody goes looking for.
 		 */
 		expect(readme).not.toMatch(/`content-type` and `accept` request validators are not graded/);
+		expect(readme).not.toMatch(/response bodies are read by status but not resolved to a component/);
 	});
 });

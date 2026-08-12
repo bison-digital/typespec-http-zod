@@ -518,6 +518,27 @@ function isBinaryPart(type: Type): boolean {
 	return false;
 }
 
+/**
+ * Whether a body served under these media types is RAW BINARY rather than a JSON value.
+ *
+ * ⚠️ **The distinction decides whether a validator may say anything about it at all.** A `bytes`
+ * body inside a JSON payload is base64 and the document publishes `type: "string"` with
+ * `contentEncoding`; a `bytes` body served as `application/octet-stream` or `image/png` is the bytes
+ * themselves, and `@typespec/openapi3` publishes a schema carrying only `contentMediaType` — which is
+ * an ANNOTATION under JSON Schema 2020-12, not an assertion. The document therefore states nothing
+ * about the value, and a validator that requires a string enforces a rule no caller reading the
+ * contract can see.
+ *
+ * ⚠️ **The same decision was already made for multipart and not for bodies**, which is how the two
+ * came to disagree: a binary PART is `z.unknown()` because openapi3 publishes `{}` for it, while a
+ * binary BODY stayed `z.string()`. Found by grading response-body kinds, a surface that had been
+ * counted and never compared — three positions in `encode/bytes`.
+ */
+function isRawBinaryMediaType(contentTypes: readonly string[]): boolean {
+	if (contentTypes.length === 0) return false;
+	return contentTypes.every((type) => !/^application\/(json|.*\+json)$/.test(type));
+}
+
 /** The declared request body type, if the operation takes one. */
 function requestBodyOf(operation: HttpOperation): Type | undefined {
 	const body = operation.parameters.body;
@@ -871,7 +892,17 @@ export function collectRoutes(
 				responseSchema:
 					responseType === undefined
 						? undefined
-						: withVisibility(program, Visibility.Read, () => registry.expressionFor(responseType)),
+						: withVisibility(program, Visibility.Read, () =>
+								/**
+								 * A raw binary body is `z.unknown()`, matching what a binary multipart part
+								 * already emits and what the document actually asserts — see
+								 * {@link isRawBinaryMediaType}.
+								 */
+								isBinaryPart(responseType) &&
+								isRawBinaryMediaType(responseContentTypesOf(operation, statusCode))
+									? "z.unknown()"
+									: registry.expressionFor(responseType),
+							),
 				rawBodyProperty,
 				// Responses are read at Visibility.Read, exactly as the success body above is. Resolving
 				// them under the ambient request visibility declared six components under the wrong

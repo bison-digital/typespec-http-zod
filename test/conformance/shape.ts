@@ -721,6 +721,31 @@ export function describeDocumentObject(
  * With a working resolver this is rare; it is counted rather than ignored so "we compared nothing
  * here" stays a visible number instead of an assumption.
  */
+/**
+ * What a top-level value IS, on each side, for a body that is not an object.
+ *
+ * ⚠️ **Response bodies that reduce to no object shape were counted and never compared** — 48 of
+ * them: a scalar body, a stream, a union. The status-to-body MAPPING was graded for all of them, so
+ * "does this status carry a body" was answered; "is that body a string or a number" was not. An
+ * emitter emitting `z.number()` where the document publishes `{"type": "string"}` would have passed,
+ * which is the same class as a property typed one way in the document and another in the validator —
+ * one level up, where nothing was looking.
+ *
+ * `undefined` still means unreadable and never "agreed", so a position neither side can reduce stays
+ * counted rather than silently passing.
+ */
+export function topLevelKindOfDocument(
+	schema: JsonSchema,
+	resolve: RefResolver | undefined,
+): ElementType | undefined {
+	return documentKindOf(schema, resolve);
+}
+
+export function topLevelKindOfZod(schema: unknown): ElementType | undefined {
+	const { def } = unwrap(schema);
+	return zodKind(def);
+}
+
 export function isUnresolvable(schema: JsonSchema, resolve: RefResolver): boolean {
 	return schema.$ref !== undefined && resolve(schema.$ref) === undefined;
 }

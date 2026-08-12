@@ -85,12 +85,14 @@ than the first.
 Stated here rather than left as numbers in a baseline file, because a number in a baseline is not a
 stated limitation once a package is published. Each is re-measured by the suite.
 
-- **`format` is not enforced.** 131 annotations are counted and deliberately not turned into
+- **`format` is not enforced.** 133 annotations are counted and deliberately not turned into
   assertions: under JSON Schema 2020-12 `format` is an annotation, not a validation keyword. Enforcing
   it would check something the document does not assert.
-- **76 response bodies are read by status but not resolved to a component.** An inline or negotiated
-  response schema is a real shape this emitter still has to get right; the differential compares the
-  status-to-body mapping for it, but not the shape itself against a named component.
+- **4 negotiated response bodies cannot be attributed to a single arm.** OpenAPI lists one
+  body per media type against members that each carry their own, so there is no one arm to compare
+  them to. The status-to-body mapping is still graded for them.
+- **4 response bodies reduce to no readable kind on one side** — a stream, or a union. Counted, never
+  silently passed.
 - **A `@head` operation gets validators here and cannot be served by every router.** That is a fact
   about the server, not about this package — see `typespec-hono`, which refuses it and says why.
 
@@ -107,6 +109,10 @@ Nothing here is judged by fixtures we wrote alone.
   **22 operations, none lost, no shape disagreements.** Every other suite measures this emitter
   against material that already knows about it; this one asks what a first adopter asks. The
   documents are vendored with digests the suite asserts, never fetched.
+- **Response bodies are compared, not counted** — 24 inline bodies by SHAPE and
+  44 non-object bodies by KIND. This surface was a bare number for a long time, and closing it
+  immediately found three positions where the emitter required a string for a raw binary body the
+  document says nothing about.
 - **`content-type` and `accept` are compared** against the `content` keys that state them — 77
   positions, no divergences. OpenAPI declares media types through `requestBody.content` and each
   response's `content` rather than as parameters, so the parameter arm sets these aside; a separate
