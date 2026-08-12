@@ -4,8 +4,12 @@ Working record. Everything here is measured; where a number appears, it came fro
 
 ## START HERE
 
-**State, 2026-08-12.** Extracted from a single un-split emitter and standing alone. **157 tests, 19
-files, typecheck clean, lint clean.**
+**State, 2026-08-12.** Extracted from a single un-split emitter and standing alone. **176 tests, 23
+files, typecheck clean, lint clean, format clean.**
+
+⚠️ **This line was stale by 19 tests before anyone noticed.** It said 157 while the suite ran 173, and
+the number is the first thing a reader trusts. Re-measure it — `pnpm test` — rather than editing
+around it.
 
 **Three numbers to lead every report with: divergences · emitter warnings · named refusals. Today
 they are `0 · 0 · 3`.** Say them unprompted and flag the moment one moves.
@@ -18,11 +22,18 @@ emitter; each is a spec that cannot be represented honestly.
 
 ### The five things most easily lost
 
-1. **Zero divergences does not mean nothing is left.** The baseline holds only what the differential
-   can see. 131 format annotations and 76 inline response bodies are _counted, not compared_ — real gaps, deliberately visible as numbers, and stated in the README
-   because a number in a baseline file is not a stated limitation once a package is published.
-2. **The gate is graded too, and it pays every time.** Four defects this extraction were in the
-   ORACLE, not the emitter, and every one accused the emitter falsely.
+1. **Zero divergences does not mean nothing is left, and it does not mean the package is usable.** The
+   baseline holds only what the differential can see, and the differential compares two BUILD-TIME
+   artefacts. It said `0 · 0 · 3` while the README told adopters to install the package in a way that
+   made its only runtime export fail to resolve — a defect no document comparison can reach, because
+   the disagreement is with `node_modules` rather than with the document. What is still counted rather
+   than compared is stated in the README's `Known limits`, because a number in a baseline file is not a
+   stated limitation once a package is published.
+2. **The gate is graded too, and it pays every time.** Of the defects found across the extraction and
+   the pre-publication review, the ORACLE has produced more than the emitter — and every oracle defect
+   accused the emitter falsely. The prototype JSON Schema axis alone opened with **206 accusations over
+   218 comparisons, all of them its own**. If a test says the emitter is wrong, parse a real value
+   before editing `src/`.
 3. **A guard that looks present may do nothing.** Break what you guard the day you write it.
 4. **`typespec-hono` is a sibling repository and the two move together.** A change to
    `test/reference/service.tsp` breaks it until its copy and digest are updated — see
@@ -88,6 +99,22 @@ checked, go and find the check.
 about nothing. The constraint arm measured **zero** constraints across the entire corpus while
 reporting agreement, for the whole life of its predecessor.
 
+⚠️ **Install the tarball and be the adopter. No harness can see what a harness configures away.** Four
+defects were found this way against a suite of 173 passing tests, and none of them was findable from
+inside: every compile in both repositories sets `runtime-module` explicitly, so the default branch was
+ungraded; every harness runs with dev dependencies present, so a runtime import that cannot resolve in
+production resolves in all of them. `pnpm pack`, install into a project outside both repos under
+`node-linker=isolated`, follow the README **literally**, and run the output — not just typecheck it.
+The gap between "it compiles" and "it runs where a stranger put it" is where this class lives.
+
+**Two test-hygiene rules that cost a day to learn, and are load-bearing.** `pnpm vitest run` **skips
+the build** — `pnpm test` is `tsc -p tsconfig.build.json && vitest run`, and controls run the wrong way
+pass against a stale `dist`. And no test file may depend on emitted output another test file wrote:
+both suites once failed on a clean tree and passed on the second run, because `vocabulary.test.ts` and
+`packaging.test.ts` graded whatever `.gen.ts` files happened to be on disk under vitest's parallelism.
+`test/support/emitted-set.ts` gives each sweep its own input and its own output directory, and
+`isolation.test.ts` asserts no two test files share one. Do not reintroduce the dependency.
+
 **Scale the claim to the evidence.** "Nothing broke" is not "nothing is wrong". Say which.
 
 ---
@@ -133,6 +160,20 @@ fails as stale — deleting it is part of the fix.
 | **A hardcoded `companyId` filter** dropped any parameter of that name from the emitted input type while the validator went on requiring it — two artefacts describing different shapes, from a rule no document states.                                                  | Reading every line of prose for the de-extraction sweep. It was code, not a comment.                                                                         |
 | **The wire assertion's failure message named one repository's architecture**, in every consumer's build output.                                                                                                                                                          | The same sweep.                                                                                                                                              |
 
+### Found by being the adopter — a fresh project, a `pnpm pack` tarball, no Hono
+
+⚠️ **Every one of these was invisible to 173 passing tests, because every harness in both repositories
+runs with dev dependencies present and configures away the path a consumer actually takes.** The
+method that found them was not a new arm: it was installing the tarball into a project outside both
+repos and following the README literally.
+
+| what                                                                                                                                                                                                                                                                                                              | how it was found                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| **The README said `npm install --save-dev`, and `armFor` is a runtime VALUE.** An application calling it typechecks, builds and runs in development, then fails on deploy with `ERR_MODULE_NOT_FOUND`. Same `dist/` bytes: devDependency exit 1, `dependencies` exit 0. `typespec-hono` had the identical defect. | Running the emitted output under a production install. Nothing else distinguishes the two cases. |
+| **`EmittedRoute.paramsSchema` was dead AND wrong in two measured ways** — no wire decoding (`z.number().int()` met `"1"`), and headers keyed on the TypeSpec name rather than the wire name. Written on every route, read by nothing. Deleted before 0.1.0 froze it.                                              | Asking which field an adopter reaches for first. It reads as "the parameters".                   |
+| **The README's own quickstart emitted 1 of the 4 advertised files**, and set `seal-object-schemas: true` while that option's row says to match openapi3, whose default is `false` — instructing a divergence against the document this package claims to agree with.                                              | Following the quickstart and counting the files.                                                 |
+| **The promised identifiers were wrong for any spec using a namespace** (`Widgets_readWidgetPath`, not `readWidgetPath`), and a validator that is already a component gets no second name — so nothing in the emitted file said which schema validates which operation.                                            | Writing the Express handler the README does not contain.                                         |
+
 ### In the oracle — all four accusing the emitter falsely
 
 | what                                                                                                                                                                                                                             | how it was found                                                            |
@@ -153,8 +194,60 @@ fails as stale — deleting it is part of the fix.
    refuses any format-derived Zod call, so turning it on breaks a test rather than moving a number.
 2. **Publishing.** Needs explicit approval, and the GitHub repositories do not exist yet — which also
    means the sibling package's CI cannot pass, because it checks this one out.
-3. **A second differential axis.** Everything is currently compared against `@typespec/openapi3`. A
-   defect the two emitters share is invisible to that, by construction.
+3. **A second differential axis — assessed, prototyped, and deliberately NOT landed.** Everything is
+   currently compared against `@typespec/openapi3` through describers we wrote, and that is the weak
+   point rather than a theoretical one: four extraction defects lived there and every one accused the
+   emitter falsely. `shape.ts` reconstructs schemas by hand from Zod's INTERNAL `._zod.def` across 788
+   lines, which nothing obliges Zod to keep stable across the `^4.0.0` peer range.
+
+   **`z.toJSONSchema()` is Zod's own supported serialiser, so it replaces all of that.** Built into
+   `differential.test.ts` (same compile — a second compile would make every disagreement ambiguous),
+   it went from **206 divergences / 218 comparisons** to **64**, and **every class diagnosed was the
+   ORACLE being naive, not the emitter**. Reverted rather than landed: 64 false accusations is not
+   shippable, and a skip-predicate tuned until the arm goes green is the vacuous arm this file warns
+   about. The patch is worth resuming; these are the expensive facts it cost hours to learn.
+
+   ⚠️ **`io: "input"` is load-bearing.** In OUTPUT mode `z.strictObject` and `z.object` both report
+   `additionalProperties: false` — the output of a stripping object has only known keys — so openness
+   silently stops being compared. In input mode the three are distinct: `false`, absent, `{}`. Input
+   is also what a request contract states: what the validator ACCEPTS.
+
+   ⚠️ **`unevaluatedProperties` is `allOf`-AWARE, and that is why openapi3 uses it.** A model
+   extending `Record<float32>` is published as `allOf: [{$ref: TheRecord}]` with
+   `unevaluatedProperties: {not: {}}`, and that does **not** seal it — the base's
+   `additionalProperties` has already evaluated those keys, so the typed catchall survives
+   inheritance. Zod has no such composition, so the emitter writes `.catchall(z.number())` on the
+   derived model and **the two agree**. Reading `{not:{}}` as "sealed" accused the emitter on 30
+   components in `type/property/additional-properties` alone.
+
+   The other four reconciliations, all legitimate dialect differences rather than defects:
+   `unevaluatedProperties: {not:{}}` vs `additionalProperties: false`; `enum: [x]` vs `const: x` (2020-12
+   defines them as equivalent); `contentEncoding`/`contentMediaType` as annotations, exactly like
+   `format`; and `propertyNames: {type: "string"}` from `z.record`, which asserts nothing because every
+   JSON key is a string. Components must be registered under their document names so nested references
+   serialise as `#/$defs/<Name>` rather than inlining — inlining diverges on every nested model and
+   does not terminate on the recursive fixtures.
+
+4. **`zod/mini` does not work, and it is a stated-audience problem rather than a footnote.** The
+   tree-shakeable variant has **no chained methods at all** — measured on 4.4.3, `typeof
+z.string().optional`, `.nullable` and `.min` are each `undefined` — while the emitted validators use
+   `.optional()`, `.nullable()`, `.default()`, `.strict()`, `.loose()` and `.catchall()`. Browsers and
+   Workers are named audience in the first paragraph of the README. This is a property of the emitted
+   SPELLING rather than of the schemas, so an emission mode using the functional forms is possible;
+   recorded in `Known limits` as a measured fact, not a plan.
+
+5. **Refusal severity is an open question, and the accounting blocks it.** All three refusals are
+   `severity: "error"`. An `error` sets `program.hasError()`, and `@typespec/openapi3` then writes **no
+   document at all** — so a consumer running both emitters loses their OpenAPI file. openapi3 marks
+   `unsupported-status-code-range` an error itself (verified in its `lib.js`, 1.14 and 1.15), so that
+   one is settled; `undeclared-discriminator` is upstream `microsoft/typespec#7141`, which reads as
+   "valid spec, cannot currently be expressed" rather than "spec is wrong for any emitter".
+
+   ⚠️ **Do not flip one before re-keying the accounting.** `corpus.ts:244` counts `emitterWarnings` as
+   `severity === "warning"` and records a refusal only where a `severity === "error"` exists. Flipping
+   any refusal swings `0 · 0 · 3` to `0 · 3 · 0` with **nothing having changed** — and worse, conflates
+   "knowingly shipping output the document does not describe" with "refused to emit", which are
+   different facts. Key on the diagnostic CODE, read from `$lib`.
 
 ### Done, and worth not redoing
 
