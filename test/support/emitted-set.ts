@@ -1,6 +1,7 @@
 import { readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { compileScenario, discoverScenarios } from "../conformance/corpus.js";
 import { compileFixture } from "./compile-fixture.js";
 
 /**
@@ -81,6 +82,22 @@ export async function compileEmittedSet(outName: string): Promise<string[]> {
 		await compileFixture(join(packageRoot, "test", dir), name, {
 			outDir: join(outputRoot, `${dir}__${name}`),
 		});
+	}
+	/**
+	 * ⚠️ **The whole corpus as well, and not only the local fixtures.**
+	 *
+	 * The sweep this replaced walked `test/` and therefore happened to include every corpus scenario —
+	 * broad, but grading whatever the previous run had left on disk. The first attempt at fixing that
+	 * kept the determinism and quietly dropped the breadth, lowering the floors to match. Lowering a
+	 * floor to fit reduced coverage is how a guard stops guarding, so the breadth is restored here —
+	 * compiled into this caller's own directory, so it is deterministic AND wide.
+	 */
+	for (const scenario of discoverScenarios()) {
+		try {
+			await compileScenario(scenario, join(outputRoot, "corpus"));
+		} catch {
+			// A scenario that cannot compile is the differential's question, not this sweep's.
+		}
 	}
 	return generatedFilesUnder(outputRoot);
 }

@@ -144,8 +144,20 @@ function ownerOfCrash(message: string): FailureOwner {
  * openapi3 is configured exactly as a consuming project's `tspconfig.yaml` configures it. An oracle
  * running with different options is not the oracle we ship against.
  */
-export async function compileScenario(scenario: Scenario): Promise<CompiledScenario> {
-	const outputDir = join(corpusOutDir, scenario.name.replaceAll("/", "__"));
+export async function compileScenario(
+	scenario: Scenario,
+	/**
+	 * Where this caller's corpus output lands.
+	 *
+	 * ⚠️ **A parameter, because a suite must never read output another suite wrote.** Vitest runs test
+	 * files in parallel with nothing ordering them, so a sweep reading `corpusOutDir` would grade
+	 * whichever build happened to be on disk — the defect that let a control pass green with the fix
+	 * deleted from `src/`. Every caller owns a directory nobody else writes, and `isolation.test.ts`
+	 * asserts it.
+	 */
+	outRoot: string = corpusOutDir,
+): Promise<CompiledScenario> {
+	const outputDir = join(outRoot, scenario.name.replaceAll("/", "__"));
 	const dirs = { zodDir: join(outputDir, "zod"), openapiDir: join(outputDir, "openapi") };
 	let program;
 	try {
