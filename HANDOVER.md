@@ -98,7 +98,7 @@ reporting agreement, for the whole life of its predecessor.
 | **Packaging** (`test/packaging.test.ts`) | what a stranger gets | an entry point outside `files`; test material shipped; a path dependency |
 | **Documentation** (`test/documentation.test.ts`) | a refusal is findable, not discoverable | a diagnostic or option nobody wrote down; a declared diagnostic with no call site |
 
-Corpus: `@typespec/http-specs@0.1.0-alpha.40`, **pinned exactly**, 61 scenarios differentiated. Both
+Corpus: `@typespec/http-specs@0.1.0-alpha.41`, **pinned exactly**, 61 scenarios differentiated. Both
 emitters run from **one program** — recompiling would make disagreements ambiguous.
 
 Depth fixtures exist because the corpus tests protocol behaviour, not validation:
@@ -140,8 +140,15 @@ fails as stale — deleting it is part of the fix.
 
 1. **Close or keep documenting the three counted-but-ungraded surfaces.** `content-type`/`accept` is
    the nearest — the response arm already reads `content`, so the machinery exists.
-2. **Bump `@typespec/*` 1.14 → 1.15 and the corpus alpha.40 → alpha.41, as its own slice**, gated by
-   the differential. They are pinned deliberately: `@typespec/openapi3` IS the gold standard, so
-   moving it during a carve makes every disagreement ambiguous.
-3. **TypeScript 6 → 7**, likewise separately. `@typespec/openapi3` itself pins `~6.0.2`.
-4. **Publishing.** Needs explicit approval, and the GitHub repositories do not exist yet.
+2. **Publishing.** Needs explicit approval, and the GitHub repositories do not exist yet — which also
+   means the sibling package's CI cannot pass, because it checks this one out.
+3. **A round-trip oracle.** The un-split package had one: a published OpenAPI document converted to
+   TypeSpec, re-emitted, and compared against the original. It proves the emitter can serve an API
+   nobody here designed, which is a different question from agreeing with openapi3 about one we did.
+
+### Done, and worth not redoing
+
+- **TypeSpec 1.14 → 1.15 and corpus alpha.40 → alpha.41** (`c0b41b3`), as its own slice. Every number
+  unchanged: 65 scenarios, 581 document operations, 584 emitted, `0 · 0 · 3`.
+- **TypeScript 6 → 7** (`c7d6095`), the native compiler. Emitted declarations differ in exactly one
+  file and two lines, and the difference is union member ordering.
