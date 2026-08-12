@@ -152,7 +152,7 @@ describe("the emitter is written against the published API", () => {
 		 */
 		const statements = source
 			.split("\n")
-			.filter((line) => /^\t/.test(line) && !/^\s*[*/]/.test(line.trim()));
+			.filter((line) => line.startsWith("\t") && !/^\s*[*/]/.test(line.trim()));
 		expect(statements.length).toBeLessThanOrEqual(3);
 	});
 });

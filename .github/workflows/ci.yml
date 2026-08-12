@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# ⚠️ The only guard that survives us. Everything else in this repository runs when somebody is at a
+# keyboard; this runs on every change, on a machine that has never seen the project before — which is
+# the condition the packaging oracle exists to test and cannot test locally.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every Node major `engines` admits, which is `>=22`. Re-read Node's release schedule when
+        # that range moves; a matrix that silently stops covering a supported version is the same
+        # class of defect as a glob that stops matching.
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      # ⚠️ `--frozen-lockfile` on purpose. A CI run that resolves a different tree from the committed
+      # one is testing something nobody has.
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      # The suite compiles TypeSpec, compiles the emitted output with the real compiler, packs the
+      # package and inspects the tarball. It is slow because each of those answers a question the
+      # cheaper version cannot.
+      - run: pnpm test
+
+      # ⚠️ LAST, always. `tsconfig.json` sets flags the build config deliberately does not —
+      # noUnusedLocals, noUnusedParameters, allowUnreachableCode: false — so a green suite and a red
+      # typecheck is an ordinary outcome, not a contradiction.
+      - run: pnpm typecheck
+
+      - run: pnpm lint
