@@ -26,14 +26,41 @@ const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const NOT_DERIVABLE = /\.(refine|superRefine|transform|catch|pipe|brand)\(/g;
 
 /**
- * The ONE permitted `z.preprocess`, written as the only shape it may take.
+ * The permitted `z.preprocess` shapes — each written as the only form it may take.
  *
- * OpenAPI's `style` says a list was flattened into one value with a delimiter; this undoes exactly
- * that, before validation, so the document's own constraints still run. A `preprocess` doing anything
- * else — coercing, defaulting, renaming — is refused, because the document does not say it.
+ * Every one of these undoes a TRANSPORT ENCODING before validation, so the document's own schema and
+ * every constraint on it still run afterwards. A `preprocess` doing anything else — coercing,
+ * defaulting, renaming — is still refused, because the document does not say it.
+ *
+ * ⚠️ **The line between "decoding" and "coercing" is whether an invalid value can become valid.**
+ * `z.coerce.number()` is the forbidden thing and it is one character of effort: `Number("")` is `0`,
+ * so `?limit=` would satisfy a required integer that the document forbids. Every decoder below passes
+ * a malformed value through UNCHANGED, so it fails against the published schema and reports the error
+ * the document justifies. That is the property that makes them derivable; it is not a matter of taste.
  */
+
+/** A list flattened into one value by OpenAPI's `style`/`explode`, split back apart. */
 const DELIMITER_SPLIT =
 	/z\.preprocess\(\(raw\) => \(typeof raw === "string" \? raw\.split\("(?:[^"\\]|\\.)*"\) : raw\), /g;
+
+/**
+ * A path, query or header scalar decoded from the only thing HTTP can carry: text.
+ *
+ * ⚠️ **`type: integer` on a query parameter describes the DECODED value, not the wire.** Without this
+ * the emitted `z.number().int()` met `"1"` and refused it — measured against a Petstore server under
+ * `wrangler dev`, `GET /pet/1` answered 400 to every conformant caller while `GET /user/zach` answered
+ * 200. Same class as the split above: the transport carries text, the document describes the value.
+ */
+const SCALAR_DECODE = [
+	/z\.preprocess\(\(raw\) => \(typeof raw === "string" && raw\.trim\(\) !== "" && Number\.isFinite\(Number\(raw\)\) \? Number\(raw\) : raw\), /g,
+	/z\.preprocess\(\(raw\) => \(raw === "true" \? true : raw === "false" \? false : raw\), /g,
+	/z\.preprocess\(\(raw\) => \(Array\.isArray\(raw\) \? raw\.map\(\(raw\) => \((?:typeof raw === "string" && raw\.trim\(\) !== "" && Number\.isFinite\(Number\(raw\)\) \? Number\(raw\) : raw|raw === "true" \? true : raw === "false" \? false : raw)\)\) : raw\), /g,
+];
+
+/** How many times a set of shapes appears in one file. */
+function countOf(source: string, patterns: readonly RegExp[]): number {
+	return patterns.reduce((total, pattern) => total + (source.match(pattern) ?? []).length, 0);
+}
 
 /** Emitted output, wherever a suite has produced it. */
 function emittedFiles(): string[] {
@@ -76,12 +103,12 @@ describe("the generated validator says only what the document can say", () => {
 		expect(offenders).toEqual([]);
 	});
 
-	it("permits `z.preprocess` only as a delimiter split", () => {
+	it("permits `z.preprocess` only as a wire decode of a known shape", () => {
+		const permitted = [DELIMITER_SPLIT, ...SCALAR_DECODE];
 		for (const file of files) {
 			const source = readFileSync(file, "utf8");
 			const all = (source.match(/z\.preprocess\(/g) ?? []).length;
-			const splits = (source.match(DELIMITER_SPLIT) ?? []).length;
-			expect(all, `a non-split z.preprocess in ${file}`).toBe(splits);
+			expect(countOf(source, permitted), `an unrecognised z.preprocess in ${file}`).toBe(all);
 		}
 	});
 
@@ -92,6 +119,20 @@ describe("the generated validator says only what the document can say", () => {
 			0,
 		);
 		expect(splits).toBeGreaterThanOrEqual(5);
+	});
+
+	it("finds the scalar decodes it is meant to permit", () => {
+		/**
+		 * ⚠️ **Its own floor, separate from the split's.** Folding both into one total would let the
+		 * decodes fall to zero while the splits held the number up — and zero decodes is precisely the
+		 * state this package shipped in, with 29 numeric query and header parameters across the corpus
+		 * refusing every conformant request.
+		 */
+		const decodes = files.reduce(
+			(total, file) => total + countOf(readFileSync(file, "utf8"), SCALAR_DECODE),
+			0,
+		);
+		expect(decodes).toBeGreaterThanOrEqual(20);
 	});
 
 	it("enforces no `format`, which is a DECISION and is now checked rather than counted", () => {

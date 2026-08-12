@@ -679,6 +679,58 @@ function collectionDelimiterOf(
 	return ",";
 }
 
+/**
+ * Decode a path, query or header value from the only thing HTTP can carry: text.
+ *
+ * ⚠️ **A path or query parameter ALWAYS arrives as a string, and `type: integer` describes what it
+ * means once decoded — not what is on the wire.** `zValidator("param", …)` hands `c.req.param()`
+ * straight to the schema, so `z.number().int()` met `"1"` and refused it. Measured against a server
+ * generated from the Swagger Petstore and run under `wrangler dev`:
+ *
+ * ```
+ * GET /pet/findByStatus?status=available -> 200   (string)
+ * GET /user/zach                         -> 200   (string)
+ * GET /pet/1                             -> 400   (integer)   <- every conformant caller
+ * GET /store/order/1                     -> 400   (integer)
+ * ```
+ *
+ * ⚠️ **Nothing saw it because nothing ever asked.** Every path and query parameter in
+ * `test/reference/service.tsp` — the only fixture that makes real requests — is a `string`. Across
+ * the corpus this emitter writes **29 numeric query and header parameters** and requests none of
+ * them. The validators were right about the document the whole time; the disagreement was with what
+ * arrives, which is the one thing no document comparison can see.
+ *
+ * ⚠️ **This DECODES, it does not coerce.** `z.coerce.number()` would have been one character of
+ * effort and wrong: `Number("")` is `0`, so `?limit=` would satisfy a required integer and an empty
+ * value the document forbids would sail through as zero. A value that is not a well-formed number is
+ * passed along UNCHANGED, so it fails against the schema the document published and reports the error
+ * the document justifies. Same rule as the collection split above — decode the wire form, then apply
+ * the document's schema to the result, never instead of it.
+ *
+ * Derived from the emitted expression rather than a restated list of scalar names: `SCALARS` in
+ * `zod.ts` decides what becomes `z.number()`, and a second copy of that list here would stop agreeing
+ * with it silently.
+ */
+function wireDecoded(declared: string): string {
+	const NUMBER = "(raw) => (typeof raw === \"string\" && raw.trim() !== \"\" && Number.isFinite(Number(raw)) ? Number(raw) : raw)";
+	const BOOLEAN = '(raw) => (raw === "true" ? true : raw === "false" ? false : raw)';
+	if (declared.startsWith("z.number()")) return `z.preprocess(${NUMBER}, ${declared})`;
+	if (declared.startsWith("z.boolean()")) return `z.preprocess(${BOOLEAN}, ${declared})`;
+	/**
+	 * A list whose ELEMENTS are numeric or boolean — `?ids=1,2,3` after the collection split, or a
+	 * repeated `?id=1&id=2`. The elements are strings for exactly the same reason the scalar is, so
+	 * the same decoder applies per element. A non-array value is left alone; the split that produces
+	 * the array runs outside this and may not have happened.
+	 */
+	const element = /^z\.array\((z\.(?:number|boolean)\(\).*)\)$/s.exec(declared);
+	if (element !== null) {
+		const inner = element[1] ?? "";
+		const decoder = inner.startsWith("z.number()") ? NUMBER : BOOLEAN;
+		return `z.preprocess((raw) => (Array.isArray(raw) ? raw.map(${decoder}) : raw), ${declared})`;
+	}
+	return declared;
+}
+
 function parameterSchemasOf(
 	program: Program,
 	operation: HttpOperation,
@@ -718,10 +770,17 @@ function parameterSchemasOf(
 		 * document publishes, so every constraint on the list — `minItems`, the element type — still
 		 * runs. Splitting in the handler instead would have left those unenforced.
 		 */
+		/**
+		 * Decoded BEFORE the split is wrapped around it, so the two nest in wire order: the outer
+		 * preprocess turns `"1,2,3"` into `["1","2","3"]`, the inner one turns those into numbers, and
+		 * the document's schema then validates the result. Wrapping the other way round would hand the
+		 * element decoder an unsplit string.
+		 */
+		const decoded = wireDecoded(declared);
 		const expression =
 			delimiter === undefined
-				? declared
-				: `z.preprocess((raw) => (typeof raw === "string" ? raw.split(${JSON.stringify(delimiter)}) : raw), ${declared})`;
+				? decoded
+				: `z.preprocess((raw) => (typeof raw === "string" ? raw.split(${JSON.stringify(delimiter)}) : raw), ${decoded})`;
 		const entry = `\t${objectKey(parameter.name)}: ${expression},`;
 		(byTarget[parameter.type] ??= []).push(entry);
 		/**
