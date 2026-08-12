@@ -574,8 +574,17 @@ export interface EmittedRoute {
 	readonly requestContentTypes: readonly string[];
 	readonly summary: string | undefined;
 	readonly requestSchema: string | undefined;
-	readonly paramsSchema: string | undefined;
-	/** The same parameters split by target, for the generated server — see `parameterSchemasOf`. */
+	/**
+	 * The parameters, split by WHERE they arrive — see `parameterSchemasOf`.
+	 *
+	 * ⚠️ **A MERGED `paramsSchema` sat beside these and was deleted before 0.1.0 froze the surface.**
+	 * It was written on every route and read by nothing — not `nameRouteSchemas`, which declares from
+	 * the split forms, and not the one consumer. Worse, it was computed by a second function under
+	 * different rules, and both wire fixes the split forms received had been applied only there: it
+	 * never decoded a path or query value, so `z.number().int()` met `"1"` and refused it, and it keyed
+	 * headers on the TypeSpec property name rather than the wire name, which 400s every conformant
+	 * request. It read as "the parameters" and was the field an adopter reached for first.
+	 */
 	readonly pathSchema: string | undefined;
 	readonly querySchema: string | undefined;
 	readonly headerSchema: string | undefined;
@@ -635,22 +644,17 @@ export interface EmittedRoute {
 }
 
 /**
- * Path and query parameters, as a Zod object.
+ * Parameters are emitted as their **own** schemas rather than folded into the body, because the two
+ * are separate things in HTTP and in OpenAPI — but they are equally part of the operation's input,
+ * and `?state=nonsense` must be a 400 rather than something the application has to defend against.
+ * Leaving them undescribed would document a constraint the runtime does not enforce, which is the
+ * same failure the vocabulary tuples exist to prevent one level down.
  *
- * They are emitted as their **own** schema rather than folded into the body, because the two are
- * separate things in HTTP and in OpenAPI — but they are equally part of the operation's input, and
- * `?state=nonsense` must be a 400 rather than something the application has to defend against. Leaving
- * them undescribed would document a constraint the runtime does not enforce, which is the same
- * failure the vocabulary tuples exist to prevent one level down.
- */
-/**
- * The same parameters, split by WHERE they arrive.
- *
- * ⚠️ **One merged schema is what a runtime interpreter needs; three are what a generated server
- * needs.** `zValidator` validates one target at a time — `zValidator("param", …)`,
- * `zValidator("query", …)` — which is how a caller learns *which* part of the request was wrong
- * instead of being handed a merged object's complaint. The merged form is kept for the route table
- * until that is retired.
+ * ⚠️ **Split by WHERE they arrive, and only so.** A validator library validates one target at a time
+ * — `("param", …)`, `("query", …)` — which is how a caller learns *which* part of the request was
+ * wrong instead of being handed a merged object's complaint. A merged form existed beside these until
+ * 0.1.0 and was deleted: nothing read it, and it had drifted into a second set of rules. See
+ * `EmittedRoute.pathSchema`.
  */
 /**
  * How a list is flattened into one query or header value, per OpenAPI's `style`.
@@ -884,35 +888,6 @@ function parameterSchemasOf(
 	};
 }
 
-function parametersSchemaOf(
-	operation: HttpOperation,
-	registry: SchemaRegistry,
-): string | undefined {
-	const entries = operation.parameters.parameters
-		.filter(
-			(parameter) =>
-				parameter.type === "path" || parameter.type === "query" || parameter.type === "header",
-		)
-		.map((parameter) => {
-			const expression = registry.expressionForProperty(parameter.param);
-			/**
-			 * Validated under the PROPERTY name for a header, the WIRE name for path and query.
-			 *
-			 * `@header("webhook-id") id: string` arrives as `webhook-id` and reaches the use-case as
-			 * `id`; the schema describes the input, so it uses the latter. Path and query keep the wire
-			 * name because that is what a server reads them by.
-			 *
-			 * ⚠️ **Either can be an illegal identifier, so both go through {@link objectKey}.** This
-			 * docblock used to claim the property name was inherently safe. It is not:
-			 * `parameters/spread` in the conformance corpus declares `` `x-ms-test-header`: string ``,
-			 * and the emitted file did not parse.
-			 */
-			const key = parameter.type === "header" ? parameter.param.name : parameter.name;
-			return `\t${objectKey(key)}: ${expression},`;
-		});
-	return entries.length === 0 ? undefined : `z.object({\n${entries.join("\n")}\n})`;
-}
-
 export function collectRoutes(
 	program: Program,
 	registry: SchemaRegistry,
@@ -1007,9 +982,6 @@ export function collectRoutes(
 					}
 					return requestType === undefined ? undefined : registry.expressionFor(requestType);
 				}),
-				paramsSchema: withVisibility(program, requestVisibility, () =>
-					parametersSchemaOf(operation, registry),
-				),
 				...(() => {
 					const split = withVisibility(program, requestVisibility, () =>
 						parameterSchemasOf(program, operation, registry),

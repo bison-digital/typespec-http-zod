@@ -799,9 +799,9 @@ function modelToZod(program: Program, model: Model): string {
  * A name as an object key — quoted when it is not a legal JavaScript identifier.
  *
  * ⚠️ **A TypeSpec property can be named anything**, and the corpus proves it: `parameters/spread`
- * declares `` `x-ms-test-header`: string ``. `parametersSchemaOf` assumed the property name was
- * always safe — its docblock even argued that using the property name rather than the wire name was
- * what avoided this — and emitted `x-ms-test-header: z.string()`, a file that does not parse.
+ * declares `` `x-ms-test-header`: string ``. A parameter walk assumed the property name was always
+ * safe — its docblock even argued that using the property name rather than the wire name was what
+ * avoided this — and emitted `x-ms-test-header: z.string()`, a file that does not parse.
  *
  * Exported so there is one answer to this question. There were two sites and only one of them knew.
  */
