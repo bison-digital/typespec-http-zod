@@ -4,7 +4,7 @@ Working record. Everything here is measured; where a number appears, it came fro
 
 ## START HERE
 
-**State, 2026-08-12.** Extracted from a single un-split emitter and standing alone. **156 tests, 19
+**State, 2026-08-12.** Extracted from a single un-split emitter and standing alone. **157 tests, 19
 files, typecheck clean, lint clean.**
 
 **Three numbers to lead every report with: divergences · emitter warnings · named refusals. Today
@@ -146,10 +146,11 @@ fails as stale — deleting it is part of the fix.
 
 ## Open, in the order I would take them
 
-1. **Two counted-but-ungraded surfaces remain**, both stated in the README: 131 unenforced `format`
-   annotations (a decision, not a defect — `format` is an annotation under 2020-12) and 76 inline or
-   negotiated response bodies read by status but not resolved to a component. `content-type`/`accept`
-   is closed: 77 positions compared, no divergences.
+1. **Every counted-but-ungraded surface is closed.** `content-type`/`accept`: 77 positions compared.
+   Response bodies: 24 by shape and 44 by kind, leaving 4 negotiated entries no single arm can be
+   attributed to and 4 that reduce to no readable kind on either side — both pinned, not floors.
+   `format` is no longer a counter at all: not enforcing it is a decision, and a class assertion now
+   refuses any format-derived Zod call, so turning it on breaks a test rather than moving a number.
 2. **Publishing.** Needs explicit approval, and the GitHub repositories do not exist yet — which also
    means the sibling package's CI cannot pass, because it checks this one out.
 3. **A second differential axis.** Everything is currently compared against `@typespec/openapi3`. A

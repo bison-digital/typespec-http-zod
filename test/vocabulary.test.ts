@@ -94,6 +94,30 @@ describe("the generated validator says only what the document can say", () => {
 		expect(splits).toBeGreaterThanOrEqual(5);
 	});
 
+	it("enforces no `format`, which is a DECISION and is now checked rather than counted", () => {
+		/**
+		 * ⚠️ **The document's `format` is an annotation, not an assertion** — JSON Schema 2020-12 says
+		 * so — and a validator that turns one into a check enforces something the contract does not
+		 * state. That is the governing rule, and the emitter's compliance with it was a *number*: 133
+		 * annotations counted as unenforced, which says what did not happen rather than what may not.
+		 *
+		 * A number cannot fail. This can: any Zod call that derives a check from a format is refused as
+		 * a class, so the decision holds by construction instead of by whoever reads the baseline next.
+		 *
+		 * ⚠️ **Not an argument that `format` should never be enforced.** It is an argument that turning
+		 * it on is a deliberate change to what this package claims, and should break a test rather than
+		 * move a counter.
+		 */
+		const FORMAT_ASSERTIONS =
+			/\.(email|url|uuid|uuidv4|uuidv7|cuid|cuid2|ulid|emoji|base64|base64url|nanoid|jwt|ipv4|ipv6|cidrv4|cidrv6|e164|datetime|date|time|duration)\(|z\.iso\./g;
+		const offenders = files.flatMap((file) =>
+			[...readFileSync(file, "utf8").matchAll(FORMAT_ASSERTIONS)].map(
+				(match) => `${match[0]} in ${file}`,
+			),
+		);
+		expect(offenders).toEqual([]);
+	});
+
 	it("ships no decorator of its own for a spec to depend on", () => {
 		/**
 		 * ⚠️ **The other half, and without it the arm above can be satisfied by a spec that simply

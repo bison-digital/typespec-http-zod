@@ -85,9 +85,11 @@ than the first.
 Stated here rather than left as numbers in a baseline file, because a number in a baseline is not a
 stated limitation once a package is published. Each is re-measured by the suite.
 
-- **`format` is not enforced.** 133 annotations are counted and deliberately not turned into
-  assertions: under JSON Schema 2020-12 `format` is an annotation, not a validation keyword. Enforcing
-  it would check something the document does not assert.
+- **`format` is deliberately not enforced, and that is now CHECKED rather than counted.** Under JSON
+  Schema 2020-12 `format` is an annotation, not a validation keyword, so turning one into a check
+  would enforce something the document does not assert. 133 annotations go unenforced, and
+  `test/vocabulary.test.ts` refuses any format-derived Zod call as a class — so turning it on breaks a
+  test rather than moving a number.
 - **4 negotiated response bodies cannot be attributed to a single arm.** OpenAPI lists one
   body per media type against members that each carry their own, so there is no one arm to compare
   them to. The status-to-body mapping is still graded for them.
