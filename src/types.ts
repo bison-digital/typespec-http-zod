@@ -11,7 +11,12 @@ import {
 	type Union,
 } from "@typespec/compiler";
 import { reportDiagnostic } from "./lib.js";
-import { effectiveIndexer, inheritedAndOwnProperties, objectKey } from "./zod.js";
+import {
+	discriminatedSubtypes,
+	effectiveIndexer,
+	inheritedAndOwnProperties,
+	objectKey,
+} from "./zod.js";
 
 /**
  * TypeSpec type → plain TypeScript type text.
@@ -135,6 +140,26 @@ function unionToTs(program: Program, union: Union): string {
 }
 
 function modelToTs(program: Program, model: Model): string {
+	/**
+	 * ⚠️ **A `@discriminator` base is a CHOICE between its subtypes, not a shape of its own — and this
+	 * walk did not know that.** `modelToZod` has had the rule since polymorphism was first supported;
+	 * here the base was walked as an ordinary model, so `@discriminator("kind") model Shape` produced
+	 * `interface Shape { kind: string; label: string }`.
+	 *
+	 * Three things were wrong with that at once. The type could not be discriminated, so no consumer
+	 * could narrow it; `kind: string` admitted every string the validator rejects; and the subtypes got
+	 * no declaration at all, because nothing reached them.
+	 *
+	 * ⚠️ **It survived because the two walks are only ever compared where a spec declares polymorphism
+	 * AND something compiles the emitted assertions.** `wire-contract.gen.ts` exists precisely to catch
+	 * the emitter disagreeing with itself — one TypeSpec, walked twice — and this is the second defect
+	 * of that class it has found. The first was a vocabulary inlined by one walk and referenced by the
+	 * other.
+	 */
+	const subtypes = discriminatedSubtypes(program, model);
+	if (subtypes.length > 0) {
+		return subtypes.map((derived) => typeToTs(program, derived)).join(" | ");
+	}
 	const indexer = effectiveIndexer(model);
 	const indexerKey = indexer?.key.name;
 	// Inherited properties included — see `inheritedAndOwnProperties`. Both artefacts describe the
