@@ -64,6 +64,48 @@ describe("the README documents everything this package can do to you", () => {
 		expect(unreachable.toSorted()).toEqual([]);
 	});
 
+	/**
+	 * ⚠️ **`./runtime` is the only thing this package puts in an application's RUNTIME graph, and the
+	 * README told readers to install it where a runtime import cannot resolve.**
+	 *
+	 * `npm install --save-dev typespec-http-zod` is correct for the emitter, which runs at build time,
+	 * and correct for the generated files, which import `ResponseArm` as a TYPE and therefore erase. It
+	 * is wrong the moment an application calls `armFor` — a function, and the one this package ships
+	 * precisely so applications do not re-derive OpenAPI's response precedence by hand.
+	 *
+	 * Measured in a fresh project installed from a `pnpm pack` tarball, same build output both times:
+	 * as a devDependency `node dist/run.js` exits **1** with
+	 * `ERR_MODULE_NOT_FOUND: Cannot find package 'typespec-http-zod'`; moved to `dependencies`, **0**.
+	 * Typecheck, build and `pnpm install` in development all pass in the failing case — deployment is
+	 * the first thing that does not, which is why a reader cannot be left to find it.
+	 *
+	 * Keyed on whether `./runtime` exports a VALUE rather than on the current export list, so a package
+	 * that later adds a second runtime function does not quietly reopen this.
+	 */
+	describe("the README tells a reader how to install what it tells them to import", () => {
+		const runtime = readFileSync(join(packageRoot, "src", "runtime.ts"), "utf8");
+		/** `export function` / `export const` / `export class` — the exports that survive to JavaScript. */
+		const valueExports = [
+			...runtime.matchAll(/^export (?:function|const|class|let|var) (\w+)/gm),
+		].map((match) => match[1] ?? "");
+
+		it("has runtime value exports to be wrong about", () => {
+			// Non-vacuity: both arms below pass trivially against a types-only runtime module.
+			expect(valueExports.length).toBeGreaterThanOrEqual(1);
+		});
+
+		it("does not tell the reader to install it as a dev dependency only", () => {
+			const install = /```bash\n([^`]*)```/.exec(readme)?.[1] ?? "";
+			expect(install).not.toBe("");
+			expect(install).toContain("npm install typespec-http-zod");
+			expect(install).not.toMatch(/--save-dev|-D\b/);
+		});
+
+		it("names every runtime value export, so the reader knows what needs resolving", () => {
+			expect(valueExports.filter((name) => !readme.includes(`\`${name}\``)).toSorted()).toEqual([]);
+		});
+	});
+
 	it("states each counted-but-ungraded surface as a limit, with its number", () => {
 		/**
 		 * ⚠️ **A number in a baseline file is not a stated limitation.** Inside a private package these
