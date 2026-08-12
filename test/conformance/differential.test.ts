@@ -138,6 +138,79 @@ function parametersAsSchema(
 }
 
 /** Drop the headers OpenAPI states through `content` keys, counting each so the gap stays visible. */
+/**
+ * The media types a `content-type` or `accept` validator accepts, read from the Zod schema directly.
+ *
+ * ⚠️ **Read from the schema rather than through the describer, deliberately.** `PropertyShape`
+ * reduces a property to what BOTH artefacts can express — a kind, a nullability, a constraint set —
+ * and a media type is none of those. It is a literal string the document states somewhere else
+ * entirely, so comparing it needs the values themselves.
+ *
+ * `undefined` means unreadable, never "none": a validator whose media types cannot be recovered is a
+ * position this arm must count as skipped rather than silently pass.
+ */
+function mediaTypesAccepted(validator: unknown, header: string): readonly string[] | undefined {
+	const def = (validator as { _zod?: { def?: ZodShapeDef } } | undefined)?._zod?.def;
+	/**
+	 * ⚠️ **Looked up case-INSENSITIVELY, because the emitted key is the wire name the spec wrote.**
+	 * Measured across the corpus: 84 validators carry `"Content-Type"`, capitalised. HTTP header names
+	 * are case-insensitive per RFC 9110 §5.1, so the emitter is right to keep the spec's spelling —
+	 * and a reader that lower-cases its needle finds nothing and reports a clean sweep. This arm
+	 * compared **zero** positions on its first run for exactly that reason, and only the floor said so.
+	 */
+	const key = Object.keys(def?.shape ?? {}).find((name) => name.toLowerCase() === header);
+	const property = key === undefined ? undefined : def?.shape?.[key];
+	if (property === undefined) return undefined;
+	const literals = (node: unknown): readonly string[] | undefined => {
+		const inner = (node as { _zod?: { def?: ZodShapeDef } } | undefined)?._zod?.def;
+		if (inner === undefined) return undefined;
+		// `.optional()` / `.nullable()` / `.default()` wrap the thing that carries the values.
+		if (inner.innerType !== undefined) return literals(inner.innerType);
+		if (inner.type === "literal") {
+			return (inner.values ?? []).filter((value): value is string => typeof value === "string");
+		}
+		if (inner.type === "enum") {
+			return Object.values(inner.entries ?? {}).filter(
+				(value): value is string => typeof value === "string",
+			);
+		}
+		if (inner.type === "union") {
+			const parts = (inner.options ?? []).map(literals);
+			if (parts.some((part) => part === undefined)) return undefined;
+			return parts.flatMap((part) => part ?? []);
+		}
+		return undefined;
+	};
+	return literals(property);
+}
+
+interface ZodShapeDef {
+	readonly type?: string;
+	readonly shape?: Record<string, unknown>;
+	readonly innerType?: unknown;
+	readonly values?: readonly unknown[];
+	readonly entries?: Record<string, unknown>;
+	readonly options?: readonly unknown[];
+}
+
+/** Every media type the document names for an operation's REQUEST body. */
+function requestMediaTypes(operation: DocumentOperation): readonly string[] {
+	const content = (operation as { requestBody?: { content?: Record<string, unknown> } }).requestBody
+		?.content;
+	return Object.keys(content ?? {}).toSorted();
+}
+
+/** Every media type the document names across an operation's RESPONSES. */
+function responseMediaTypes(operation: DocumentOperation): readonly string[] {
+	const responses = (operation as { responses?: Record<string, { content?: Record<string, unknown> }> })
+		.responses;
+	const found = new Set<string>();
+	for (const response of Object.values(responses ?? {})) {
+		for (const type of Object.keys(response.content ?? {})) found.add(type);
+	}
+	return [...found].toSorted();
+}
+
 function withoutContentHeaders(
 	shape: ObjectShape | undefined,
 	count: () => void,
@@ -291,7 +364,16 @@ interface Comparison {
 	/** Responses whose body names no component, or whose entry merges several operations. Counted. */
 	readonly inlineResponseBodies: number;
 	/** `content-type`/`accept` validators set aside: stated via `content` keys, not as parameters. */
-	readonly contentHeadersSkipped: number;
+	/**
+	 * Content-negotiation headers the parameter arm sets aside, split into the two honest answers.
+	 *
+	 * ⚠️ **`skipped` used to be the only number, and it was a gap dressed as a measurement.** A
+	 * `content-type` validator is not a parameter divergence — OpenAPI states media types through
+	 * `content` KEYS rather than as parameters — so the parameter arm has to remove them. Removing
+	 * them and counting them left the surface ungraded; removing them and comparing them somewhere
+	 * else is what closes it.
+	 */
+	readonly contentHeaders: { compared: number; skipped: number };
 	/** Components no payload can reach, so no validator is owed. Counted, never silently skipped. */
 	readonly unreachableComponents: number;
 	/** How many constraint keywords were actually READ, per side. Zero means the arm proved nothing. */
@@ -349,7 +431,7 @@ async function compareEverything(): Promise<Comparison> {
 	let responsesCompared = 0;
 	let responseBodiesCompared = 0;
 	let inlineResponseBodies = 0;
-	let contentHeadersSkipped = 0;
+	const contentHeaders = { compared: 0, skipped: 0 };
 	let unreachableComponents = 0;
 	const constraintsSeen = { document: 0, validator: 0 };
 	const versionedSourcesNarrowed: string[] = [];
@@ -501,7 +583,7 @@ async function compareEverything(): Promise<Comparison> {
 						// The reverse direction: a validator guarding something the document never declared
 						// would reject conformant requests, so it is a divergence too.
 						const surplus = withoutContentHeaders(describeZodObject(validator, nameOf), () => {
-							contentHeadersSkipped++;
+							contentHeaders.skipped++;
 						});
 						if (surplus !== undefined && Object.keys(surplus.properties).length > 0) {
 							add(
@@ -514,7 +596,7 @@ async function compareEverything(): Promise<Comparison> {
 					}
 					const fromDocument = describeDocumentObject(json, resolve);
 					const fromZod = withoutContentHeaders(describeZodObject(validator, nameOf), () => {
-						contentHeadersSkipped++;
+						contentHeaders.skipped++;
 					});
 					if (fromDocument === undefined) continue;
 					if (fromZod === undefined) {
@@ -539,6 +621,54 @@ async function compareEverything(): Promise<Comparison> {
 						elementCounter,
 						kindCounter,
 					);
+				}
+
+				/**
+				 * **The content-negotiation headers, compared against the KEYS that state them.**
+				 *
+				 * ⚠️ **This surface was counted and not graded.** `@header contentType: "application/json"`
+				 * emits a validator property, and the document declares no such parameter — it declares
+				 * `requestBody.content["application/json"]`. So the parameter arm removes them, which is
+				 * correct, and for a long time that was the end of it: a number called
+				 * `contentHeadersSkipped` that nobody could act on.
+				 *
+				 * The document does state them, just somewhere else. A `content-type` validator is
+				 * checked against the request body's media types and an `accept` validator against the
+				 * union of the responses'. A validator accepting a media type the document never offers
+				 * refuses nothing it should and accepts something it should not; the reverse rejects a
+				 * conformant caller.
+				 *
+				 * ⚠️ **`accept` is absent on a NEGOTIATED route, by design.** There it selects which
+				 * operation answers, so validating it against one member's literal would 400 a
+				 * well-formed request whose real answer is 406. Absent is the correct reading, and only
+				 * a PRESENT validator is compared.
+				 */
+				const headerValidator = validatorFor(emitted, operationId, "Header");
+				for (const [header, expected] of [
+					["content-type", requestMediaTypes(operation)],
+					["accept", responseMediaTypes(operation)],
+				] as const) {
+					const accepted = mediaTypesAccepted(headerValidator, header);
+					if (accepted === undefined) continue;
+					if (expected.length === 0) {
+						// A validator guarding a media type the document names nowhere.
+						contentHeaders.skipped++;
+						add(
+							"content-header",
+							`${scenario.name}:${operationId}`,
+							`${header} validator accepts [${accepted.toSorted()}], document names no media type`,
+						);
+						continue;
+					}
+					contentHeaders.compared++;
+					const surplus = accepted.filter((type) => !expected.includes(type)).toSorted();
+					if (surplus.length > 0) {
+						add(
+							"content-header",
+							`${scenario.name}:${operationId}`,
+							`${header} validator accepts [${surplus}] which the document does not offer (document=[${expected}])`,
+						);
+					}
 				}
 
 				/**
@@ -742,7 +872,7 @@ async function compareEverything(): Promise<Comparison> {
 		responsesCompared,
 		responseBodiesCompared,
 		inlineResponseBodies,
-		contentHeadersSkipped,
+		contentHeaders,
 		unreachableComponents,
 		unionsCompared,
 		refConstraintSkips,
@@ -968,6 +1098,12 @@ describe("the validator and the document agree, over a corpus we did not write",
 		 * whole arm with it and the suite still reports agreement.
 		 */
 		expect(comparison.parametersCompared).toBeGreaterThanOrEqual(90);
+		/**
+		 * ⚠️ **The floor that turns a counted surface into a graded one.** This arm replaced a bare
+		 * `contentHeadersSkipped`, which was a gap dressed as a measurement; without a floor here it
+		 * would be the same gap with a different name.
+		 */
+		expect(comparison.contentHeaders.compared).toBeGreaterThanOrEqual(70);
 		/**
 		 * ⚠️ **The response surface, held open by its own floor.** Until this arm existed, nothing in
 		 * this package compared what an operation is allowed to ANSWER with. The emitter hands

@@ -19,8 +19,7 @@ emitter; each is a spec that cannot be represented honestly.
 ### The five things most easily lost
 
 1. **Zero divergences does not mean nothing is left.** The baseline holds only what the differential
-   can see. `content-type`/`accept` validators, 131 format annotations and 76 inline response bodies
-   are _counted, not compared_ — real gaps, deliberately visible as numbers, and stated in the README
+   can see. 131 format annotations and 76 inline response bodies are _counted, not compared_ — real gaps, deliberately visible as numbers, and stated in the README
    because a number in a baseline file is not a stated limitation once a package is published.
 2. **The gate is graded too, and it pays every time.** Four defects this extraction were in the
    ORACLE, not the emitter, and every one accused the emitter falsely.
@@ -139,8 +138,10 @@ fails as stale — deleting it is part of the fix.
 
 ## Open, in the order I would take them
 
-1. **Close or keep documenting the three counted-but-ungraded surfaces.** `content-type`/`accept` is
-   the nearest — the response arm already reads `content`, so the machinery exists.
+1. **Two counted-but-ungraded surfaces remain**, both stated in the README: 131 unenforced `format`
+   annotations (a decision, not a defect — `format` is an annotation under 2020-12) and 76 inline or
+   negotiated response bodies read by status but not resolved to a component. `content-type`/`accept`
+   is closed: 77 positions compared, no divergences.
 2. **Publishing.** Needs explicit approval, and the GitHub repositories do not exist yet — which also
    means the sibling package's CI cannot pass, because it checks this one out.
 3. **A second differential axis.** Everything is currently compared against `@typespec/openapi3`. A

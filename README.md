@@ -85,9 +85,6 @@ than the first.
 Stated here rather than left as numbers in a baseline file, because a number in a baseline is not a
 stated limitation once a package is published. Each is re-measured by the suite.
 
-- **`content-type` and `accept` request validators are not graded.** OpenAPI states them through
-  `requestBody.content` KEYS rather than as parameters, so the differential's parameter arm sets them
-  aside and counts what it skipped. Treat this surface as unexplored rather than as verified.
 - **`format` is not enforced.** 131 annotations are counted and deliberately not turned into
   assertions: under JSON Schema 2020-12 `format` is an annotation, not a validation keyword. Enforcing
   it would check something the document does not assert.
@@ -110,6 +107,10 @@ Nothing here is judged by fixtures we wrote alone.
   **22 operations, none lost, no shape disagreements.** Every other suite measures this emitter
   against material that already knows about it; this one asks what a first adopter asks. The
   documents are vendored with digests the suite asserts, never fetched.
+- **`content-type` and `accept` are compared** against the `content` keys that state them — 77
+  positions, no divergences. OpenAPI declares media types through `requestBody.content` and each
+  response's `content` rather than as parameters, so the parameter arm sets these aside; a separate
+  arm compares them where the document actually puts them.
 - **Depth fixtures** for what a protocol corpus does not contain: it declares **no constraints at
   all**, so `test/reference/constraints.tsp` exercises every constraint keyword once, on the type it
   is legal on.
