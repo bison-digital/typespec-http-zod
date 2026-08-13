@@ -49,7 +49,14 @@ const ATTRIBUTION = [
 	/\bAI[- ](?:generated|assisted|authored|written)\b/i,
 	/\bwritten by (?:an? )?(?:AI|LLM|assistant|bot)\b/i,
 	/\bassisted by (?:an? )?(?:AI|LLM)\b/i,
-	/🤖/u,
+	/**
+	 * The robot emoji, written as an escape so this file is pure ASCII.
+	 *
+	 * A sweep removing non-ASCII characters from the repository would otherwise delete the literal and
+	 * silently disarm this pattern, leaving a guard that matches nothing while still reading as
+	 * coverage. The escape is ASCII source and the identical pattern.
+	 */
+	/\u{1F916}/u,
 ];
 
 function offendersIn(label: string, text: string): string[] {

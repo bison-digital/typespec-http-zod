@@ -5,7 +5,7 @@
 This is the **origin** copy. `typespec-hono` vendors it and records the same digest.
 
 ```
-sha256  3031608d3f10f901a316588ff9732fe45e7d7aa6c7129317887b03c562e941e0
+sha256  d3992e858fe12df430cec64a77a1374e88eeed718d0e65538c8d406107f5f224
 ```
 
 **Why the other package holds a copy rather than importing it.** This package ships no test material:
