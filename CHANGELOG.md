@@ -10,7 +10,47 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.1.0`.
+Nothing since `0.2.0`.
+
+## [0.2.0] - 2026-08-13
+
+A minor bump rather than a patch, under the policy above: every change below alters the emitted
+output, so a consumer who regenerates gets different validators.
+
+### Fixed
+
+- **An unknown scalar is emitted as `z.unknown()` rather than refused.** `@typespec/openapi3`
+  publishes `scalar Mystery;` as the empty schema `{}`, which asserts nothing and accepts any value.
+  This emitter refused the compile and wrote `z.never()`, which accepts none: `"hello"`, `42` and
+  `null` were all rejected. The `unsupported-scalar` diagnostic is retired.
+- **A `never` property is dropped from the schema rather than emitted as `z.never()`.** openapi3 omits
+  such a property from the document entirely, so `model N { value: never; other: string }` publishes
+  as `{other}` with `required: ["other"]`. The previous emission made the model unsatisfiable: the
+  exact body the document describes was rejected.
+- **Composite default values are emitted.** `#["a", "b"]` and `#{ x: 1 }` were refused with
+  `unsupported-default`, while openapi3 publishes `default: ["a","b"]` and `default: {"x":1}`. Arrays
+  and objects nested to any depth are now emitted as literals. A default with no literal form, such as
+  the scalar constructor `utcDateTime.fromISO(...)`, is still reported.
+- **A cycle that closes through a union variant or a dictionary value is emitted rather than
+  refused.** Such a cycle has no object property to hang a getter on, so `circular-model` refused it.
+  It is now deferred with `z.lazy()`, and every declaration on the cycle carries a structural
+  TypeScript type with the deferred one annotated `z.ZodType<T>`, which is what keeps `z.infer` from
+  resolving to `any`. The `circular-model` diagnostic is retired.
+
+### Changed
+
+- `schemas.gen.ts` declares a structural `interface` or `type` for any component on a reference cycle,
+  in place of the usual `z.infer<typeof ...>` alias. Output for a spec with no cycle is unchanged.
+- Two diagnostics are retired, leaving six: `unsupported-type`, `unsupported-default`, `empty-union`,
+  `unknown-key-vocabulary`, `unsupported-status-code-range` and `undeclared-discriminator`.
+
+### Documentation
+
+- The README is a starting page: install, quick start with a worked example, what it emits, and links
+  to `docs/guides.md` and `docs/reference.md`. Options, diagnostics and known limits move to the
+  reference.
+- `int64` and `uint64` above `2^53-1` are documented as a limit, with `@encode(string)` as the remedy.
+- Every tracked file is ASCII.
 
 ## [0.1.0] - 2026-08-13
 
