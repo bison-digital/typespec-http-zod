@@ -21,14 +21,14 @@ export interface FixtureOptions {
 	/**
 	 * Where the emitted files import their runtime contract from.
 	 *
-	 * ⚠️ **A fixture cannot use the default.** `typespec-http-zod/runtime` is correct for a consumer
+	 * **A fixture cannot use the default.** `typespec-http-zod/runtime` is correct for a consumer
 	 * and unresolvable from this package's own `.out/`, so a suite that left it alone would emit files
-	 * it cannot load — and would be measuring nothing while looking green.
+	 * it cannot load - and would be measuring nothing while looking green.
 	 */
 	readonly runtimeModule?: string;
 	/**
 	 * Where the emitted Zod and wire assertions import their shared types from. The default points at
-	 * the vocabularies module alone, which is enough for a suite that only loads the schemas — but
+	 * the vocabularies module alone, which is enough for a suite that only loads the schemas - but
 	 * `wire-contract.gen.ts` names request types too, so under the default it references members that
 	 * module does not export and **cannot compile**. A suite that compiles the whole emitted set has
 	 * to supply a barrel over both, the way a real consumer's contracts package is one.
@@ -38,7 +38,7 @@ export interface FixtureOptions {
 	/**
 	 * The output directory's name, when it must differ from the spec's.
 	 *
-	 * ⚠️ **Two suites compiling one fixture to one directory with DIFFERENT options overwrite each
+	 * **Two suites compiling one fixture to one directory with DIFFERENT options overwrite each
 	 * other, and vitest runs test files in parallel.** A suite that races itself is not evidence, and
 	 * the failure looks exactly like a flaky emitter.
 	 */
@@ -46,8 +46,8 @@ export interface FixtureOptions {
 	/**
 	 * The full output directory, when a suite owns one of its own rather than sharing `dir/.out/`.
 	 *
-	 * ⚠️ **Added for `vocabulary.test.ts`, which used to grade whatever `.gen.ts` files other suites
-	 * had left on disk.** Nothing ordered those suites — vitest runs test files in parallel — so on a
+	 * **Added for `vocabulary.test.ts`, which used to grade whatever `.gen.ts` files other suites
+	 * had left on disk.** Nothing ordered those suites - vitest runs test files in parallel - so on a
 	 * fresh checkout it graded nothing and failed, and on a second run it graded the PREVIOUS build and
 	 * passed. Both measured. A suite whose input is produced by other suites has to produce its own.
 	 */
@@ -57,10 +57,10 @@ export interface FixtureOptions {
 /**
  * The name of the barrel this harness writes beside the emitted output.
  *
- * ⚠️ **A suite that compiles the WHOLE emitted set needs one, and pointing `contracts-package` at
+ * **A suite that compiles the WHOLE emitted set needs one, and pointing `contracts-package` at
  * `vocabularies.gen.js` instead is a trap that looks fine until it is compiled.**
  * `wire-contract.gen.ts` names request types as well as vocabularies, so under that setting it
- * references members the module does not export — four `TS2694`s and, downstream of them, four
+ * references members the module does not export - four `TS2694`s and, downstream of them, four
  * identity assertions failing for a reason that has nothing to do with the shapes.
  *
  * A real consumer's contracts package is a barrel over both. So is this.
@@ -70,7 +70,7 @@ const CONTRACTS_BARREL = "contracts.barrel";
 /**
  * This package's own `src/runtime.ts`, as a specifier the emitted file can actually resolve.
  *
- * ⚠️ **Relative, and spelled `.js`, and both matter.** An absolute path bakes one machine's checkout
+ * **Relative, and spelled `.js`, and both matter.** An absolute path bakes one machine's checkout
  * into generated output; a `.ts` extension is rejected under `nodenext` without
  * `allowImportingTsExtensions`. Writing `./x.js` for a neighbouring `x.ts` is TypeScript's own
  * convention under node resolution, and it is what a real consumer's build sees.

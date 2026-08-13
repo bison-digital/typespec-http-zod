@@ -31,8 +31,8 @@ describe("the reference service emits", () => {
 		const schemas = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
 
 		/**
-		 * ⚠️ **These identifiers used to be emitted by the SERVER generator, into the server file.** A
-		 * package advertising TypeSpec HTTP → Zod produced component schemas and nothing a caller could
+		 * **These identifiers used to be emitted by the SERVER generator, into the server file.** A
+		 * package advertising TypeSpec HTTP -> Zod produced component schemas and nothing a caller could
 		 * check a request or a response against. This arm is what holds that fixed.
 		 */
 		const operations = [
@@ -61,7 +61,7 @@ describe("the reference service emits", () => {
 		const schemas = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
 
 		/**
-		 * ⚠️ **A header validator keyed on the PROPERTY name rejects every conformant request.**
+		 * **A header validator keyed on the PROPERTY name rejects every conformant request.**
 		 * `@header("x-request-id") requestId` arrives as `x-request-id`; a validator built from the
 		 * TypeSpec property name checks a key that is never present. Measured against a real server
 		 * once: 400 emitted where the document said 200.
@@ -70,11 +70,11 @@ describe("the reference service emits", () => {
 		expect(schemas).toMatch(/"x-request-id"/);
 
 		/**
-		 * ⚠️ **Asserted as wire-name-PRESENT and property-name-ABSENT, because either alone is weak.**
+		 * **Asserted as wire-name-PRESENT and property-name-ABSENT, because either alone is weak.**
 		 * `@query("$select") select` arrives as `$select`; a validator keyed on `select` checks a key
 		 * that is never sent. Matching only the wire name would also pass if the emitter emitted both.
 		 *
-		 * The key is unquoted — `$` is a valid identifier start, so quoting it would be noise — which is
+		 * The key is unquoted - `$` is a valid identifier start, so quoting it would be noise - which is
 		 * why this reads the key position rather than a quoted literal. Asserting `"$select"` was this
 		 * arm's own first mistake: the emitter was right and the test was wrong.
 		 */
@@ -87,9 +87,9 @@ describe("the reference service emits", () => {
 		const schemas = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
 
 		/**
-		 * ⚠️ **`satisfies` rather than `as const`, and the difference is measurable.** Both narrow
+		 * **`satisfies` rather than `as const`, and the difference is measurable.** Both narrow
 		 * `status: "default"` so it does not widen to `string`. Only `satisfies` catches a misspelled or
-		 * omitted `schema` — under `as const` a bodyless arm is legitimate, so the typo yields a
+		 * omitted `schema` - under `as const` a bodyless arm is legitimate, so the typo yields a
 		 * valid-looking arm that validates nothing.
 		 */
 		const arms = [...schemas.matchAll(/satisfies readonly ResponseArm\[\]/g)];
@@ -102,11 +102,11 @@ describe("the reference service emits", () => {
 		const schemas = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
 
 		/**
-		 * `setFlags` declares `Widget | NotFound | Throttled | Unexpected` — 200, 404, a `4XX` range and
+		 * `setFlags` declares `Widget | NotFound | Throttled | Unexpected` - 200, 404, a `4XX` range and
 		 * `default`, three of which describe a 404. All four must be present and in OpenAPI's precedence
 		 * order, because that ordering is what lets a consumer take the first match.
 		 *
-		 * ⚠️ **The range arm was emitted NOWHERE for the whole life of the un-split emitter.**
+		 * **The range arm was emitted NOWHERE for the whole life of the un-split emitter.**
 		 * `HttpStatusCodesEntry` has three cases and only two were handled, so a declared class of
 		 * failures had no validator, was not refused, and produced no warning.
 		 */

@@ -1,6 +1,6 @@
 name: Release
 
-# ⚠️ **Publishing is deliberate and cannot happen by accident.** This runs only when a `v*` tag is
+# **Publishing is deliberate and cannot happen by accident.** This runs only when a `v*` tag is
 # pushed, or when somebody dispatches it by hand. A merge to `main` publishes nothing.
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
-      # ⚠️ The full gate runs again here, against the exact commit being published. CI passing on the
+      # The full gate runs again here, against the exact commit being published. CI passing on the
       # branch is not the same claim: a tag can point anywhere.
       - run: pnpm test
       - run: pnpm typecheck

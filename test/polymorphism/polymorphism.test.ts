@@ -9,11 +9,11 @@ import { compileFixture, type CompiledFixture } from "../support/compile-fixture
  *
  * The document publishes such a base with `discriminator: {propertyName, mapping}`, and the mapping
  * is an instruction: validate the body against the subtype it names. Emitting the base's own
- * properties instead produced `z.object({kind: z.string(), wingspan})` — which accepts
+ * properties instead produced `z.object({kind: z.string(), wingspan})` - which accepts
  * `{kind: "eagle", wingspan: 1}` and checks nothing `Eagle` declares. The endpoint is polymorphic
  * and none of its polymorphism is validated.
  *
- * ⚠️ **The subtypes had no validators at all**, because nothing walked `derivedModels`, and the
+ * **The subtypes had no validators at all**, because nothing walked `derivedModels`, and the
  * differential could not see it: it compared a discriminated base as an *object*, and both artefacts
  * stop being objects there. It is compared as a choice now, and `shape.test.ts` pins the describers.
  */
@@ -35,7 +35,7 @@ describe("a discriminated base is a choice between its subtypes", () => {
 	});
 
 	it("declares every subtype, not only the models an operation names", () => {
-		// `Sparrow`, `Eagle`, `SawShark`… appear in no operation signature. openapi3 publishes a
+		// `Sparrow`, `Eagle`, `SawShark`... appear in no operation signature. openapi3 publishes a
 		// component for each because the discriminator maps to them, and so must this.
 		const expected = [
 			"birdSchema",
@@ -59,7 +59,7 @@ describe("a discriminated base is a choice between its subtypes", () => {
 	});
 
 	it("REJECTS a discriminator value no subtype claims", () => {
-		// The arm that fails if the base is still emitted as `z.object({kind: z.string(), …})`.
+		// The arm that fails if the base is still emitted as `z.object({kind: z.string(), ...})`.
 		expect(accepts(schemas.birdSchema as ZodType, { kind: "penguin", wingspan: 12 })).toBe(false);
 	});
 
@@ -73,7 +73,7 @@ describe("a discriminated base is a choice between its subtypes", () => {
 		/**
 		 * `Eagle.friends?: Bird[]`, where `Bird` is the union `Eagle` is an option of. Measured on Zod
 		 * 4.4.3, `z.discriminatedUnion` reads only the discriminator from each option rather than
-		 * enumerating its shape — which is the single fact that lets polymorphism and recursion coexist
+		 * enumerating its shape - which is the single fact that lets polymorphism and recursion coexist
 		 * here. If that ever changes, this arm throws at import rather than failing quietly.
 		 */
 		expect(

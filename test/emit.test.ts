@@ -8,7 +8,7 @@ import { compileFixture, type CompiledFixture } from "./support/compile-fixture.
 /**
  * **The emitted TypeScript has to compile, and nothing else here proves it.**
  *
- * ⚠️ **"It compiled" is not evidence that output is correct — but "it did not compile" is proof it is
+ * **"It compiled" is not evidence that output is correct - but "it did not compile" is proof it is
  * wrong, and that has happened for reasons no assertion about content would have caught:** an
  * unquoted object key (`x-ms-test-header`) that made the file unparseable; two operations in
  * different interfaces sharing a name, so the same `const` was declared twice; a recursive model
@@ -27,15 +27,15 @@ let compiled: CompiledFixture;
 let cyclic: CompiledFixture;
 
 beforeAll(async () => {
-	// ⚠️ Its own output directory. This and `reference.test.ts` both compiled `service` into
+	// Its own output directory. This and `reference.test.ts` both compiled `service` into
 	// `reference/.out/service/`, in parallel, and the loser's options decided what the winner
-	// graded — measured as TS2305s against a `schemas.gen.ts` written under different options.
+	// graded - measured as TS2305s against a `schemas.gen.ts` written under different options.
 	compiled = await compileFixture(referenceDir, "service", { outName: "service-emit" });
 	/**
-	 * ⚠️ **A cycle emits a SHAPE OF OUTPUT nothing else here compiles**, and it is the shape most
+	 * **A cycle emits a SHAPE OF OUTPUT nothing else here compiles**, and it is the shape most
 	 * likely to typecheck wrongly rather than not at all. A declaration on a cycle carries a written-out
 	 * type and a `z.ZodType<T>` annotation; drop the annotation and the module still loads, still parses,
-	 * still rejects — and infers `any`, at which point `wire-contract.gen.ts` asserts nothing. Measured:
+	 * still rejects - and infers `any`, at which point `wire-contract.gen.ts` asserts nothing. Measured:
 	 * `TS7022` on the deferred declaration AND on the sibling it poisons.
 	 *
 	 * This arm existed for one fixture, so that whole class was uncompiled.
@@ -92,15 +92,15 @@ function typecheckEmitted(outDir: string): { output: string; failed: boolean } {
 describe("the emitted output compiles", () => {
 	it("passes tsc under the settings a consumer builds with", () => {
 		const { output, failed } = typecheckEmitted(compiled.outDir);
-		// The output is the evidence — a bare `toBe(false)` would report "expected true to be false".
+		// The output is the evidence - a bare `toBe(false)` would report "expected true to be false".
 		expect(output.trim(), output).toBe("");
 		expect(failed).toBe(false);
 	});
 
 	it("compiles a CYCLE without inferring `any`", () => {
 		/**
-		 * ⚠️ **`noImplicitAny` is what makes this arm bite, and `strict` already implies it.** The
-		 * failure is not a missing declaration — the module loads and behaves correctly either way. It is
+		 * **`noImplicitAny` is what makes this arm bite, and `strict` already implies it.** The
+		 * failure is not a missing declaration - the module loads and behaves correctly either way. It is
 		 * `TS7022`, "implicitly has type 'any' because it is referenced directly or indirectly in its own
 		 * initializer", which is the compiler refusing to pretend it resolved a type it did not.
 		 */

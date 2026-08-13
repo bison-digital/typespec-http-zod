@@ -8,30 +8,30 @@
  * cannot express is a thing the differential silently does not check, so the record is deliberately
  * small and every omission is named.
  *
- * ⚠️ **Not checked yet, and therefore not proven**: `format` (an annotation in JSON Schema 2020-12
+ * **Not checked yet, and therefore not proven**: `format` (an annotation in JSON Schema 2020-12
  * rather than an assertion, so a validator ignoring it is not in breach), and **the value type of
  * array items and dictionary values**. The first is counted every run so the gap stays a number.
  *
- * ⚠️ **The second is a live hole of exactly the kind that has already hidden two defects.** A
+ * **The second is a live hole of exactly the kind that has already hidden two defects.** A
  * property compared as "an array, required, not nullable" agrees with the document whether it holds
  * `Bird` or `string`. Twice now a describer that declined to look at something turned out to be
- * standing in front of a real defect — `allOf` hid 28 components, and reading a discriminated base
- * as an object hid every subtype — so this omission should be read as unexplored, not as safe.
+ * standing in front of a real defect - `allOf` hid 28 components, and reading a discriminated base
+ * as an object hid every subtype - so this omission should be read as unexplored, not as safe.
  *
  * Discriminators WERE on this list and are now compared, as a choice rather than as a shape.
  */
 
 /** What the artefact says about properties nobody declared. */
 export type Openness =
-	| "sealed" // rejects them — `unevaluatedProperties: {not:{}}` / `.strict()`
-	| "open" // admits them — `unevaluatedProperties: {}` / `.loose()`
-	| "typed" // admits them at a declared type — a catchall
-	| "silent"; // says nothing — the document omits the keyword, Zod strips
+	| "sealed" // rejects them - `unevaluatedProperties: {not:{}}` / `.strict()`
+	| "open" // admits them - `unevaluatedProperties: {}` / `.loose()`
+	| "typed" // admits them at a declared type - a catchall
+	| "silent"; // says nothing - the document omits the keyword, Zod strips
 
 export interface PropertyShape {
 	readonly required: boolean;
 	readonly nullable: boolean;
-	/** JSON Schema keyword → value. Only keywords BOTH sides can express appear here. */
+	/** JSON Schema keyword -> value. Only keywords BOTH sides can express appear here. */
 	readonly constraints: Readonly<Record<string, string | number>>;
 	/**
 	 * The document's `format`, if it declares one. **Never compared, always counted.**
@@ -46,12 +46,12 @@ export interface PropertyShape {
 	/** What an array's items or a dictionary's values hold. Absent when the property is neither. */
 	readonly element?: ElementType;
 	/**
-	 * What the property IS — `string`, `array`, `object`. **Absent means unreadable, never "agreed".**
+	 * What the property IS - `string`, `array`, `object`. **Absent means unreadable, never "agreed".**
 	 *
-	 * ⚠️ **Nothing compared this until 2026-08-11, and it is the coarsest fact there is.** Every other
+	 * **Nothing compared this until 2026-08-11, and it is the coarsest fact there is.** Every other
 	 * field describes a property whose type both sides already agree on; none of them fire when the
 	 * document says `string` and the validator says array. `@encode("csv") value: string[]` is exactly
-	 * that — the document publishes `{type: "string"}` because the wire carries `"a,b,c"`, and this
+	 * that - the document publishes `{type: "string"}` because the wire carries `"a,b,c"`, and this
 	 * emitter produced `z.array(z.string())`, so a conformant body is rejected.
 	 */
 	readonly kind?: ElementType;
@@ -59,7 +59,7 @@ export interface PropertyShape {
 
 export interface ObjectShape {
 	readonly openness: Openness;
-	/** Keyed by the name that goes ON THE WIRE — which is the whole point of the `@encodedName` arm. */
+	/** Keyed by the name that goes ON THE WIRE - which is the whole point of the `@encodedName` arm. */
 	readonly properties: Readonly<Record<string, PropertyShape>>;
 }
 
@@ -71,45 +71,45 @@ interface ZodDef {
 	readonly catchall?: { _zod?: { def?: ZodDef } };
 	readonly innerType?: { _zod?: { def?: ZodDef } };
 	/**
-	 * `z.preprocess` — Zod 4 compiles it to a `pipe`, whose `out` carries the schema being fed and
+	 * `z.preprocess` - Zod 4 compiles it to a `pipe`, whose `out` carries the schema being fed and
 	 * whose `in` is the transform feeding it. Reading `out` is how a flattened collection parameter's
 	 * real shape, and its optionality, are reached at all.
 	 */
 	readonly out?: { _zod?: { def?: ZodDef } };
 	readonly checks?: readonly { _zod?: { def?: Record<string, unknown> } }[];
 	readonly entries?: Record<string, unknown>;
-	/** `z.discriminatedUnion` — the property it switches on, and the schemas it switches between. */
+	/** `z.discriminatedUnion` - the property it switches on, and the schemas it switches between. */
 	readonly discriminator?: string;
 	readonly options?: readonly { _zod?: { def?: ZodDef } }[];
-	/** `z.literal` — the values it accepts. */
+	/** `z.literal` - the values it accepts. */
 	readonly values?: readonly unknown[];
-	/** `z.array` — what it holds. */
+	/** `z.array` - what it holds. */
 	readonly element?: { _zod?: { def?: ZodDef } };
-	/** `z.record` — what its values are. */
+	/** `z.record` - what its values are. */
 	readonly valueType?: { _zod?: { def?: ZodDef } };
 }
 
 /**
  * What a container holds, named the same way from either artefact.
  *
- * ⚠️ **Without this, `z.array(z.string())` and an array of `Bird` are indistinguishable.** Every
- * other field here describes the property — required, nullable, its own constraints — and all of
+ * **Without this, `z.array(z.string())` and an array of `Bird` are indistinguishable.** Every
+ * other field here describes the property - required, nullable, its own constraints - and all of
  * them agree whatever the elements turn out to be. Two defects have already hidden behind a
  * describer that declined to look at something, so the element type is read rather than assumed.
  *
  * A **declared** type is named (`"Bird"`), because that is the only comparison that means anything
  * across two artefacts: the document writes `$ref` and the validator holds an object reference, and
  * matching them by identity against the emitted module is what turns both into the same word. A type
- * the emitter INLINES — a named scalar carrying a constraint — is reported by its primitive instead,
+ * the emitter INLINES - a named scalar carrying a constraint - is reported by its primitive instead,
  * because the document refs it and the validator cannot, and calling that a disagreement would
  * report the emitter's deliberate inlining as a defect.
  */
 export type ElementType = string;
 
 /**
- * "The document places no constraint on this value at all" — JSON Schema's empty schema, `{}`.
+ * "The document places no constraint on this value at all" - JSON Schema's empty schema, `{}`.
  *
- * ⚠️ **This is a STATEMENT, and it is not the same as `undefined`.** `undefined` means *we could not
+ * **This is a STATEMENT, and it is not the same as `undefined`.** `undefined` means *we could not
  * read it*; this means *we read it, and it says anything goes*. Conflating the two is what made a
  * validator that OVER-constrains an unconstrained value invisible to this harness: the document side
  * collapsed `{}` to `undefined`, the arm skipped, and the skip counted as coverage.
@@ -143,20 +143,20 @@ const defOf = (schema: unknown): ZodDef | undefined =>
 
 /**
  * `.optional()` is outermost and `.nullable()` sits inside it, because that is the only order that
- * compiles — a constraint after `.optional()` would apply to the optionality rather than the value.
+ * compiles - a constraint after `.optional()` would apply to the optionality rather than the value.
  * Unwrapping in the same order is what lets the constraints underneath be read at all.
  *
- * ⚠️ **A `z.preprocess` wrapper has to be unwrapped too, and not doing so read as a REQUIRED
- * property.** A flattened collection parameter — `?tags=a,b,c`, one string the validator has to split
- * before checking — is emitted as `z.preprocess(split, z.array(z.string()).optional())`. Zod 4
+ * **A `z.preprocess` wrapper has to be unwrapped too, and not doing so read as a REQUIRED
+ * property.** A flattened collection parameter - `?tags=a,b,c`, one string the validator has to split
+ * before checking - is emitted as `z.preprocess(split, z.array(z.string()).optional())`. Zod 4
  * compiles that to a `pipe` whose `out` side carries the real schema, so a loop that only knows
  * `optional`/`nullable`/`default` stopped at the wrapper and reported the property as required.
  *
- * ⚠️ **The emitter was right and this describer was wrong, which is the direction that matters.**
+ * **The emitter was right and this describer was wrong, which is the direction that matters.**
  * Measured directly against Zod 4.4.3: the emitted schema's `.isOptional()` is `true` and
  * `safeParse({})` accepts, so a caller omitting the parameter is not rejected. Had this been read as
  * an emitter defect and "fixed" there, a correct validator would have been broken to satisfy a
- * describer — which is why a divergence gets measured against the runtime before anyone edits `src/`.
+ * describer - which is why a divergence gets measured against the runtime before anyone edits `src/`.
  */
 function unwrap(schema: unknown): {
 	def: ZodDef | undefined;
@@ -181,11 +181,11 @@ function unwrap(schema: unknown): {
 }
 
 /**
- * Zod's check vocabulary → JSON Schema keywords.
+ * Zod's check vocabulary -> JSON Schema keywords.
  *
  * Read off Zod's own internals rather than the emitted source text: a source-text scan cannot tell
  * `.min(1)` on a string from `.min(1)` on an array, and those are `minLength` and `minItems`. The
- * check names and payloads were measured against zod@4.4.3 rather than assumed —
+ * check names and payloads were measured against zod@4.4.3 rather than assumed -
  * `greater_than` carries `inclusive`, which is the only thing separating `minimum` from
  * `exclusiveMinimum`.
  */
@@ -211,9 +211,9 @@ function constraintsOf(def: ZodDef | undefined): Record<string, string | number>
 				// `number_format` (`.int()`) is deliberately absent: it corresponds to `format`, which
 				// JSON Schema 2020-12 defines as an annotation rather than an assertion.
 				//
-				// ⚠️ **`.source`, not `String(...)`.** A `RegExp` stringifies WITH its `/` delimiters, so
+				// **`.source`, not `String(...)`.** A `RegExp` stringifies WITH its `/` delimiters, so
 				// comparing it against the document's bare pattern reported every single pattern as a
-				// disagreement — `/^\S+$/` against `^\S+$`. The delimiters are JavaScript syntax, not part
+				// disagreement - `/^\S+$/` against `^\S+$`. The delimiters are JavaScript syntax, not part
 				// of the expression, and the document has no equivalent of them.
 				if (c.format === "regex") out.pattern = (c.pattern as RegExp).source;
 				break;
@@ -232,13 +232,13 @@ function opennessOfZod(def: ZodDef): Openness {
 	return "typed";
 }
 
-/** `undefined` when the declaration is not an object — an enum, a union, a dictionary. */
+/** `undefined` when the declaration is not an object - an enum, a union, a dictionary. */
 /**
- * Schema object → the name it is declared under, by identity.
+ * Schema object -> the name it is declared under, by identity.
  *
  * The emitted module is the only place that mapping exists: at runtime `z.array(birdSchema)` holds
  * an object reference and nothing else, so `Bird` can only be recovered by asking which export IS
- * that object. `birdSchema` → `Bird`.
+ * that object. `birdSchema` -> `Bird`.
  */
 export type NameResolver = (schema: unknown) => string | undefined;
 
@@ -255,9 +255,9 @@ export function namesFromModule(module: Record<string, unknown>): NameResolver {
 }
 
 /**
- * What a Zod schema IS, in the document's vocabulary — or `undefined` when it cannot be said.
+ * What a Zod schema IS, in the document's vocabulary - or `undefined` when it cannot be said.
  *
- * ⚠️ **`undefined` must mean "unreadable", not "unconstrained".** A union or a literal has no single
+ * **`undefined` must mean "unreadable", not "unconstrained".** A union or a literal has no single
  * JSON Schema type, and guessing one would report disagreements that are artefacts of the guess. The
  * differential counts every skip so the gap cannot pass for coverage.
  */
@@ -273,7 +273,7 @@ function zodKind(def: ZodDef | undefined): ElementType | undefined {
 	return ZOD_KINDS[def.type ?? ""];
 }
 
-/** What a Zod container holds — a declared name where there is one, else its primitive kind. */
+/** What a Zod container holds - a declared name where there is one, else its primitive kind. */
 function elementOfZod(def: ZodDef | undefined, name: NameResolver): ElementType | undefined {
 	const held =
 		def?.type === "array" ? def.element : def?.type === "record" ? def.valueType : undefined;
@@ -309,11 +309,11 @@ export function describeZodObject(
 /**
  * A polymorphic component: the property it switches on, and every value that property may take.
  *
- * ⚠️ **A discriminated base is a CHOICE, and comparing it as an object compares the wrong thing.**
+ * **A discriminated base is a CHOICE, and comparing it as an object compares the wrong thing.**
  * The document publishes `Bird` as a component with `discriminator: {propertyName, mapping}`, whose
  * mapping is an instruction to validate against the named subtype; the emitter answers with
  * `z.discriminatedUnion`. Neither is an object shape, so `describeObject` returns `undefined` for
- * both — and a describer that returns `undefined` on the validator side reads as "no validator at
+ * both - and a describer that returns `undefined` on the validator side reads as "no validator at
  * all", which is the loudest possible way to be wrong about something that is right.
  */
 export interface UnionShape {
@@ -325,9 +325,9 @@ export interface UnionShape {
 /**
  * Every value a schema admits for `key`, looking THROUGH nested unions.
  *
- * `Fish → Shark → SawShark` is the case: `Fish` switches on `kind`, and one of its options is the
+ * `Fish -> Shark -> SawShark` is the case: `Fish` switches on `kind`, and one of its options is the
  * `Shark` union, which switches on `sharktype`. `Shark`'s contribution to `kind` lives on its own
- * options, both of which say `"shark"` — so the walk has to descend and the values have to be a set.
+ * options, both of which say `"shark"` - so the walk has to descend and the values have to be a set.
  */
 function discriminatorValues(schema: unknown, key: string, out: Set<string>): void {
 	const def = defOf(schema);
@@ -336,7 +336,7 @@ function discriminatorValues(schema: unknown, key: string, out: Set<string>): vo
 		for (const option of def.options ?? []) discriminatorValues(option, key, out);
 		return;
 	}
-	// Reads one property, not the whole shape — enumerating it would fire a recursive model's getters.
+	// Reads one property, not the whole shape - enumerating it would fire a recursive model's getters.
 	const literal = defOf(def.shape?.[key]);
 	for (const value of literal?.values ?? []) {
 		if (typeof value === "string") out.add(value);
@@ -388,8 +388,8 @@ function opennessOfOne(declared: unknown): Openness {
 /**
  * The openness a component **effectively** declares, inherited `allOf` bases included.
  *
- * ⚠️ **A base's `unevaluatedProperties` makes a derived model's `{not: {}}` inert, and that is not a
- * quirk — it is the whole reason OpenAPI 3.1 uses this keyword instead of `additionalProperties`.**
+ * **A base's `unevaluatedProperties` makes a derived model's `{not: {}}` inert, and that is not a
+ * quirk - it is the whole reason OpenAPI 3.1 uses this keyword instead of `additionalProperties`.**
  * Annotations produced inside an `allOf` branch propagate to the parent, so a property the base
  * already evaluated is no longer "unevaluated" by the time the derived model's seal is applied.
  *
@@ -398,7 +398,7 @@ function opennessOfOne(declared: unknown): Openness {
  * `unevaluatedProperties: {type: number}` on the base. Reading only the derived's declaration says
  * "sealed" and reports a divergence against a validator that is right.
  *
- * Not reasoned out — **measured**, by compiling the emitted document with Ajv 2020-12:
+ * Not reasoned out - **measured**, by compiling the emitted document with Ajv 2020-12:
  * `{id: 1, extra: 2}` is accepted and `{id: 1, extra: "s"}` is rejected, so the effective answer is
  * a typed catchall. With a base that declares `{}` an arbitrary extra value is accepted; with a base
  * declaring nothing, the derived's seal bites and an extra is rejected while an inherited property
@@ -443,9 +443,9 @@ function isNullable(schema: JsonSchema): boolean {
 export type RefResolver = (ref: string) => JsonSchema | undefined;
 
 /**
- * The constraints a property effectively carries — its own, over those of anything it `$ref`s.
+ * The constraints a property effectively carries - its own, over those of anything it `$ref`s.
  *
- * ⚠️ **Following the reference is the whole point, not a shortcut.** A named scalar is where TypeSpec
+ * **Following the reference is the whole point, not a shortcut.** A named scalar is where TypeSpec
  * puts a reusable constraint (`@pattern` on `TrimmedString`), the document keeps it on the referenced
  * component, and the emitter **inlines** it at every use. Comparing only what is written on the
  * property therefore compares our inlined copy against nothing at all.
@@ -463,18 +463,18 @@ function constraintsOfDocument(
 ): Record<string, string | number> {
 	const out: Record<string, string | number> = {};
 	/**
-	 * ⚠️ **A NULLABLE property's constraints live inside its `anyOf`, and this reader used to stop at
+	 * **A NULLABLE property's constraints live inside its `anyOf`, and this reader used to stop at
 	 * the wrapper.** `retiredOn?: IsoDate | null` reaches the document as
-	 * `anyOf: [{$ref: IsoDate}, {type: "null"}]`, with the `pattern` on the referenced component —
+	 * `anyOf: [{$ref: IsoDate}, {type: "null"}]`, with the `pattern` on the referenced component -
 	 * so reading only the property's own keywords found nothing, and reported the emitter as
 	 * enforcing a pattern the document does not state. The emitter was right: it peels nullability
-	 * and applies the constraint to what is underneath, which is what `.regex(…).nullable()` means.
+	 * and applies the constraint to what is underneath, which is what `.regex(...).nullable()` means.
 	 *
-	 * ⚠️ **The gate contradicted itself, which is why this was worth finding before any emitter
+	 * **The gate contradicted itself, which is why this was worth finding before any emitter
 	 * defect.** {@link documentKindOf} already peels exactly this wrapper to decide what a property
 	 * IS. Reading the type through it and the constraints around it meant the two describers
 	 * disagreed about the same schema, and every nullable-and-constrained property in any spec was
-	 * ungraded — silently, and in the direction that accuses the emitter.
+	 * ungraded - silently, and in the direction that accuses the emitter.
 	 */
 	const unwrapped = ((): JsonSchema => {
 		const arms = schema.anyOf ?? schema.oneOf;
@@ -496,10 +496,10 @@ function constraintsOfDocument(
 }
 
 /**
- * Every property a component effectively declares — its own, plus everything it inherits.
+ * Every property a component effectively declares - its own, plus everything it inherits.
  *
- * ⚠️ **`allOf` is inheritance, and skipping it skipped 28 of 226 object components — 12% of the
- * corpus — without reporting a thing.** `model Extension extends Element` reaches OpenAPI as
+ * **`allOf` is inheritance, and skipping it skipped 28 of 226 object components - 12% of the
+ * corpus - without reporting a thing.** `model Extension extends Element` reaches OpenAPI as
  * `allOf: [{$ref: Element}]` beside the derived model's own `properties`, and the differential used
  * to return `undefined` for any schema carrying one. Those models were not divergent, they were
  * **absent**: never compared, never counted, invisible in a baseline that looked exhaustive. Behind
@@ -540,8 +540,8 @@ function flattenedProperties(
  * What a document property IS, resolving the two wrappers TypeSpec routinely puts around it.
  *
  * A `$ref` to a named scalar is followed, because the emitter inlines those; a nullable property
- * arrives as `anyOf: [T, null]`, and the non-null arm is the type. Anything else — a real union, a
- * composed schema — is `undefined`, meaning **unreadable**, and the differential counts it.
+ * arrives as `anyOf: [T, null]`, and the non-null arm is the type. Anything else - a real union, a
+ * composed schema - is `undefined`, meaning **unreadable**, and the differential counts it.
  */
 function documentKindOf(
 	schema: JsonSchema,
@@ -566,12 +566,12 @@ function documentKindOf(
 /**
  * Every keyword that says something about what a value may BE.
  *
- * A schema carrying none of them, and no `type`, is the empty schema — it permits anything. A
+ * A schema carrying none of them, and no `type`, is the empty schema - it permits anything. A
  * schema carrying one we cannot reduce is unreadable, which is a different answer.
  *
- * ⚠️ **`properties`, `items` and `required` are on this list on purpose.** `{properties: {…}}` with
+ * **`properties`, `items` and `required` are on this list on purpose.** `{properties: {...}}` with
  * no `type` is an object, not an open value; reading it as {@link ANY} would invent agreement with
- * any validator at all — which is the same class of mistake this whole change exists to remove,
+ * any validator at all - which is the same class of mistake this whole change exists to remove,
  * pointed the other way.
  */
 const ASSERTING_KEYWORDS = [
@@ -593,11 +593,11 @@ const ASSERTING_KEYWORDS = [
 /**
  * Whether the document states no constraint on this value whatsoever.
  *
- * Annotations — `description`, `examples`, `contentMediaType`, `format` — are not assertions under
+ * Annotations - `description`, `examples`, `contentMediaType`, `format` - are not assertions under
  * 2020-12, so a schema carrying only those is still unconstrained. `contentMediaType` is the real
  * case: it is what openapi3 publishes for an octet-stream body.
  *
- * `{"not": {}}` is the empty set — `never` — and is genuinely readable, but it is unreachable here:
+ * `{"not": {}}` is the empty set - `never` - and is genuinely readable, but it is unreachable here:
  * a `never`-typed property is refused with `unsupported-type` before it can be compared. It is
  * listed above as asserting, so it reads as unreadable rather than as "anything goes", which is the
  * safe direction.
@@ -631,10 +631,10 @@ function readableKind(schema: JsonSchema): ElementType | undefined {
 /**
  * What a document container holds.
  *
- * ⚠️ **A `$ref` is named only when the emitter would also declare it.** The document refs every
+ * **A `$ref` is named only when the emitter would also declare it.** The document refs every
  * named type, including a scalar like `TrimmedString`; this emitter inlines a named scalar's
  * constraints at each use and declares only models, enums and named unions. Naming the scalar here
- * would report that deliberate inlining as a disagreement on every property that uses one — the same
+ * would report that deliberate inlining as a disagreement on every property that uses one - the same
  * trap `constraintsOfDocument` already had to step around.
  */
 function elementOfDocument(
@@ -652,7 +652,7 @@ function elementOfDocument(
 	const ref = held.$ref;
 	if (ref === undefined) return readableKind(held);
 	const target = resolve?.(ref);
-	// Unreadable — a ref we could not follow says nothing, which is not the same as saying anything.
+	// Unreadable - a ref we could not follow says nothing, which is not the same as saying anything.
 	if (target === undefined) return undefined;
 	const isDeclared =
 		target.properties !== undefined ||
@@ -662,14 +662,14 @@ function elementOfDocument(
 		target.enum !== undefined ||
 		target.discriminator !== undefined;
 	// Was `documentKind(target)`, which leaked the raw sentinel out of one path while the others
-	// suppressed it — the same value meaning two things, in the one place nobody had noticed.
+	// suppressed it - the same value meaning two things, in the one place nobody had noticed.
 	if (!isDeclared) return readableKind(target);
 	const bare = ref.split("/").at(-1) ?? ref;
 	return bare.split(".").at(-1) ?? bare;
 }
 
 /**
- * `undefined` unless the component is polymorphic — a `discriminator` that actually maps somewhere.
+ * `undefined` unless the component is polymorphic - a `discriminator` that actually maps somewhere.
  *
  * A `@discriminator` base with **no** subtypes carries the keyword and no `mapping`; openapi3 leaves
  * it an ordinary object and so does the emitter, because a union over zero options validates
@@ -687,7 +687,7 @@ export function describeDocumentDiscriminator(schema: JsonSchema): UnionShape | 
 	return { discriminator: propertyName, values: Object.keys(mapping).toSorted() };
 }
 
-/** `undefined` when the component is not a plain object schema — a union, an enum, a scalar. */
+/** `undefined` when the component is not a plain object schema - a union, an enum, a scalar. */
 export function describeDocumentObject(
 	schema: JsonSchema,
 	resolve?: RefResolver,
@@ -716,7 +716,7 @@ export function describeDocumentObject(
 }
 
 /**
- * Whether a property's constraints could not be read at all — a `$ref` the resolver could not follow.
+ * Whether a property's constraints could not be read at all - a `$ref` the resolver could not follow.
  *
  * With a working resolver this is rare; it is counted rather than ignored so "we compared nothing
  * here" stays a visible number instead of an assumption.
@@ -724,11 +724,11 @@ export function describeDocumentObject(
 /**
  * What a top-level value IS, on each side, for a body that is not an object.
  *
- * ⚠️ **Response bodies that reduce to no object shape were counted and never compared** — 48 of
+ * **Response bodies that reduce to no object shape were counted and never compared** - 48 of
  * them: a scalar body, a stream, a union. The status-to-body MAPPING was graded for all of them, so
  * "does this status carry a body" was answered; "is that body a string or a number" was not. An
  * emitter emitting `z.number()` where the document publishes `{"type": "string"}` would have passed,
- * which is the same class as a property typed one way in the document and another in the validator —
+ * which is the same class as a property typed one way in the document and another in the validator -
  * one level up, where nothing was looking.
  *
  * `undefined` still means unreadable and never "agreed", so a position neither side can reduce stays
@@ -753,9 +753,9 @@ export function isUnresolvable(schema: JsonSchema, resolve: RefResolver): boolea
 /**
  * A property's own schema, found through `allOf` as well as on the object itself.
  *
- * ⚠️ **Without this, every INHERITED property was silently skipped, and the skip counted as a
+ * **Without this, every INHERITED property was silently skipped, and the skip counted as a
  * comparison.** `describeDocumentObject` already follows `allOf`, so an inherited property appears in
- * the compared shape and its name is checked — but the per-property tail of `compareShapes` looked
+ * the compared shape and its name is checked - but the per-property tail of `compareShapes` looked
  * the schema up again in `json.properties`, where a derived model does not have it. Missing there
  * means "unreadable", so the loop skipped, and **kind, element, format and every constraint went
  * unread for the inherited half of every derived model.**

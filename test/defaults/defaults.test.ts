@@ -8,17 +8,17 @@ import { compileFixture, type CompiledFixture } from "../support/compile-fixture
 /**
  * **A composite default is an ordinary construct, and this emitter refused it.**
  *
- * ⚠️ **The refusal was a statement about the emitter, not about what can be represented.**
+ * **The refusal was a statement about the emitter, not about what can be represented.**
  * `unsupported-default` fired on `#["a", "b"]` and `#{ x: 1 }`, with the recorded reason that "a
  * populated literal default would need each element rendered, and no schema here has one". Meanwhile
- * `.default()` takes any JS value, and `@typespec/openapi3` publishes all of them — measured from one
+ * `.default()` takes any JS value, and `@typespec/openapi3` publishes all of them - measured from one
  * compile of this fixture: `default: ["a","b"]`, `default: {"x":1,"label":"hi"}`,
  * `default: [["p"],["q"]]`. So the document could say it and the validator could enforce it, and only
  * this emitter said no.
  *
- * ⚠️ **The refusal path also emitted `.default(z.never())`.** `UNREPRESENTABLE` is a schema
+ * **The refusal path also emitted `.default(z.never())`.** `UNREPRESENTABLE` is a schema
  * expression and this position takes a VALUE, so the output named a Zod object as the fallback for
- * the property. It never ran because the diagnostic was an error and the compile stopped — but the
+ * the property. It never ran because the diagnostic was an error and the compile stopped - but the
  * moment that severity changed, it would have compiled and been wrong at run time.
  *
  * Two ways this can look green while being broken, both guarded below:
@@ -62,7 +62,7 @@ describe("a composite default is rendered, not refused", () => {
 		const row = schemas["rowSchema"];
 		expect(row?.parse({ tags: ["z"] })).toMatchObject({ tags: ["z"] });
 		/**
-		 * ⚠️ **The half a default can silently destroy.** A property rendered as `z.unknown().default(…)`
+		 * **The half a default can silently destroy.** A property rendered as `z.unknown().default(...)`
 		 * would satisfy the arm above and accept this too.
 		 */
 		expect(row?.safeParse({ inner: { x: "not a number", label: "L" } }).success).toBe(false);
@@ -72,7 +72,7 @@ describe("a composite default is rendered, not refused", () => {
 
 	it("emits a value, never a schema expression, in the default position", () => {
 		/**
-		 * ⚠️ **`.default(z.never())` is what the refusal path emitted**, and it is invisible to a parse
+		 * **`.default(z.never())` is what the refusal path emitted**, and it is invisible to a parse
 		 * test while the diagnostic remains an error, because the compile never completes. Asserted as a
 		 * CLASS over the emitted text so any schema expression reaching this position fails, rather than
 		 * the one spelling that happened to occur.

@@ -8,7 +8,7 @@ import { resolveStreamModule, streamedTypeOf, withStreamModule } from "../../src
 /**
  * **A streamed operation's payloads are not reachable from its response body.**
  *
- * Under OpenAPI 3.1 an SSE body is `{"type": "string"}` — the event stream itself — so a walk that
+ * Under OpenAPI 3.1 an SSE body is `{"type": "string"}` - the event stream itself - so a walk that
  * follows bodies sees a scalar and stops. openapi3 publishes the event payloads as components
  * regardless (it builds a per-event `itemSchema` for OpenAPI 3.2, and under 3.1 the components are
  * what survives), and nothing here could validate them. They ARE reachable in the TypeSpec graph:
@@ -46,7 +46,7 @@ describe("what a stream carries gets a validator", () => {
 
 	it("covers JSON Lines, which carries the item model rather than an events union", () => {
 		// `JsonlStream<Tick>` reaches `Tick` by the same route. The first cut required an `@events`
-		// union and left this behind — the guard bought nothing and cost a second dependency.
+		// union and left this behind - the guard bought nothing and cost a second dependency.
 		expect(schemas.tickSchema).toBeDefined();
 	});
 });
@@ -54,9 +54,9 @@ describe("what a stream carries gets a validator", () => {
 describe("the stream library is OPTIONAL, and its absence is not a failure", () => {
 	it("resolves to undefined when nothing installs it, and then streams nothing", async () => {
 		/**
-		 * ⚠️ **The arm that matters for anybody who does not stream.** A static import would make this
+		 * **The arm that matters for anybody who does not stream.** A static import would make this
 		 * emitter unusable without `@typespec/streams`, which most specs never install. Here the
-		 * module is simply absent, and `streamedTypeOf` must answer "nothing" rather than throw — the
+		 * module is simply absent, and `streamedTypeOf` must answer "nothing" rather than throw - the
 		 * behaviour every non-streaming spec depends on and no other test exercises.
 		 */
 		const answered = withStreamModule(undefined, () =>

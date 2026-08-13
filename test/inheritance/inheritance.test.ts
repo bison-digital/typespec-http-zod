@@ -10,12 +10,12 @@ import { compileFixture, type CompiledFixture } from "../support/compile-fixture
  * `model.properties` holds a model's OWN properties, and `baseModel` appeared nowhere in `src/`. A
  * leaf model is also the one openapi3 seals, so the two defects compounded: `Extension extends
  * Element` was emitted as `z.object({level}).strict()`, and the conformance scenario's own documented
- * request body — `{"level": 0, "extension": [...]}` — would come back `400`, naming a key the
+ * request body - `{"level": 0, "extension": [...]}` - would come back `400`, naming a key the
  * published contract requires. **Dropping a field is bad; rejecting a conformant request is worse.**
  *
  * Nothing saw it, twice over. The spec it was first built against declared no `extends`, and the
  * differential returned
- * `undefined` for any document schema carrying an `allOf` — so 28 of 226 components were not
+ * `undefined` for any document schema carrying an `allOf` - so 28 of 226 components were not
  * divergent, they were never compared.
  *
  * The differential now covers the shapes. This file covers the behaviour, which shape agreement
@@ -53,9 +53,9 @@ describe("a derived model carries what it inherits", () => {
 	it("ACCEPTS an inherited property on a SEALED derived model", () => {
 		/**
 		 * The defect, stated as a test. `address` is declared by `Building`; `Cottage` is a leaf and so
-		 * is the one openapi3 seals — the combination that turned a missing field into a rejection.
+		 * is the one openapi3 seals - the combination that turned a missing field into a rejection.
 		 *
-		 * ⚠️ Written first against `House`, which is **not** sealed because `Mansion` extends it. The
+		 * Written first against `House`, which is **not** sealed because `Mansion` extends it. The
 		 * test failed and the emitter was right: sealing a base would make a subtype's own properties
 		 * unevaluated against it, so openapi3 leaves it open and this emitter mirrors that rule.
 		 */
@@ -78,7 +78,7 @@ describe("a derived model carries what it inherits", () => {
 
 	it("still REQUIRES an inherited property that the base made required", () => {
 		// Inheriting the property but losing its requiredness would pass the arm above and still be
-		// wrong — the validator would admit a body the document calls invalid.
+		// wrong - the validator would admit a body the document calls invalid.
 		expect(accepts(schemas.houseSchema as ZodType, { garden: true })).toBe(false);
 		expect(accepts(schemas.houseSchema as ZodType, { address: "1 Main St" })).toBe(false);
 	});
@@ -102,8 +102,8 @@ describe("a derived model carries what it inherits", () => {
 	});
 
 	it("lets a redeclared property OVERRIDE rather than appear twice", () => {
-		// A duplicated key in the emitted object literal is silently legal JavaScript — the last one
-		// wins — so this is checked by behaviour, not by reading the source.
+		// A duplicated key in the emitted object literal is silently legal JavaScript - the last one
+		// wins - so this is checked by behaviour, not by reading the source.
 		expect(accepts(schemas.annexSchema as ZodType, { address: "a", detached: true })).toBe(true);
 		expect(accepts(schemas.annexSchema as ZodType, { address: 1, detached: true })).toBe(false);
 	});

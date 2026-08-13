@@ -8,13 +8,13 @@ import { compileFixture, type CompiledFixture } from "../support/compile-fixture
  * **A multipart request body is validated, and validated as what the document says it is.**
  *
  * `requestBodyOf` returned a type only for `bodyKind === "single"`, so every multipart operation was
- * mounted with no body validator at all — 19 routes across the conformance corpus and 12 components
+ * mounted with no body validator at all - 19 routes across the conformance corpus and 12 components
  * the document declares that nothing could check. Not a refusal and not a diagnostic: silently
  * unchecked, which is the failure this emitter exists to remove.
  *
- * ⚠️ **A binary part must be `z.unknown()`, and that is the load-bearing choice.** `SCALARS` maps
+ * **A binary part must be `z.unknown()`, and that is the load-bearing choice.** `SCALARS` maps
  * `bytes` to `z.string()`, which is right for a JSON body (base64) and wrong in a part, where the
- * bytes are raw — openapi3 publishes `{}` for it, no type at all. `z.string()` would enforce a rule
+ * bytes are raw - openapi3 publishes `{}` for it, no type at all. `z.string()` would enforce a rule
  * the document does not state AND reject what a server actually receives, since `c.req.parseBody()`
  * hands back a `File`.
  */
@@ -60,7 +60,7 @@ describe("a multipart body is checked part by part", () => {
 		for (const value of [new Uint8Array([1]), "base64ish", { name: "f.png" }]) {
 			expect(accepts("uploadSchema", body({ profileImage: value }))).toBe(true);
 		}
-		// …but the part must still be PRESENT, which is the half `z.unknown()` alone would lose.
+		// ...but the part must still be PRESENT, which is the half `z.unknown()` alone would lose.
 		const { profileImage, ...without } = body({});
 		void profileImage;
 		expect(accepts("uploadSchema", without)).toBe(false);

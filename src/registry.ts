@@ -16,26 +16,26 @@ import {
  * Assigns each named TypeSpec model/enum a single Zod declaration, emitted in dependency order.
  *
  * Without this, a model used by twelve operations is inlined twelve times: the generated file grows
- * quadratically, and — worse — the *type* it infers is a fresh structural type at each site, so
+ * quadratically, and - worse - the *type* it infers is a fresh structural type at each site, so
  * `apps/web` gets twelve `Company`s that are only accidentally the same. One declaration per model
  * is what makes the emitted types usable as a shared vocabulary rather than as twelve coincidences.
  */
 
 /**
- * **A cycle with no property on its path — and it used to be refused.**
+ * **A cycle with no property on its path - and it used to be refused.**
  *
- * ⚠️ **A recursive model is NOT this.** `model InnerModel { children?: InnerModel[] }` is an ordinary
- * tree — `@typespec/openapi3` publishes a self-`$ref` for it and the document is valid — so it is
+ * **A recursive model is NOT this.** `model InnerModel { children?: InnerModel[] }` is an ordinary
+ * tree - `@typespec/openapi3` publishes a self-`$ref` for it and the document is valid - so it is
  * emitted as a reference, made lazy by a getter on the property that closes the loop (see
  * `modelToZod`). What this handles is a cycle with no property to hang a getter on: a named **union**
  * whose variant refers back to a model still being rendered, or a dictionary VALUE that does.
  *
- * ⚠️ **`circular-model` claimed this was unrepresentable, and it was merely unimplemented.** Measured
- * on Zod 4.4.3, `z.lazy()` closes every one of these at run time — a union-variant cycle and a
+ * **`circular-model` claimed this was unrepresentable, and it was merely unimplemented.** Measured
+ * on Zod 4.4.3, `z.lazy()` closes every one of these at run time - a union-variant cycle and a
  * dictionary-value cycle both parse nested values and, importantly, still **reject at depth**, so the
  * schema has not quietly degraded to something that accepts anything.
  *
- * ⚠️ **But `z.lazy()` alone does not TYPECHECK, and that is the whole difficulty.** Measured with
+ * **But `z.lazy()` alone does not TYPECHECK, and that is the whole difficulty.** Measured with
  * `tsc` under `strict`:
  *
  * ```
@@ -45,14 +45,14 @@ import {
  * ```
  *
  * Inferring `any` is worse than failing to compile, because `wire-contract.gen.ts` asserts
- * `Identical<z.infer<typeof X>, Contracts.X>` — against `any` that assertion PASSES while proving
+ * `Identical<z.infer<typeof X>, Contracts.X>` - against `any` that assertion PASSES while proving
  * nothing, which is the one outcome this package treats as worse than a red test.
  *
  * The fix is the recipe Zod documents: give the deferred declaration an explicit `z.ZodType<T>` and
  * declare `T` structurally. Measured, `tsc` exit 0 with the identity assertion still holding.
  *
- * ⚠️ **EVERY member of the cycle needs its structural type, not only the deferred one.** Leaving the
- * others as `export type X = z.infer<typeof xSchema>` reintroduces the loop through the annotation —
+ * **EVERY member of the cycle needs its structural type, not only the deferred one.** Leaving the
+ * others as `export type X = z.infer<typeof xSchema>` reintroduces the loop through the annotation -
  * measured: `TS2456: Type alias 'Branch' circularly references itself` plus `TS2502` and `TS7022`. So
  * cycle membership, not merely deferral, decides which declarations are emitted structurally.
  */
@@ -63,7 +63,7 @@ interface Declaration {
 	readonly source: string;
 	/**
 	 * The structural TypeScript body for a declaration on a cycle, emitted INSTEAD of the
-	 * `z.infer<typeof …>` alias — which cannot be used here without closing the type-level loop.
+	 * `z.infer<typeof ...>` alias - which cannot be used here without closing the type-level loop.
 	 */
 	readonly structural?: string;
 	/** Whether the declaration is annotated `: z.ZodType<typeName>`, which `z.lazy()` requires. */
@@ -73,8 +73,8 @@ interface Declaration {
 /**
  * The name an ANONYMOUS payload model inherits from the single model it spreads.
  *
- * ⚠️ **`@typespec/http` hands back a synthesised model for a body whose declaration carried
- * metadata**, and it has no name — so `@error model InvalidAuth { @statusCode _: 403; error: string }`
+ * **`@typespec/http` hands back a synthesised model for a body whose declaration carried
+ * metadata**, and it has no name - so `@error model InvalidAuth { @statusCode _: 403; error: string }`
  * reached the registry as `{error}` with `name: ""`, was inlined at its use site, and produced **no
  * validator at all** for a component the document publishes as `InvalidAuth`. Four authentication
  * scenarios, each with an unvalidated 403.
@@ -83,8 +83,8 @@ interface Declaration {
  * itself, which is why its component keeps the original name. This recovers the same name from
  * `sourceModels`, so both artefacts call the shape the same thing.
  *
- * ⚠️ **Only a PURE spread of one named model.** `{...A, extra: string}` is a different shape and must
- * not claim `A`'s name — so every property has to come from the source. Metadata-stripping removes
+ * **Only a PURE spread of one named model.** `{...A, extra: string}` is a different shape and must
+ * not claim `A`'s name - so every property has to come from the source. Metadata-stripping removes
  * properties and never adds them, which is exactly the asymmetry this tests for. A collision would be
  * caught by the differential's `component-name-collision` arm regardless.
  */
@@ -94,11 +94,11 @@ function spreadSourceOf(
 	/**
 	 * The properties the ORIGINAL type has, carried down the chain rather than re-derived.
 	 *
-	 * ⚠️ **Re-deriving them at each link is what blocked `Alias.InnerModel`.** The intermediate model
+	 * **Re-deriving them at each link is what blocked `Alias.InnerModel`.** The intermediate model
 	 * an operation builds holds the spread body's properties AND the operation's own `@path` and
 	 * `@header` parameters, so checking THAT set against the named ancestor fails on properties the
 	 * body never had. The question is whether every property of the shape being named comes from the
-	 * ancestor — `{name}` does — not whether some intermediate did.
+	 * ancestor - `{name}` does - not whether some intermediate did.
 	 *
 	 * The guard is unchanged in what it refuses: `{...A, extra}` still fails, because `extra` is in
 	 * the original set and not in `A`.
@@ -116,9 +116,9 @@ function spreadSourceOf(
 		if (!model.properties.has(property)) return undefined;
 	}
 	/**
-	 * ⚠️ **Follow the chain through ANONYMOUS links.** TypeSpec puts an unnamed model between an
+	 * **Follow the chain through ANONYMOUS links.** TypeSpec puts an unnamed model between an
 	 * operation's parameter model and the model that was spread into it, so stopping at the first
-	 * source finds `""` and gives up — measured: the bodies for `Alias.InnerModel` and
+	 * source finds `""` and gives up - measured: the bodies for `Alias.InnerModel` and
 	 * `Model.CompositeRequestMix` both reported `sources: [{ usage: "spread", name: "" }]` while the
 	 * document published both as components, and the one case that already worked
 	 * (`Model.BodyParameter`) was the one whose source happened to be named directly.
@@ -132,13 +132,13 @@ function spreadSourceOf(
 
 const spreadSourceName = (type: Model): string | undefined => spreadSourceOf(type)?.name;
 
-/** A type earns a name when the spec gave it one — anonymous shapes stay inline where they are used. */
+/** A type earns a name when the spec gave it one - anonymous shapes stay inline where they are used. */
 function declaredNameOf(type: Type): string | undefined {
 	if (type.kind === "Enum") return type.name;
 	/**
 	 * A named union earns a declaration too.
 	 *
-	 * Without this a union request body is inlined at its use site, so it exports no type — and
+	 * Without this a union request body is inlined at its use site, so it exports no type - and
 	 * `backend/contract.ts` and the wire assertions both pair a model with a schema **by name**. A
 	 * cross-field rule modelled as a discriminated union (which is how `@refine` is being replaced)
 	 * would silently stop being checked at the boundary.
@@ -149,10 +149,10 @@ function declaredNameOf(type: Type): string | undefined {
 	if (type.name === "Array" || type.name === "Record") return undefined;
 	if (type.name === "") return spreadSourceName(type);
 	/**
-	 * ⚠️ **A template INSTANTIATION carries the template's name, and it is not a declaration.**
+	 * **A template INSTANTIATION carries the template's name, and it is not a declaration.**
 	 *
 	 * `PublicSuccess<PublicCompanyDetail>` and `PublicSuccess<PublicOfficers>` are both called
-	 * `PublicSuccess`, so naming them would export eleven consts called `publicSuccessSchema` — the
+	 * `PublicSuccess`, so naming them would export eleven consts called `publicSuccessSchema` - the
 	 * file does not compile, and if it did, one shape would validate every response. `@typespec/openapi3`
 	 * inlines instantiations for the same reason (the public document has no `PublicSuccess*`
 	 * component), so both artefacts agree about what has a name and what does not.
@@ -168,11 +168,11 @@ const lowerFirst = (value: string): string => value.charAt(0).toLowerCase() + va
 /**
  * One model can need MORE THAN ONE declaration.
  *
- * ⚠️ **Keyed on `(type, visibility)`, because a model is not one shape.** `@visibility` and HTTP
+ * **Keyed on `(type, visibility)`, because a model is not one shape.** `@visibility` and HTTP
  * metadata both mean the same declaration projects differently by position: `@typespec/openapi3`
  * emits `VisibilityModel` and `VisibilityModelCreate` as separate components for exactly this
  * reason. Keyed on the type alone, whichever position was walked first won and every other position
- * silently got its shape — measured on the corpus, one strict model carrying all six lifecycle
+ * silently got its shape - measured on the corpus, one strict model carrying all six lifecycle
  * properties, so a create request was required to send read-only fields.
  *
  * The suffix rule is openapi3's: canonical (`Read`) keeps the bare name, and another visibility only
@@ -181,10 +181,10 @@ const lowerFirst = (value: string): string => value.charAt(0).toLowerCase() + va
  */
 function keyFor(type: Type, visibility: Visibility): string {
 	/**
-	 * ⚠️ **Keyed on the SPREAD SOURCE where there is one, or one component gets two declarations.**
+	 * **Keyed on the SPREAD SOURCE where there is one, or one component gets two declarations.**
 	 *
 	 * `@typespec/http` synthesises a fresh anonymous model per position, so two operations taking the
-	 * same body produce two distinct types that both resolve to the name `BodyModel` — and
+	 * same body produce two distinct types that both resolve to the name `BodyModel` - and
 	 * `parameters/body-optionality` emitted `export const bodyModelSchema` twice, a file that does not
 	 * parse. The document has exactly one `BodyModel` component; collapsing onto the source is what
 	 * makes the two artefacts agree about how many things there are.
@@ -214,9 +214,9 @@ export class SchemaRegistry {
 	readonly #program: Program;
 	readonly #declarations = new Map<string, Declaration>();
 	readonly #order: Declaration[] = [];
-	/** Key → the identifier it is *going* to bind, so a back edge can name a declaration in flight. */
+	/** Key -> the identifier it is *going* to bind, so a back edge can name a declaration in flight. */
 	readonly #inProgress = new Map<string, string>();
-	/** Keys on a cycle — every one needs a structural type rather than a `z.infer` alias. */
+	/** Keys on a cycle - every one needs a structural type rather than a `z.infer` alias. */
 	readonly #cyclic = new Set<string>();
 
 	constructor(program: Program) {
@@ -224,7 +224,7 @@ export class SchemaRegistry {
 	}
 
 	/**
-	 * The Zod expression for a type — a bare identifier once the type has a declaration, otherwise
+	 * The Zod expression for a type - a bare identifier once the type has a declaration, otherwise
 	 * inline source. Declaring is depth-first so a model's dependencies are emitted above it, which is
 	 * what lets the generated file be plain `const` declarations with no forward references.
 	 */
@@ -232,7 +232,7 @@ export class SchemaRegistry {
 		const bare = declaredNameOf(type);
 		if (bare === undefined) return this.#inline(type);
 		/**
-		 * ⚠️ **A type not reshaped at this visibility IS the canonical declaration — not a copy of it.**
+		 * **A type not reshaped at this visibility IS the canonical declaration - not a copy of it.**
 		 *
 		 * Keying on the requested visibility while only suffixing transformed types produced two cache
 		 * entries sharing one identifier, and the emitted file stopped parsing:
@@ -251,21 +251,21 @@ export class SchemaRegistry {
 		const existing = this.#declarations.get(key);
 		if (existing !== undefined) return existing.identifier;
 		/**
-		 * ⚠️ **A declaration already in flight is REFERENCED, not re-entered.**
+		 * **A declaration already in flight is REFERENCED, not re-entered.**
 		 *
 		 * Returning the identifier is what turns a recursive model into the self-`$ref` the document
-		 * publishes. The back edge is noted so the enclosing object knows to defer it behind a getter —
+		 * publishes. The back edge is noted so the enclosing object knows to defer it behind a getter -
 		 * and if nothing does, {@link captureBackEdges} below still sees it and the cycle is named.
 		 */
 		const pending = this.#inProgress.get(key);
 		if (pending !== undefined) {
 			noteBackEdge();
 			/**
-			 * ⚠️ **Every declaration currently in flight is ON this cycle**, and all of them need a
-			 * structural type — not only the one that ends up deferred. `#inProgress` is exactly the path
+			 * **Every declaration currently in flight is ON this cycle**, and all of them need a
+			 * structural type - not only the one that ends up deferred. `#inProgress` is exactly the path
 			 * from the cycle's entry point down to here, so recording it wholesale is both correct and
 			 * cheap. Recording only the deferred declaration leaves the others as `z.infer` aliases and
-			 * closes the loop again at the type level — `TS2456`, measured.
+			 * closes the loop again at the type level - `TS2456`, measured.
 			 */
 			for (const inFlight of this.#inProgress.keys()) this.#cyclic.add(inFlight);
 			return pending;
@@ -279,7 +279,7 @@ export class SchemaRegistry {
 		this.#inProgress.delete(key);
 		/**
 		 * A back edge that survived the whole body reached this declaration by a path with no object
-		 * property on it — a named union variant, or a dictionary value — so nothing could make it lazy
+		 * property on it - a named union variant, or a dictionary value - so nothing could make it lazy
 		 * and the emitted `const` would read itself while initialising. `z.lazy()` defers the whole body
 		 * instead, which is the only place left to put the deferral once no property can hold it.
 		 */
@@ -301,18 +301,18 @@ export class SchemaRegistry {
 	/**
 	 * Declare the BASE CHAIN a component's own declaration implies.
 	 *
-	 * ⚠️ **Reachability from an operation is not the same set the document publishes.** openapi3 emits
+	 * **Reachability from an operation is not the same set the document publishes.** openapi3 emits
 	 * a component for every base in an `allOf` chain whether or not an operation names it, so `Pet` and
-	 * `Cat` — bases of a `Siamese` that IS named — had no validator at all while the document declared
+	 * `Cat` - bases of a `Siamese` that IS named - had no validator at all while the document declared
 	 * them.
 	 *
-	 * ⚠️ **Subtypes are deliberately NOT walked here, because nothing would be walking them.** A
+	 * **Subtypes are deliberately NOT walked here, because nothing would be walking them.** A
 	 * discriminated base renders as `z.discriminatedUnion` over its subtypes, and rendering that
 	 * already asks the registry for each one. A loop here looked load-bearing and was measured not to
 	 * be: removing it left all 23 polymorphism and differential arms green.
 	 *
-	 * ⚠️ **Wrapped in {@link captureBackEdges} and the result discarded.** This call can land on a
-	 * declaration still in flight — a subtype's base is, by construction, the model that asked for it —
+	 * **Wrapped in {@link captureBackEdges} and the result discarded.** This call can land on a
+	 * declaration still in flight - a subtype's base is, by construction, the model that asked for it -
 	 * and that is not a reference in anyone's emitted expression. Letting the back edge escape would
 	 * have the enclosing declaration report a cycle it does not have and emit `z.never()`.
 	 */
@@ -325,7 +325,7 @@ export class SchemaRegistry {
 	/**
 	 * The Zod for a single property, constraints and optionality included.
 	 *
-	 * Used for path/query parameters, which are `ModelProperty`s that belong to no model — so they
+	 * Used for path/query parameters, which are `ModelProperty`s that belong to no model - so they
 	 * need the property-level walk rather than the type-level one, or `@minLength` on a path param
 	 * would be documented and never enforced.
 	 */
@@ -342,14 +342,14 @@ export class SchemaRegistry {
 	/**
 	 * A declaration for a shape the spec never wrote, under a name the document publishes.
 	 *
-	 * `@discriminated` with an envelope has no TypeSpec type for its wrapper — openapi3 synthesises
+	 * `@discriminated` with an envelope has no TypeSpec type for its wrapper - openapi3 synthesises
 	 * one and publishes it as `PetWithEnvelopeCat`, so there is a component with no `Type` to key on.
 	 * Keyed by name instead, and pushed in the same dependency-first order as everything else, so the
 	 * envelope declarations land above the union that references them.
 	 *
 	 * `declareNamed` exposes the same seam to the route emitter, which needs it for a **multipart**
 	 * body: the document publishes `MultiPartRequest` as a component, and there is no walkable type
-	 * for it — the parts have to be assembled from `@typespec/http`'s own view of the payload.
+	 * for it - the parts have to be assembled from `@typespec/http`'s own view of the payload.
 	 */
 	declareNamed(name: string, build: () => string): string {
 		return this.#declareSynthetic(name, build);
@@ -373,9 +373,9 @@ export class SchemaRegistry {
 	/**
 	 * The structural TypeScript body for a type on a cycle.
 	 *
-	 * ⚠️ **The same walk `requests.gen.ts` uses, resolving named types to their NAMES rather than
-	 * declaring them.** A cyclic declaration cannot take its type from `z.infer<typeof …>` — that is
-	 * the loop — so it needs a type written out. Every name this body references is declared in the
+	 * **The same walk `requests.gen.ts` uses, resolving named types to their NAMES rather than
+	 * declaring them.** A cyclic declaration cannot take its type from `z.infer<typeof ...>` - that is
+	 * the loop - so it needs a type written out. Every name this body references is declared in the
 	 * same file either structurally (if it is on the cycle too) or as the ordinary `z.infer` alias (if
 	 * it is not), so nothing further has to be emitted for it.
 	 *
@@ -394,8 +394,8 @@ export class SchemaRegistry {
 	/**
 	 * Render `type` without consulting its own declaration, but letting nested types use theirs.
 	 *
-	 * ⚠️ **The "not itself" rule belongs to the TOP of the walk, not to every depth.** It used to live
-	 * in the resolver, which is asked at every node — so a model reaching itself through a property
+	 * **The "not itself" rule belongs to the TOP of the walk, not to every depth.** It used to live
+	 * in the resolver, which is asked at every node - so a model reaching itself through a property
 	 * was inlined again, and again: `type/array` and `type/dictionary` in the conformance corpus both
 	 * declare `children?: InnerModel[]` and both died with
 	 * `RangeError: Maximum call stack size exceeded`. Skipping the resolver once, here, is what makes
@@ -425,7 +425,7 @@ export interface TsDeclaration {
 	readonly name: string;
 	/** `true` when the body is an object literal and can be emitted as an `interface`. */
 	readonly isObject: boolean;
-	/** `true` for an enum-derived alias — declared but not exported, see below. */
+	/** `true` for an enum-derived alias - declared but not exported, see below. */
 	readonly isVocabulary: boolean;
 	readonly source: string;
 }
@@ -434,7 +434,7 @@ export interface TsDeclaration {
  * The same walk as {@link SchemaRegistry}, emitting plain TypeScript instead of Zod.
  *
  * Kept as a separate class rather than a mode on the schema registry because the two produce
- * different *kinds* of declaration — an `interface` versus a `const` — and their reference resolvers
+ * different *kinds* of declaration - an `interface` versus a `const` - and their reference resolvers
  * hand back different text. Sharing {@link declaredNameOf} is the part that matters: a model named in
  * one artefact is named the same way in the other, so the emitted assertion can pair them by name.
  */
@@ -454,9 +454,9 @@ export class TypeRegistry {
 		const existing = this.#declarations.get(type);
 		if (existing !== undefined) return existing.name;
 		/**
-		 * ⚠️ **No laziness is needed on this side, and no refusal either.** A TypeScript `interface`
-		 * may refer to itself — `interface InnerModel { children?: InnerModel[] }` is the ordinary way
-		 * to write a tree — so the name alone is the whole answer. The Zod registry has to defer the
+		 * **No laziness is needed on this side, and no refusal either.** A TypeScript `interface`
+		 * may refer to itself - `interface InnerModel { children?: InnerModel[] }` is the ordinary way
+		 * to write a tree - so the name alone is the whole answer. The Zod registry has to defer the
 		 * same edge behind a getter only because a `const` cannot read itself while initialising.
 		 */
 		if (this.#inProgress.has(type)) return name;
@@ -469,21 +469,21 @@ export class TypeRegistry {
 			name,
 			/**
 			 * Only a plain object literal can be an `interface`. A permissive response is
-			 * `{ …pinned } & Record<string, unknown>`, and `export interface X { … } & …` does not parse —
+			 * `{ ...pinned } & Record<string, unknown>`, and `export interface X { ... } & ...` does not parse -
 			 * so an intersection is emitted as a type alias instead.
 			 */
 			isObject: source.startsWith("{") && !source.includes("} & "),
 			/**
-			 * ⚠️ **A vocabulary alias is NOT exported.**
+			 * **A vocabulary alias is NOT exported.**
 			 *
 			 * It restates a vocabulary enum's members from the spec, and the vocabularies artefact already
-			 * exports the same 27 names derived from the runtime tuples — exporting both collides on
+			 * exports the same 27 names derived from the runtime tuples - exporting both collides on
 			 * every one of them the moment the package re-exports this file.
 			 *
 			 * Restating rather than referencing is deliberate, and it is what makes the drift visible:
 			 * the emitted **Zod** defers to the runtime tuple while this type says what the spec
 			 * *declares*, so the two disagreeing is exactly the lie the document is telling. Referencing
-			 * the contracts type instead would make every assertion pass and publish the lie unchecked —
+			 * the contracts type instead would make every assertion pass and publish the lie unchecked -
 			 * which is how `FilingState` came to advertise a `failed` state that cannot occur while
 			 * omitting the generated one a consumer actually uses.
 			 */
@@ -496,7 +496,7 @@ export class TypeRegistry {
 	}
 
 	/**
-	 * The Zod-free type for a single property — used for path and query parameters, which are
+	 * The Zod-free type for a single property - used for path and query parameters, which are
 	 * `ModelProperty`s belonging to no model. Without routing them through the registry a named model
 	 * or enum in a parameter position is inlined rather than referenced.
 	 */

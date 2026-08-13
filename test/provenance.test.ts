@@ -6,15 +6,15 @@ import { describe, expect, it } from "vitest";
 /**
  * **Nothing in this package may name the codebase it was extracted from.**
  *
- * ⚠️ **This is not tidiness, and one of these was a live defect rather than a comment.** The emitter
- * carried `.filter((parameter) => parameter.name !== "companyId")` — one application's tenant
+ * **This is not tidiness, and one of these was a live defect rather than a comment.** The emitter
+ * carried `.filter((parameter) => parameter.name !== "companyId")` - one application's tenant
  * identifier, dropped from every consumer's generated input type while the validator went on
  * requiring it. Behaviour derived from nothing any document states, which is the exact class this
  * emitter exists to delete, sitting in the emitter itself.
  *
  * The rest were prose, and prose matters here more than usual: these docblocks are the record of WHY
  * each rule exists, and a reader who cannot see the repository they cite gets an explanation that
- * explains nothing. One of them shipped — `"the gateway's validator and the shared wire type describe
+ * explains nothing. One of them shipped - `"the gateway's validator and the shared wire type describe
  * different shapes"` was the failure message in every consumer's build output.
  *
  * Asserted as a CLASS over the whole of `src/`, so a term reintroduced anywhere fails here rather
@@ -27,9 +27,9 @@ const src = join(packageRoot, "src");
 /**
  * Terms belonging to the codebase this was extracted from.
  *
- * Two kinds, and both matter: proper nouns nobody else has (`@cm/…`, `cm.tsp`, a registrar), and
+ * Two kinds, and both matter: proper nouns nobody else has (`@cm/...`, `cm.tsp`, a registrar), and
  * ordinary words used as if they named a specific component (`the gateway`, `the domain`). The second
- * kind is the one that reads as generic and is not — a docblock saying "the domain asserts this"
+ * kind is the one that reads as generic and is not - a docblock saying "the domain asserts this"
  * describes an arrangement the reader has no reason to have.
  */
 const FOREIGN = [
@@ -53,14 +53,14 @@ const FOREIGN = [
 ];
 
 /**
- * Every hand-written file in the package — `src/` AND `test/`.
+ * Every hand-written file in the package - `src/` AND `test/`.
  *
- * ⚠️ **This guard scanned `src/` only, and a stale `@cm/typespec-hono` sat in a ported test file
+ * **This guard scanned `src/` only, and a stale `@cm/typespec-hono` sat in a ported test file
  * until an unrelated assertion failed on it.** A test naming a foreign package is exactly as wrong as
  * source doing so: it is the same claim about the same codebase, and it is the file a reader reaches
  * for when they want to know what a rule means.
  *
- * Generated output under `.out/` is excluded — it is not hand-written, and its content is graded by
+ * Generated output under `.out/` is excluded - it is not hand-written, and its content is graded by
  * `vocabulary.test.ts` against a different rule.
  */
 function handWrittenFiles(): string[] {
@@ -96,7 +96,7 @@ describe("the package names no codebase but its own", () => {
 					/**
 					 * One deliberate exception, and it is stated as a SHAPE rather than a line number: a
 					 * docblock may name a term while recording that the behaviour naming it was removed.
-					 * Losing that history to satisfy this rule would be the worse trade — the reason a rule
+					 * Losing that history to satisfy this rule would be the worse trade - the reason a rule
 					 * exists is the part that stops it being reintroduced.
 					 */
 					if (/\bused to\b|\bwas removed\b|\bno longer\b/.test(line)) continue;
@@ -109,7 +109,7 @@ describe("the package names no codebase but its own", () => {
 
 	it("keys no behaviour on a name the spec AUTHOR chose", () => {
 		/**
-		 * ⚠️ **The prose arm above would not have caught the defect that prompted this file.** A filter
+		 * **The prose arm above would not have caught the defect that prompted this file.** A filter
 		 * on a literal property name is code, not a comment, and it read as ordinary.
 		 *
 		 * The class, stated precisely: **`.kind` is TypeSpec's vocabulary and `.name` is the spec
@@ -117,7 +117,7 @@ describe("the package names no codebase but its own", () => {
 		 * `parameter.name === "companyId"` is deciding that one word means something in every spec that
 		 * uses it. The first is how an emitter is written. The second is a rule no document states.
 		 *
-		 * The exception is a name TypeSpec itself decides — `bytes`, `Record`, `never`, the empty name
+		 * The exception is a name TypeSpec itself decides - `bytes`, `Record`, `never`, the empty name
 		 * an anonymous model carries. That is a closed first-party set, not a list this package
 		 * maintains, which is why it can be written down without becoming the thing it guards against.
 		 */
@@ -143,9 +143,9 @@ describe("the package names no codebase but its own", () => {
 /**
  * **The emitter entry point uses nothing this package does not export.**
  *
- * ⚠️ **This is the only mechanical proof that the published API is sufficient to build an emitter
- * on.** `typespec-hono` is written against `api.ts` and cannot reach past it — the `exports` map
- * forbids a deep import — so if this package's own `$onEmit` quietly reaches into `zod.ts` or
+ * **This is the only mechanical proof that the published API is sufficient to build an emitter
+ * on.** `typespec-hono` is written against `api.ts` and cannot reach past it - the `exports` map
+ * forbids a deep import - so if this package's own `$onEmit` quietly reaches into `zod.ts` or
  * `registry.ts`, it is doing something no consumer could, and the API looks complete while being
  * short by exactly that much.
  *

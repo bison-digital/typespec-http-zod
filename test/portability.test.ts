@@ -7,14 +7,14 @@ import { compileEmittedSet } from "./support/emitted-set.js";
 /**
  * **Nothing that ships names a path that exists on one machine.**
  *
- * ⚠️ **The emitted output is the half that matters, and it is the half no other arm reads for this.**
- * A generated file carrying `/Users/somebody/projects/…` compiles perfectly for the person who ran
- * the emitter and for nobody else — and it would be committed by the consumer, because generated
+ * **The emitted output is the half that matters, and it is the half no other arm reads for this.**
+ * A generated file carrying `/Users/somebody/projects/...` compiles perfectly for the person who ran
+ * the emitter and for nobody else - and it would be committed by the consumer, because generated
  * output is checked in. The `runtime-module` and `contracts-package` options both take a specifier
  * that lands verbatim in the output, so an absolute one is a single mis-set option away.
  *
- * ⚠️ **This is a companion to "every import resolves", not a subset of it.** An absolute specifier
- * RESOLVES, on the machine that wrote it — which is exactly why a resolution check cannot see it and
+ * **This is a companion to "every import resolves", not a subset of it.** An absolute specifier
+ * RESOLVES, on the machine that wrote it - which is exactly why a resolution check cannot see it and
  * why portability needs an assertion of its own. Both properties are real and neither implies the
  * other.
  *
@@ -69,7 +69,7 @@ describe("nothing this package ships names one machine's filesystem", () => {
 
 	it("carries no machine path in anything the emitter GENERATES", () => {
 		/**
-		 * ⚠️ **The arm the review asked for, and the one with a real way to fail.** Tracked files are
+		 * **The arm the review asked for, and the one with a real way to fail.** Tracked files are
 		 * reviewed when they change; generated files are written fresh on every compile from whatever
 		 * options the consumer set, and are then committed into the consumer's repository.
 		 */

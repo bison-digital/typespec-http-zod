@@ -15,12 +15,12 @@ import { describe, expect, it } from "vitest";
  * - **`documents/*`** are published OpenAPI documents the round-trip suite converts and re-emits. A
  *   suite that fetches them decides its own result on a value it did not supply.
  *
- * ⚠️ **The version of this inherited from the un-split package did not exist.** Its
- * `documents/PROVENANCE.md` recorded two digests and asserted neither — and one of them had never
+ * **The version of this inherited from the un-split package did not exist.** Its
+ * `documents/PROVENANCE.md` recorded two digests and asserted neither - and one of them had never
  * matched the file it described, from the commit that introduced it. The record said, in as many
  * words, that "the digest is what makes this checkable rather than asserted"; nothing checked it.
  *
- * ⚠️ **Asserted as a CLASS over every file in the directory**, not as the two names somebody thought
+ * **Asserted as a CLASS over every file in the directory**, not as the two names somebody thought
  * of. A third document added without a digest fails here rather than joining silently.
  */
 
@@ -82,7 +82,7 @@ describe("every vendored reference document matches its recorded digest", () => 
 
 	it("is never fetched at run time", () => {
 		/**
-		 * ⚠️ **Hermetic is a property of the code, not an intention.** The round-trip pipeline reads
+		 * **Hermetic is a property of the code, not an intention.** The round-trip pipeline reads
 		 * these from disk; a `fetch` anywhere in it would make the suite's result depend on a server
 		 * nobody here controls, and the failure would look like an emitter defect.
 		 */

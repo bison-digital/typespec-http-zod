@@ -6,7 +6,7 @@ using Http;
  * The cycle that genuinely cannot be deferred.
  *
  * A getter is what makes a recursive reference lazy, and a getter needs an object property to sit
- * on. Here the loop closes through a **named union** — `Node` → `Branch` → `Node` — and a union
+ * on. Here the loop closes through a **named union** - `Node` -> `Branch` -> `Node` - and a union
  * declaration has no properties, so `const branchSchema = z.union([nodeSchema])` would read
  * `nodeSchema` while it is still initialising.
  *

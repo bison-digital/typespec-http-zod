@@ -11,8 +11,8 @@ import { compileFixture, type CompiledFixture } from "../support/compile-fixture
  * validator accepts an encoded value, because both artefacts saying "string" is agreement about a
  * word. These arms send what the contract actually describes.
  *
- * ⚠️ **Each arm is paired with its opposite.** `@encode` is the one change where the wrong answer is
- * the *declared* type — an arm that only checked "the encoded form is accepted" would pass on a
+ * **Each arm is paired with its opposite.** `@encode` is the one change where the wrong answer is
+ * the *declared* type - an arm that only checked "the encoded form is accepted" would pass on a
  * validator that accepts everything, and an arm that only checked "the declared form is rejected"
  * would pass on one that accepts nothing. Both, over the same property, or neither proves anything.
  */

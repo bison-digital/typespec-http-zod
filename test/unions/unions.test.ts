@@ -9,12 +9,12 @@ import { compileFixture, type CompiledFixture } from "../support/compile-fixture
  * **A `@discriminated` union is a choice between WRAPPINGS of its variants.**
  *
  * `z.discriminatedUnion("kind", [catSchema, dogSchema])` over models that carry no `kind` **matches
- * nothing** — every request to a polymorphic endpoint failed, and the suite was green. The
+ * nothing** - every request to a polymorphic endpoint failed, and the suite was green. The
  * differential could not see it either: it read a discriminated component as an object, so both
  * sides described "not an object" and agreed.
  *
- * ⚠️ **`envelope: "none"` is accepted only where the variant declares the discriminator itself**, and
- * refused otherwise — see `undeclared.tsp`. openapi3 publishes the variant unchanged, so unless it
+ * **`envelope: "none"` is accepted only where the variant declares the discriminator itself**, and
+ * refused otherwise - see `undeclared.tsp`. openapi3 publishes the variant unchanged, so unless it
  * declares the property the document names a discriminator it never requires, which OpenAPI 3.1
  * forbids. The emitter briefly injected the property to compensate; that enforced a rule no contract
  * stated, and enforcing what the document does not say is the defect this whole effort exists to
@@ -55,7 +55,7 @@ describe("a discriminated union validates the shape that goes on the wire", () =
 		expect(
 			accepts("petWithEnvelopeSchema", { kind: "cat", value: { name: "W", meow: true } }),
 		).toBe(true);
-		// The bare variant — what the emitter used to require, and what the wire never carries.
+		// The bare variant - what the emitter used to require, and what the wire never carries.
 		expect(accepts("petWithEnvelopeSchema", { name: "W", meow: true })).toBe(false);
 	});
 
@@ -95,8 +95,8 @@ describe("a discriminated union validates the shape that goes on the wire", () =
 		 * declares `kind`, so the document publishes it as required and the validator enforces exactly
 		 * what the contract states.
 		 *
-		 * ⚠️ **The source check is the point.** Injecting the property anyway is behaviourally
-		 * identical, so no amount of parsing values can tell the two apart — which is precisely how
+		 * **The source check is the point.** Injecting the property anyway is behaviourally
+		 * identical, so no amount of parsing values can tell the two apart - which is precisely how
 		 * the compensating version survived once already.
 		 */
 		expect(accepts("releaseSchema", { kind: "part", amount: 5 })).toBe(true);

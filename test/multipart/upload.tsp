@@ -6,7 +6,7 @@ using Http;
  * Multipart bodies, in the shapes that decide whether one is validated at all.
  *
  * `requestBodyOf` returned a type only for `bodyKind === "single"`, so every multipart operation was
- * mounted with **no body validator** — not refused, not diagnosed, silently unchecked.
+ * mounted with **no body validator** - not refused, not diagnosed, silently unchecked.
  */
 @service(#{ title: "multipart" })
 namespace Multipart;

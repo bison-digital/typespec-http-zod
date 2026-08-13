@@ -7,13 +7,13 @@ import { compileEmittedSet } from "./support/emitted-set.js";
 /**
  * **Every call in the generated Zod must be derivable from the document.**
  *
- * ⚠️ **This is the assertion the governing rule always claimed and did not have — twice.** "Nothing
+ * **This is the assertion the governing rule always claimed and did not have - twice.** "Nothing
  * in the runtime validator is unsayable in the document" sat in the original emitter's plan for its
  * entire life, cited constantly, never built. It was eventually built there; then this package was
  * extracted without it, and the README went on claiming the class was asserted rather than trusted.
  *
  * That is the worst arrangement available: a rule everybody cites, nothing checks, and which
- * therefore drifts exactly as far as attention lapses. It matters more now, not less —
+ * therefore drifts exactly as far as attention lapses. It matters more now, not less -
  * `z.preprocess` is admitted for collection formats, and an unenforced rule with a fresh exception
  * is how a dialect starts.
  *
@@ -27,13 +27,13 @@ const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const NOT_DERIVABLE = /\.(refine|superRefine|transform|catch|pipe|brand)\(/g;
 
 /**
- * The permitted `z.preprocess` shapes — each written as the only form it may take.
+ * The permitted `z.preprocess` shapes - each written as the only form it may take.
  *
  * Every one of these undoes a TRANSPORT ENCODING before validation, so the document's own schema and
- * every constraint on it still run afterwards. A `preprocess` doing anything else — coercing,
- * defaulting, renaming — is still refused, because the document does not say it.
+ * every constraint on it still run afterwards. A `preprocess` doing anything else - coercing,
+ * defaulting, renaming - is still refused, because the document does not say it.
  *
- * ⚠️ **The line between "decoding" and "coercing" is whether an invalid value can become valid.**
+ * **The line between "decoding" and "coercing" is whether an invalid value can become valid.**
  * `z.coerce.number()` is the forbidden thing and it is one character of effort: `Number("")` is `0`,
  * so `?limit=` would satisfy a required integer that the document forbids. Every decoder below passes
  * a malformed value through UNCHANGED, so it fails against the published schema and reports the error
@@ -47,8 +47,8 @@ const DELIMITER_SPLIT =
 /**
  * A path, query or header scalar decoded from the only thing HTTP can carry: text.
  *
- * ⚠️ **`type: integer` on a query parameter describes the DECODED value, not the wire.** Without this
- * the emitted `z.number().int()` met `"1"` and refused it — measured against a Petstore server under
+ * **`type: integer` on a query parameter describes the DECODED value, not the wire.** Without this
+ * the emitted `z.number().int()` met `"1"` and refused it - measured against a Petstore server under
  * `wrangler dev`, `GET /pet/1` answered 400 to every conformant caller while `GET /user/zach` answered
  * 200. Same class as the split above: the transport carries text, the document describes the value.
  */
@@ -62,8 +62,8 @@ const SCALAR_DECODE = [
  * A `content-type` header reduced to the media type, discarding the parameters the document does not
  * mention.
  *
- * ⚠️ **Refusing parameters is enforcing something the document cannot state**, and it made every
- * multipart request fail — the boundary parameter RFC 2046 requires is exactly what the literal
+ * **Refusing parameters is enforcing something the document cannot state**, and it made every
+ * multipart request fail - the boundary parameter RFC 2046 requires is exactly what the literal
  * refused. Both spellings are permitted: the lowercasing one applies when the declared literal is
  * itself lowercase, which is every literal openapi3 publishes across this corpus.
  */
@@ -87,9 +87,9 @@ describe("the generated validator says only what the document can say", () => {
 
 	it("has emitted output to inspect at all", () => {
 		/**
-		 * ⚠️ **Every floor in this file was recalibrated once against a NARROWED sweep and left there
+		 * **Every floor in this file was recalibrated once against a NARROWED sweep and left there
 		 * after the breadth was restored.** For a while these suites compiled a handful of local
-		 * fixtures — 46 files — instead of the whole corpus, and the floors were lowered to fit; the
+		 * fixtures - 46 files - instead of the whole corpus, and the floors were lowered to fit; the
 		 * split floor was cut from 5 to 3. Restoring the corpus took the sweep back to 277 files and
 		 * nobody put the numbers back, so four floors sat an order of magnitude under what was actually
 		 * being measured and would have gone on passing through almost any regression.
@@ -105,7 +105,7 @@ describe("the generated validator says only what the document can say", () => {
 	it("uses no Zod call that enforces something the document cannot state", () => {
 		/**
 		 * Empty, not a count. An allowance that survives the thing it allowed has stopped guarding
-		 * anything — which is why the original wrote this as a number first: reaching zero had to fail
+		 * anything - which is why the original wrote this as a number first: reaching zero had to fail
 		 * here rather than pass quietly.
 		 */
 		const offenders = files.flatMap((file) => {
@@ -135,8 +135,8 @@ describe("the generated validator says only what the document can say", () => {
 
 	it("finds the scalar decodes it is meant to permit", () => {
 		/**
-		 * ⚠️ **Its own floor, separate from the split's.** Folding both into one total would let the
-		 * decodes fall to zero while the splits held the number up — and zero decodes is precisely the
+		 * **Its own floor, separate from the split's.** Folding both into one total would let the
+		 * decodes fall to zero while the splits held the number up - and zero decodes is precisely the
 		 * state this package shipped in, with 29 numeric query and header parameters across the corpus
 		 * refusing every conformant request.
 		 */
@@ -149,7 +149,7 @@ describe("the generated validator says only what the document can say", () => {
 
 	it("finds the media type decodes it is meant to permit", () => {
 		/**
-		 * ⚠️ **Its own floor again, and it has to be.** 78 `content-type` validators across the corpus
+		 * **Its own floor again, and it has to be.** 78 `content-type` validators across the corpus
 		 * were emitted as bare literals; seventeen of them refused every syntactically valid multipart
 		 * request, because the boundary parameter RFC 2046 requires is not in the literal. A shared
 		 * total would let this fall back to zero while the other decodes held the number up.
@@ -163,15 +163,15 @@ describe("the generated validator says only what the document can say", () => {
 
 	it("enforces no `format`, which is a DECISION and is now checked rather than counted", () => {
 		/**
-		 * ⚠️ **The document's `format` is an annotation, not an assertion** — JSON Schema 2020-12 says
-		 * so — and a validator that turns one into a check enforces something the contract does not
+		 * **The document's `format` is an annotation, not an assertion** - JSON Schema 2020-12 says
+		 * so - and a validator that turns one into a check enforces something the contract does not
 		 * state. That is the governing rule, and the emitter's compliance with it was a *number*: 133
 		 * annotations counted as unenforced, which says what did not happen rather than what may not.
 		 *
 		 * A number cannot fail. This can: any Zod call that derives a check from a format is refused as
 		 * a class, so the decision holds by construction instead of by whoever reads the baseline next.
 		 *
-		 * ⚠️ **Not an argument that `format` should never be enforced.** It is an argument that turning
+		 * **Not an argument that `format` should never be enforced.** It is an argument that turning
 		 * it on is a deliberate change to what this package claims, and should break a test rather than
 		 * move a counter.
 		 */
@@ -187,9 +187,9 @@ describe("the generated validator says only what the document can say", () => {
 
 	it("ships no decorator of its own for a spec to depend on", () => {
 		/**
-		 * ⚠️ **The other half, and without it the arm above can be satisfied by a spec that simply
-		 * stopped using the decorator.** Four existed in this emitter's ancestor — `@trimmed`, `@loose`,
-		 * `@externalValues`, `@refine` — and each let a spec state something `@typespec/openapi3` could
+		 * **The other half, and without it the arm above can be satisfied by a spec that simply
+		 * stopped using the decorator.** Four existed in this emitter's ancestor - `@trimmed`, `@loose`,
+		 * `@externalValues`, `@refine` - and each let a spec state something `@typespec/openapi3` could
 		 * not publish, so the emitted validator enforced a rule no caller reading the contract could see.
 		 *
 		 * Asserted against the package's own TypeSpec entry point, because that is the only thing a

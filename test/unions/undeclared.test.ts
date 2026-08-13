@@ -6,7 +6,7 @@ import { compileFixture } from "../support/compile-fixture.js";
  * **A construct the document cannot express honestly is REFUSED, not compensated for.**
  *
  * This emitter once injected the missing discriminator itself. The validator was right, the document
- * was wrong, and the gap was booked as a "declared divergence" — a warning on the union, a committed
+ * was wrong, and the gap was booked as a "declared divergence" - a warning on the union, a committed
  * list in the baseline, a citation of the OpenAPI rule openapi3 breaks. All of that was true, and
  * all of it beside the point: it enforced a rule no published contract stated, which is the same
  * defect as the `@refine` predicate this effort exists to delete. Being right about the wire does
@@ -32,7 +32,7 @@ describe("a discriminator the document cannot publish is refused", () => {
 		/**
 		 * The general form of the rule, and the reason this arm outlives the case above. A warning from
 		 * this emitter would mean "the output is knowingly not what the document says, and we are
-		 * shipping it anyway" — the exact compromise that was just removed. There should be none.
+		 * shipping it anyway" - the exact compromise that was just removed. There should be none.
 		 */
 		const compiled = await compileFixture(here, "undeclared");
 		const ours = compiled.diagnostics.filter(

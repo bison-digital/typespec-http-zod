@@ -16,7 +16,7 @@ import {
  * shape. Nothing else tests them: they are exercised only through the corpus, and a describer that
  * quietly returns nothing makes every arm downstream pass by finding no disagreements to report.
  *
- * ⚠️ **That is not hypothetical — it happened here.** The constraint arm reported zero divergences
+ * **That is not hypothetical - it happened here.** The constraint arm reported zero divergences
  * across 230 properties and was believed. It was extracting **zero constraints from either side**,
  * because the corpus declares almost none: its only `@minValue`/`@maxValue` sit on a `@statusCode`
  * property, which is HTTP metadata and never reaches a body schema. The arm was measuring nothing
@@ -74,7 +74,7 @@ describe("describeZodObject reads what the validator will really do", () => {
 		);
 		expect(shape?.properties.minText?.constraints).toEqual({ minLength: 1 });
 		expect(shape?.properties.maxText?.constraints).toEqual({ maxLength: 5 });
-		// The regex SOURCE, without the `/` delimiters `String(regexp)` would add — the document has no
+		// The regex SOURCE, without the `/` delimiters `String(regexp)` would add - the document has no
 		// equivalent of them, and including them reported every pattern as a disagreement. This test
 		// asserted the delimited form until the differential caught it on a real spec.
 		expect(shape?.properties.patterned?.constraints).toEqual({ pattern: "^a+$" });
@@ -126,16 +126,16 @@ describe("describeDocumentObject reads what the contract really promises", () =>
 
 	it("is undefined for a UNION, which is not a plain object", () => {
 		// `oneOf`/`anyOf` describe a choice between shapes; there is no single set of properties to
-		// compare. `allOf` is a different keyword expressing a different thing — see below.
+		// compare. `allOf` is a different keyword expressing a different thing - see below.
 		expect(describeDocumentObject({ anyOf: [{ type: "string" }] })).toBeUndefined();
 		expect(describeDocumentObject(object({ oneOf: [{ type: "string" }] }))).toBeUndefined();
 		expect(describeDocumentObject({ type: "string" })).toBeUndefined();
 	});
 
 	/**
-	 * ⚠️ **This block replaced an assertion that `allOf` was undefined too**, justified in its own
-	 * comment as "an inheritance chain… comparing two different things". That reasoning is what hid
-	 * 28 of 226 object components from the differential — not as divergences, as absences. The
+	 * **This block replaced an assertion that `allOf` was undefined too**, justified in its own
+	 * comment as "an inheritance chain... comparing two different things". That reasoning is what hid
+	 * 28 of 226 object components from the differential - not as divergences, as absences. The
 	 * document seals a derived model with `unevaluatedProperties`, a keyword chosen precisely because
 	 * it sees *through* `allOf`, so the inherited properties are part of what the model declares.
 	 */
@@ -169,7 +169,7 @@ describe("describeDocumentObject reads what the contract really promises", () =>
 			expect(Object.keys(shape?.properties ?? {}).toSorted()).toEqual(["name", "note", "own"]);
 			expect(shape?.properties.name?.required).toBe(true);
 			expect(shape?.properties.note?.required).toBe(false);
-			// The derived model's own seal still decides openness — inheritance does not open it up.
+			// The derived model's own seal still decides openness - inheritance does not open it up.
 			expect(shape?.openness).toBe("sealed");
 		});
 
@@ -253,7 +253,7 @@ describe("describeDocumentObject reads what the contract really promises", () =>
 					exclusiveMaximum: 8,
 					minItems: 2,
 					maxItems: 3,
-					// Deliberately ignored — an annotation, not an assertion.
+					// Deliberately ignored - an annotation, not an assertion.
 					format: "int32",
 				},
 			},
@@ -274,7 +274,7 @@ describe("describeDocumentObject reads what the contract really promises", () =>
 	it("reads a property's constraints THROUGH the scalar it references", () => {
 		// A named scalar is where TypeSpec puts a reusable `@pattern`, and the emitter inlines it at
 		// every use. Reading only what is written on the property compares our inlined copy against
-		// nothing — which left the arm seeing 2 constraints in total and calling it agreement.
+		// nothing - which left the arm seeing 2 constraints in total and calling it agreement.
 		const trimmed: JsonSchema = { type: "string", pattern: "^\\S+$" };
 		const resolve = (ref: string): JsonSchema | undefined =>
 			ref === "#/components/schemas/Trimmed" ? trimmed : undefined;
@@ -340,7 +340,7 @@ describe("describes a POLYMORPHIC component as a choice, not as a shape", () => 
 
 	it("is undefined for a discriminator that maps NOWHERE, which is still an object", () => {
 		// `@discriminator` on a base nobody extends. openapi3 leaves it an ordinary object, and a union
-		// over zero options would validate nothing — so both sides must keep treating it as a shape.
+		// over zero options would validate nothing - so both sides must keep treating it as a shape.
 		expect(
 			describeDocumentDiscriminator({ type: "object", discriminator: { propertyName: "kind" } }),
 		).toBeUndefined();
@@ -388,8 +388,8 @@ describe("reads what a property IS, and says so only when it can", () => {
 
 	it("leaves the kind ABSENT when neither artefact can name one", () => {
 		/**
-		 * ⚠️ **Absent must mean unreadable, never "agreed".** The first cut guessed `"unknown"` for
-		 * these and reported 17 disagreements that were the describer's own blind spots — a real union
+		 * **Absent must mean unreadable, never "agreed".** The first cut guessed `"unknown"` for
+		 * these and reported 17 disagreements that were the describer's own blind spots - a real union
 		 * has no single JSON Schema type, and an unresolvable `$ref` has none at all.
 		 */
 		expect(
@@ -420,12 +420,12 @@ describe("reads what a property IS, and says so only when it can", () => {
 /**
  * **The empty schema is a statement, and both artefacts must say the same word for it.**
  *
- * ⚠️ This is the arm the harness did not have, and its absence was measurable: a validator that
+ * This is the arm the harness did not have, and its absence was measurable: a validator that
  * OVER-constrains a value the document leaves open was invisible. The document side read `{}` as
  * *unreadable* and skipped; the skip then counted as coverage. Typing binary multipart parts as
  * `z.string()` reddened three behavioural arms and none of this suite.
  *
- * Under-constraining was always caught — document `string` against validator `any` reads on both
+ * Under-constraining was always caught - document `string` against validator `any` reads on both
  * sides. The blindness was one-directional, which is exactly why nothing noticed it.
  */
 describe("an unconstrained value is read as a statement, not as a failure to read", () => {
@@ -444,7 +444,7 @@ describe("an unconstrained value is read as a statement, not as a failure to rea
 		expect(kindOf({})).not.toBe(describeZodObject(z.object({ a: z.string() }))?.properties.a?.kind);
 	});
 
-	it("treats annotations as annotations — they assert nothing", () => {
+	it("treats annotations as annotations - they assert nothing", () => {
 		// `contentMediaType` is what openapi3 publishes for an octet-stream body, and `format` is an
 		// annotation rather than an assertion under 2020-12. Neither narrows the value.
 		expect(kindOf({ description: "anything at all" })).toBe("any");
@@ -453,12 +453,12 @@ describe("an unconstrained value is read as a statement, not as a failure to rea
 
 	it("does NOT read a structural keyword as `any`, even with no `type`", () => {
 		/**
-		 * The mirror-image mistake, and the more dangerous one: reading `{properties: …}` as "anything
+		 * The mirror-image mistake, and the more dangerous one: reading `{properties: ...}` as "anything
 		 * goes" would invent agreement with every validator that exists.
 		 *
-		 * ⚠️ **These come back UNREADABLE, not `"object"`/`"array"`.** Inferring the type from a
+		 * **These come back UNREADABLE, not `"object"`/`"array"`.** Inferring the type from a
 		 * structural keyword would be a new inference this arm has not earned, and openapi3 emits an
-		 * explicit `type` alongside them in every case measured — so the conservative answer costs no
+		 * explicit `type` alongside them in every case measured - so the conservative answer costs no
 		 * coverage. What the arm guarantees is only that none of these reads as {@link ANY}, and that
 		 * is asserted directly rather than through a value that could drift.
 		 */
@@ -491,7 +491,7 @@ describe("an unconstrained value is read as a statement, not as a failure to rea
 		expect(describeZodObject(z.object({ a: z.array(z.unknown()) }))?.properties.a?.element).toBe(
 			"any",
 		);
-		// …and the disagreement it makes visible.
+		// ...and the disagreement it makes visible.
 		expect(elementOf({ type: "array", items: {} })).not.toBe(
 			describeZodObject(z.object({ a: z.array(z.string()) }))?.properties.a?.element,
 		);

@@ -7,7 +7,7 @@ using Http;
  *
  * A discriminated union is a choice between **wrappings** of its variants, not between the variants
  * themselves. Ignoring the wrapping produced `z.discriminatedUnion("kind", [catSchema, dogSchema])`
- * over models that carry no `kind` at all — a union that matches nothing, on every polymorphic
+ * over models that carry no `kind` at all - a union that matches nothing, on every polymorphic
  * endpoint, invisible because the differential read a discriminated component as an object.
  */
 @service(#{ title: "unions" })
@@ -38,10 +38,10 @@ union PetWithCustomNames {
 }
 
 /**
- * Variants that declare the discriminator THEMSELVES — the only spelling of `envelope: "none"` this
+ * Variants that declare the discriminator THEMSELVES - the only spelling of `envelope: "none"` this
  * emitter accepts.
  *
- * For this shape openapi3's bare `oneOf` validates the wire exactly, so nothing should be injected —
+ * For this shape openapi3's bare `oneOf` validates the wire exactly, so nothing should be injected -
  * and injecting anyway is behaviourally identical, which is precisely why it needs a test rather
  * than an eyeball.
  */

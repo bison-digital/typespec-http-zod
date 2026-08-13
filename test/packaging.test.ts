@@ -10,9 +10,9 @@ import { DEFAULT_RUNTIME_MODULE } from "../src/index.js";
 /**
  * **What a stranger gets when they install this package.**
  *
- * ⚠️ **Every other test here runs inside the checkout, where that question cannot be asked.** A
+ * **Every other test here runs inside the checkout, where that question cannot be asked.** A
  * package resolves its own devDependencies, so a source file importing something it never declared
- * works perfectly — right up until somebody installs it on its own and gets `Cannot find package`.
+ * works perfectly - right up until somebody installs it on its own and gets `Cannot find package`.
  * Measured before an arm like this existed: the emitter imported `resolveOperationId` from
  * `@typespec/openapi`, which appeared in `devDependencies` and in no `peerDependencies` at all. The
  * published package would not have run.
@@ -20,7 +20,7 @@ import { DEFAULT_RUNTIME_MODULE } from "../src/index.js";
  * The generated OUTPUT has the same problem one level out: it imports `zod` into the consumer's
  * project, so that is the consumer's requirement too, and saying so is this manifest's job.
  *
- * ⚠️ **Asserted as a CLASS** — every specifier the source and the output reference — rather than as a
+ * **Asserted as a CLASS** - every specifier the source and the output reference - rather than as a
  * list somebody remembers to extend.
  */
 
@@ -38,10 +38,10 @@ const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf
 	devDependencies?: Record<string, string>;
 };
 
-/** `@scope/name/sub` → `@scope/name`; `node:fs` and relative paths are not packages. */
+/** `@scope/name/sub` -> `@scope/name`; `node:fs` and relative paths are not packages. */
 function packageOf(specifier: string): string | undefined {
 	if (specifier.startsWith(".") || specifier.startsWith("node:")) return undefined;
-	// An emitted import line is itself a template literal, so its specifier can be a placeholder —
+	// An emitted import line is itself a template literal, so its specifier can be a placeholder -
 	// `${runtimeModule}` is decided by the consumer's option, not by this manifest.
 	if (specifier.includes("${")) return undefined;
 	const parts = specifier.split("/");
@@ -54,7 +54,7 @@ function sourceFiles(dir: string): string[] {
 		.map((entry) => join(dir, entry));
 }
 
-/** Static `from "x"` and guarded `import("x")` alike — both resolve at run time. */
+/** Static `from "x"` and guarded `import("x")` alike - both resolve at run time. */
 function specifiersIn(source: string): string[] {
 	return [
 		...[...source.matchAll(/^import\s[^"']*from\s*"([^"]+)"/gm)].map((match) => match[1] ?? ""),
@@ -88,12 +88,12 @@ describe("the package declares what it needs to run outside this checkout", () =
 
 	it("declares every package the GENERATED output imports", () => {
 		/**
-		 * ⚠️ **The output's imports are the consumer's problem, and the consumer learns about them from
+		 * **The output's imports are the consumer's problem, and the consumer learns about them from
 		 * this manifest.** Generated validators importing `zod` into a project that does not have it
 		 * fail at their build, naming a package they never chose.
 		 */
 		/**
-		 * ⚠️ **Compiled by this suite, into a directory only this suite writes.** It used to walk
+		 * **Compiled by this suite, into a directory only this suite writes.** It used to walk
 		 * `test/` for whatever other suites had emitted, which made it read the previous run's build
 		 * on a populated tree and nothing at all on a fresh clone. See `support/emitted-set.ts`.
 		 */
@@ -115,8 +115,8 @@ describe("the package declares what it needs to run outside this checkout", () =
 	/**
 	 * **The `runtime-module` DEFAULT, which no compile in this suite can exercise.**
 	 *
-	 * ⚠️ **This branch was ungraded across the entire suite, and it shipped wrong in the sibling
-	 * package.** Every fixture overrides `runtime-module` — it has to, because
+	 * **This branch was ungraded across the entire suite, and it shipped wrong in the sibling
+	 * package.** Every fixture overrides `runtime-module` - it has to, because
 	 * `typespec-http-zod/runtime` is correct for a consumer and unresolvable from this package's own
 	 * `.out/`, so a suite that left it alone would emit files it could not load. The consequence is
 	 * that what a consumer who configures NOTHING gets was decided by a constant nothing read.
@@ -134,7 +134,7 @@ describe("the package declares what it needs to run outside this checkout", () =
 		it("defaults to a subpath this package actually publishes", () => {
 			const owner = packageOf(DEFAULT_RUNTIME_MODULE);
 			expect(owner).toBe(manifest.name);
-			/** `typespec-http-zod/runtime` → the `./runtime` key `exports` has to carry. */
+			/** `typespec-http-zod/runtime` -> the `./runtime` key `exports` has to carry. */
 			const subpath = `.${DEFAULT_RUNTIME_MODULE.slice(manifest.name.length)}`;
 			expect(Object.keys(manifest.exports ?? {})).toContain(subpath);
 		});
@@ -143,7 +143,7 @@ describe("the package declares what it needs to run outside this checkout", () =
 			/**
 			 * The fixture points `runtime-module` at a relative path to `src/runtime.ts`, and a consumer
 			 * gets the published subpath. Both spell the same module, so the NAMES are comparable either
-			 * way — which is the half that broke in the sibling, independently of resolution.
+			 * way - which is the half that broke in the sibling, independently of resolution.
 			 */
 			const runtimeImports = emitted.flatMap((file) => [
 				...readFileSync(file, "utf8").matchAll(
@@ -177,9 +177,9 @@ describe("the package declares what it needs to run outside this checkout", () =
 
 	it("marks as optional exactly the peers behind a guarded import", () => {
 		/**
-		 * ⚠️ **A guarded `import()` that is a REQUIRED peer forces every consumer to install it.**
+		 * **A guarded `import()` that is a REQUIRED peer forces every consumer to install it.**
 		 * `@typespec/versioning` and `@typespec/streams` are resolved inside `try`/`catch` precisely so a
-		 * spec declaring neither needs neither — the same treatment `@typespec/openapi3` gives them.
+		 * spec declaring neither needs neither - the same treatment `@typespec/openapi3` gives them.
 		 * Marking one and not the other is how that promise quietly stops being true.
 		 */
 		const guarded = new Set<string>();
@@ -198,7 +198,7 @@ describe("the package declares what it needs to run outside this checkout", () =
 
 	it("keeps the runtime free of every build-time import", () => {
 		/**
-		 * ⚠️ **`./runtime` is what an APPLICATION imports.** The main entry is an emitter and pulls in
+		 * **`./runtime` is what an APPLICATION imports.** The main entry is an emitter and pulls in
 		 * `@typespec/compiler`; an Express service reading the response arms this package emitted must
 		 * not drag a compiler into its runtime graph for the sake of two declarations.
 		 */
@@ -214,12 +214,12 @@ describe("the package declares what it needs to run outside this checkout", () =
 describe("the package is configured to publish the way it claims", () => {
 	it("declares public access and provenance", () => {
 		/**
-		 * ⚠️ **Provenance is what lets a stranger verify the tarball came from this commit**, via a
+		 * **Provenance is what lets a stranger verify the tarball came from this commit**, via a
 		 * signed attestation npm produces at publish time. It is off by default, its absence is
-		 * invisible on the published page, and nobody notices until somebody wants to check — which is
+		 * invisible on the published page, and nobody notices until somebody wants to check - which is
 		 * the shape of thing worth asserting rather than remembering.
 		 *
-		 * ⚠️ **`access: "public"` matters even for an unscoped name.** It is the default today; stating
+		 * **`access: "public"` matters even for an unscoped name.** It is the default today; stating
 		 * it means a later rename to a scoped package cannot publish privately by accident.
 		 */
 		expect(manifest.publishConfig?.access).toBe("public");
@@ -228,8 +228,8 @@ describe("the package is configured to publish the way it claims", () => {
 
 	it("has a release workflow that can only publish deliberately", () => {
 		/**
-		 * ⚠️ **`id-token: write` is not optional.** Provenance is an OIDC exchange, so a workflow
-		 * without that permission fails the publish outright rather than quietly publishing unsigned —
+		 * **`id-token: write` is not optional.** Provenance is an OIDC exchange, so a workflow
+		 * without that permission fails the publish outright rather than quietly publishing unsigned -
 		 * which is the better failure, but only if the permission is there to begin with.
 		 *
 		 * The trigger is asserted too: publishing must follow a tag or a deliberate dispatch, never a
@@ -248,8 +248,8 @@ describe("the package is publishable", () => {
 
 	beforeAll(() => {
 		/**
-		 * ⚠️ **`pnpm pack` is the only thing that answers "what actually ships".** `files` is a set of
-		 * globs, and a glob that stops matching is indistinguishable from one that matches nothing —
+		 * **`pnpm pack` is the only thing that answers "what actually ships".** `files` is a set of
+		 * globs, and a glob that stops matching is indistinguishable from one that matches nothing -
 		 * an entry point outside it installs as a missing module. Reading the real tarball is the
 		 * difference between checking the manifest and checking the package.
 		 */
@@ -285,10 +285,10 @@ describe("the package is publishable", () => {
 
 	it("ships no test material", () => {
 		/**
-		 * ⚠️ **Test material in a published package becomes de-facto public API, delivered to every
+		 * **Test material in a published package becomes de-facto public API, delivered to every
 		 * installer forever.** `@typespec/openapi3` excludes `dist/test/**` explicitly; so does this.
 		 * It is also why the shared reference fixture is vendored into the other repository rather than
-		 * shipped from here — see `test/reference/PROVENANCE.md`.
+		 * shipped from here - see `test/reference/PROVENANCE.md`.
 		 */
 		const shipped: string[] = [];
 		const walk = (dir: string, prefix: string): void => {
@@ -315,9 +315,9 @@ describe("the package is publishable", () => {
 
 	it("declares no dependency by path", () => {
 		/**
-		 * ⚠️ **A `link:` or `file:` range is a local checkout, and publishing one breaks every
+		 * **A `link:` or `file:` range is a local checkout, and publishing one breaks every
 		 * installer.** This package has no runtime dependencies today; the arm exists because the
-		 * arrangement that develops it — two sibling repositories linked together — is exactly the one
+		 * arrangement that develops it - two sibling repositories linked together - is exactly the one
 		 * that invites the mistake, and it costs nothing to hold the line before there is something to
 		 * hold it on.
 		 */

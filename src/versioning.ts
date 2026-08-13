@@ -5,9 +5,9 @@ import { unsafe_mutateSubgraphWithNamespace } from "@typespec/compiler/experimen
 /**
  * **Serve the version the service is on, not every version it has ever had.**
  *
- * ⚠️ **The emitter used to emit the UNION of all versions.** Measured on
+ * **The emitter used to emit the UNION of all versions.** Measured on
  * `versioning/removed`: v2 deletes `POST /v1` and `POST /interface-v1/v1`, and both were mounted
- * anyway — 582 routes against the 580 the document declares. A service built on that output serves
+ * anyway - 582 routes against the 580 the document declares. A service built on that output serves
  * endpoints its current version does not have, validates bodies against properties a later version
  * removed, and does all of it while the document says otherwise.
  *
@@ -15,7 +15,7 @@ import { unsafe_mutateSubgraphWithNamespace } from "@typespec/compiler/experimen
  * `v1, v2preview, v2`, the documents sort alphabetically, and the differential compared us against
  * `openapi.v2preview.json`. Fixing WHICH document is read is what made this visible at all.
  *
- * ⚠️ **`@typespec/versioning` is an OPTIONAL peer, behind a guarded `import()`** — the same treatment
+ * **`@typespec/versioning` is an OPTIONAL peer, behind a guarded `import()`** - the same treatment
  * `@typespec/streams` gets, and for the same reason: a spec that declares no versions must not need
  * the package installed. `@typespec/openapi3` resolves it exactly this way (`versioning-module.js`),
  * so a service is versioned for us precisely when it is versioned for the document we are judged
@@ -55,14 +55,14 @@ export interface ServiceSnapshot {
 /**
  * Every service to emit, each already projected to its current version.
  *
- * ⚠️ **The LAST snapshot, not a merge and not a choice.** `getVersioningMutators` returns snapshots
- * in declared order — which is the only order that means anything, since a version name sorts
+ * **The LAST snapshot, not a merge and not a choice.** `getVersioningMutators` returns snapshots
+ * in declared order - which is the only order that means anything, since a version name sorts
  * however its author spelled it (`v2preview` sorts after `v2`). The last one is what the service
  * currently serves, and one schema set can only describe one version.
  *
  * Serving an older version would be a legitimate thing to want and is deliberately NOT offered here:
  * it needs an option, a name for the emitted directory, and an answer for what the contracts package
- * exports. Emitting the union — which is what happened before — is not that feature, it is the
+ * exports. Emitting the union - which is what happened before - is not that feature, it is the
  * absence of this one.
  */
 export function serviceSnapshots(

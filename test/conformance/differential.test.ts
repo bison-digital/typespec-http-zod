@@ -29,25 +29,25 @@ import {
  * Every other test in this package was written by whoever wrote the emitter, against fixtures they
  * also chose. This one is not. Both artefacts come out of ONE compile of a spec we did not write,
  * and the assertion is that they say the same thing about the same models. Where they differ, the
- * document is right by definition — it is the contract callers read, and it is produced by the
+ * document is right by definition - it is the contract callers read, and it is produced by the
  * reference implementation.
  *
- * ⚠️ **"It compiled" is not evidence, and this corpus proves it on itself.** Before this suite
- * existed, `serialization/encoded-name/json` — whose scenario doc reads "Testing that you send the
- * right JSON name on the wire" — compiled clean and emitted `defaultName` where the document
+ * **"It compiled" is not evidence, and this corpus proves it on itself.** Before this suite
+ * existed, `serialization/encoded-name/json` - whose scenario doc reads "Testing that you send the
+ * right JSON name on the wire" - compiled clean and emitted `defaultName` where the document
  * requires `wireName`. It sat in the green column. An exit code is not an oracle; a second artefact
  * built from the same source is.
  *
  * **The baseline may only shrink.** Both directions are asserted: a divergence not in the baseline
  * fails as a regression, and a baseline entry that no longer diverges fails as stale. That second
- * arm is what stops the file becoming a place where defects go to be forgotten — fixing one makes
+ * arm is what stops the file becoming a place where defects go to be forgotten - fixing one makes
  * this suite red until the entry is deleted.
  */
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const baselinePath = join(here, "baseline.json");
 
-/** `Property.JsonEncodedNameModel` → `jsonEncodedNameModelSchema`. */
+/** `Property.JsonEncodedNameModel` -> `jsonEncodedNameModelSchema`. */
 function identifierFor(component: string): string {
 	// openapi3 qualifies a component with its namespace when the bare name is ambiguous; the emitter
 	// names declarations from the model alone. Stripping is safe only while no two components we
@@ -92,10 +92,10 @@ const PARAMETER_TARGETS = [
 /**
  * A location's parameters, as the object schema they collectively describe.
  *
- * ⚠️ **This is the whole trick, and it is why there is no second comparison engine here.** A
+ * **This is the whole trick, and it is why there is no second comparison engine here.** A
  * validator for `?a=1&b=2` is an object with properties `a` and `b`; so is the document's list of
  * query parameters. Reshaping one into the other lets the existing `compareShapes` ask every
- * question it already asks of a component — names, required, type, nullability, constraints — of a
+ * question it already asks of a component - names, required, type, nullability, constraints - of a
  * surface it had never been pointed at.
  *
  * `undefined` when the location has no parameters, which is different from having none we can read.
@@ -104,7 +104,7 @@ const PARAMETER_TARGETS = [
  * Headers OpenAPI states somewhere other than `parameters`, so their absence from that list is not
  * the document declining to constrain them.
  *
- * ⚠️ **Excluded from the comparison, and COUNTED — never silently dropped.** `@header contentType`
+ * **Excluded from the comparison, and COUNTED - never silently dropped.** `@header contentType`
  * reaches the document as the KEYS of `requestBody.content`, and `accept` as the keys of a
  * response's `content`. Reading their absence from `parameters` as "the document says nothing" is
  * reading absence from a channel that cannot report presence: the emitter validating them is right,
@@ -112,7 +112,7 @@ const PARAMETER_TARGETS = [
  *
  * The honest consequence is that `content-type` and `accept` validators are still ungraded. That is
  * a smaller hole than the one this arm closes, and `contentHeadersSkipped` keeps it a number rather
- * than an assumption — the fix is to compare them against the `content` keys, which is B10's
+ * than an assumption - the fix is to compare them against the `content` keys, which is B10's
  * neighbourhood.
  */
 const CONTENT_NEGOTIATION_HEADERS = new Set(["content-type", "accept"]);
@@ -127,7 +127,7 @@ function parametersAsSchema(
 	const required: string[] = [];
 	for (const parameter of here) {
 		if (parameter.name === undefined) continue;
-		// ⚠️ BOTH sides must drop these, or the filter creates the disagreement it was added to avoid:
+		// BOTH sides must drop these, or the filter creates the disagreement it was added to avoid:
 		// removing `accept` from the validator alone reported every negotiated route as having the
 		// wrong property names.
 		if (CONTENT_NEGOTIATION_HEADERS.has(parameter.name.toLowerCase())) continue;
@@ -143,8 +143,8 @@ function parametersAsSchema(
 /**
  * The media types a `content-type` or `accept` validator accepts, read from the Zod schema directly.
  *
- * ⚠️ **Read from the schema rather than through the describer, deliberately.** `PropertyShape`
- * reduces a property to what BOTH artefacts can express — a kind, a nullability, a constraint set —
+ * **Read from the schema rather than through the describer, deliberately.** `PropertyShape`
+ * reduces a property to what BOTH artefacts can express - a kind, a nullability, a constraint set -
  * and a media type is none of those. It is a literal string the document states somewhere else
  * entirely, so comparing it needs the values themselves.
  *
@@ -154,9 +154,9 @@ function parametersAsSchema(
 function mediaTypesAccepted(validator: unknown, header: string): readonly string[] | undefined {
 	const def = (validator as { _zod?: { def?: ZodShapeDef } } | undefined)?._zod?.def;
 	/**
-	 * ⚠️ **Looked up case-INSENSITIVELY, because the emitted key is the wire name the spec wrote.**
+	 * **Looked up case-INSENSITIVELY, because the emitted key is the wire name the spec wrote.**
 	 * Measured across the corpus: 84 validators carry `"Content-Type"`, capitalised. HTTP header names
-	 * are case-insensitive per RFC 9110 §5.1, so the emitter is right to keep the spec's spelling —
+	 * are case-insensitive per RFC 9110 section 5.1, so the emitter is right to keep the spec's spelling -
 	 * and a reader that lower-cases its needle finds nothing and reports a clean sweep. This arm
 	 * compared **zero** positions on its first run for exactly that reason, and only the floor said so.
 	 */
@@ -196,7 +196,7 @@ interface ZodShapeDef {
 	readonly entries?: Record<string, unknown>;
 	readonly options?: readonly unknown[];
 	/**
-	 * The schema a `z.preprocess` applies AFTER decoding — see {@link throughDecode}.
+	 * The schema a `z.preprocess` applies AFTER decoding - see {@link throughDecode}.
 	 *
 	 * `z.preprocess(fn, schema)` is a `pipe` in Zod 4, and `out` is where the real schema lives.
 	 */
@@ -206,7 +206,7 @@ interface ZodShapeDef {
 /**
  * Look through a wire decode to the schema the document actually published.
  *
- * ⚠️ **This is the SECOND describer in this file to be blinded by `z.preprocess`, and the first one
+ * **This is the SECOND describer in this file to be blinded by `z.preprocess`, and the first one
  * is recorded in the handover.** A flattened collection parameter read as required because optionality
  * sits outside the wrapper; the fix taught that walker about `pipe.out`, and this walker was never
  * told. When `content-type` validators gained a decode that strips media type parameters, this arm
@@ -225,9 +225,9 @@ function throughDecode(def: ZodShapeDef | undefined): ZodShapeDef | undefined {
 /**
  * The request body's schema, and whether it names a component.
  *
- * ⚠️ **The request body was compared by NOTHING.** The parameter arm grades `path`, `query` and
- * `header`; the response arms grade what an operation answers with. What a caller may SEND — the
- * body, the largest surface of most APIs — had no arm at all. Measured: 28 scalar or array request
+ * **The request body was compared by NOTHING.** The parameter arm grades `path`, `query` and
+ * `header`; the response arms grade what an operation answers with. What a caller may SEND - the
+ * body, the largest surface of most APIs - had no arm at all. Measured: 28 scalar or array request
  * bodies in the corpus alone, none of them compared, and the symmetry with the response side is
  * exactly what made it visible.
  */
@@ -287,8 +287,8 @@ function withoutContentHeaders(
 /**
  * The per-route validator for a document operation, tolerating openapi3's merged ids.
  *
- * ⚠️ **A negotiated route has ONE path entry and several operations behind it**, and openapi3 names
- * it by joining their ids — `SameBody_getAvatarAsPng_SameBody_getAvatarAsJpeg`. No emitted const
+ * **A negotiated route has ONE path entry and several operations behind it**, and openapi3 names
+ * it by joining their ids - `SameBody_getAvatarAsPng_SameBody_getAvatarAsJpeg`. No emitted const
  * carries that name, and looking only for an exact match reported the route as having no validator
  * at all. Every member shares the route, so every member shares its path, query and header
  * validators; the first whose id prefixes the document's serves for the comparison.
@@ -308,7 +308,7 @@ function validatorFor(
 	return undefined;
 }
 
-/** One arm of the emitted `<operationId>Responses` const — what the operation may answer with. */
+/** One arm of the emitted `<operationId>Responses` const - what the operation may answer with. */
 interface EmittedArm {
 	readonly status: number | string;
 	readonly schema?: unknown;
@@ -317,8 +317,8 @@ interface EmittedArm {
 /**
  * The response arms emitted for a document operation: each declared status, and its body's schema.
  *
- * ⚠️ **A negotiated route is SEVERAL operations behind one document entry**, so its arms are the
- * union of its members' — the same merged-id rule `validatorFor` follows, and for the same reason:
+ * **A negotiated route is SEVERAL operations behind one document entry**, so its arms are the
+ * union of its members' - the same merged-id rule `validatorFor` follows, and for the same reason:
  * openapi3 names the merged entry by joining the ids, and no emitted const carries that name.
  * `merged` says whether that happened, because the STATUS set unions honestly across members while
  * the body for a given status does not: each member answers its own media type with its own shape.
@@ -358,9 +358,9 @@ function responseComponentOf(response: DocumentResponse): string | undefined {
 }
 
 /**
- * The response's body schema when it names no component — an INLINE shape.
+ * The response's body schema when it names no component - an INLINE shape.
  *
- * ⚠️ **These were counted and skipped, and the count was 76.** The arm above compares by NAME, and an
+ * **These were counted and skipped, and the count was 76.** The arm above compares by NAME, and an
  * inline schema has none, so the status-to-body mapping was graded while the body's own shape was
  * not. An inline response schema is a real shape this emitter still has to get right; the machinery
  * to compare one is the same machinery the component arm already uses.
@@ -375,7 +375,7 @@ function responseInlineSchema(response: DocumentResponse): JsonSchema | undefine
 	return undefined;
 }
 
-/** Whether the document's response carries a body at all — an empty `content` is a bodyless arm. */
+/** Whether the document's response carries a body at all - an empty `content` is a bodyless arm. */
 function responseHasBody(response: DocumentResponse): boolean {
 	return Object.keys(response.content ?? {}).length > 0;
 }
@@ -383,17 +383,17 @@ function responseHasBody(response: DocumentResponse): boolean {
 /**
  * Every component a payload can actually reach, followed transitively from `paths`.
  *
- * ⚠️ **"The oracle is being unfair to us" is the reasoning to distrust, so this MEASURES rather than
+ * **"The oracle is being unfair to us" is the reasoning to distrust, so this MEASURES rather than
  * argues.** Four of the seven `no-zod-declaration` entries were components no request or response
  * can reach: `MyFlow` is an OAuth2 flow DESCRIPTION that openapi3 publishes as a component while
  * inlining its values into `securitySchemes`, and one spread source is declared without ever
  * appearing in a payload. A validator for those would guard a wire position that does not exist.
  *
- * Reachability is read from `paths` alone — request bodies, responses, parameter schemas — because
+ * Reachability is read from `paths` alone - request bodies, responses, parameter schemas - because
  * that is the definition of "a payload can reach it". Everything unreachable is COUNTED, never
  * silently dropped, so narrowing the gate stays visible as a number.
  *
- * ⚠️ Guessing which ones these were got it wrong: `Model.CompositeRequestOnlyWithBody` looked like a
+ * Guessing which ones these were got it wrong: `Model.CompositeRequestOnlyWithBody` looked like a
  * real missing validator and is not, while two of its neighbours are.
  */
 function componentsReachableFromPaths(document: OpenApiDocument): Set<string> {
@@ -437,13 +437,13 @@ interface Comparison {
 	readonly parametersCompared: number;
 	/** Operations whose declared response statuses were compared. Zero means the response arm is inert. */
 	readonly responsesCompared: number;
-	/** Status→body pairs compared by declared component name. Zero means only the statuses were read. */
+	/** Status->body pairs compared by declared component name. Zero means only the statuses were read. */
 	readonly responseBodiesCompared: number;
 	/** Responses whose body names no component, or whose entry merges several operations. Counted. */
 	readonly negotiatedResponseBodies: number;
 	/** Inline response bodies whose SHAPE is compared, not merely counted. */
 	readonly inlineResponseBodiesCompared: number;
-	/** Bodies neither side reduces to an object shape — a scalar, a stream, a union. */
+	/** Bodies neither side reduces to an object shape - a scalar, a stream, a union. */
 	readonly unreadableResponseBodies: number;
 	/** Non-object response bodies whose top-level KIND is compared. */
 	readonly responseBodyKindsCompared: number;
@@ -451,9 +451,9 @@ interface Comparison {
 	/**
 	 * Content-negotiation headers the parameter arm sets aside, split into the two honest answers.
 	 *
-	 * ⚠️ **`skipped` used to be the only number, and it was a gap dressed as a measurement.** A
-	 * `content-type` validator is not a parameter divergence — OpenAPI states media types through
-	 * `content` KEYS rather than as parameters — so the parameter arm has to remove them. Removing
+	 * **`skipped` used to be the only number, and it was a gap dressed as a measurement.** A
+	 * `content-type` validator is not a parameter divergence - OpenAPI states media types through
+	 * `content` KEYS rather than as parameters - so the parameter arm has to remove them. Removing
 	 * them and counting them left the surface ungraded; removing them and comparing them somewhere
 	 * else is what closes it.
 	 */
@@ -462,7 +462,7 @@ interface Comparison {
 	readonly unreachableComponents: number;
 	/** How many constraint keywords were actually READ, per side. Zero means the arm proved nothing. */
 	readonly constraintsSeen: { document: number; validator: number };
-	/** Document `format` annotations the validator does not enforce — counted, never compared. */
+	/** Document `format` annotations the validator does not enforce - counted, never compared. */
 	readonly unenforcedFormats: number;
 	/** Array items / dictionary values: read vs unreadable. Zero compared means the arm is inert. */
 	/** Places the emitter DECLARED it diverges from the document. Asserted exhaustive; must stay tiny. */
@@ -470,7 +470,7 @@ interface Comparison {
 	readonly elements: { compared: number; skipped: number; unconstrained: number };
 	/** Property types: read vs unreadable. The coarsest fact there is, and unchecked until now. */
 	readonly kinds: { compared: number; skipped: number; unconstrained: number };
-	/** Sources whose document set was reduced to one — versioned services. Counted, not hidden. */
+	/** Sources whose document set was reduced to one - versioned services. Counted, not hidden. */
 	readonly versionedSourcesNarrowed: readonly string[];
 	/** Operations the document declares, and operations we actually mount. */
 	readonly operations: { document: number; emitted: number };
@@ -486,7 +486,7 @@ interface Comparison {
 /**
  * Every operation the document declares.
  *
- * ⚠️ **The assertion whose absence hid the worst defect in this emitter.** The differential compared
+ * **The assertion whose absence hid the worst defect in this emitter.** The differential compared
  * components exhaustively and never once asked whether the ROUTES survived. They largely did not:
  * across the corpus the document declared 540 operations and we emitted 256. A baseline of 62
  * component divergences looked like a manageable list while more than half the surface was missing,
@@ -501,7 +501,7 @@ function operationsInDocument(document: OpenApiDocument): number {
 	return count;
 }
 
-/** `openapi.json`, `openapi.v2.json` — never `schemas.gen.ts`, and never the YAML twin. */
+/** `openapi.json`, `openapi.v2.json` - never `schemas.gen.ts`, and never the YAML twin. */
 const documentsIn = (dir: string): string[] =>
 	readdirSync(dir)
 		.filter((name) => name.startsWith("openapi") && name.endsWith(".json"))
@@ -560,10 +560,10 @@ async function compareEverything(): Promise<Comparison> {
 		scenariosDifferentiated++;
 
 		/**
-		 * ⚠️ **A versioned service emits one document per version; we emit one schema set.**
+		 * **A versioned service emits one document per version; we emit one schema set.**
 		 * Measured on `versioning/added`: the v1 document's `ModelV1` omits `unionProp`, the v2
 		 * document requires it, and we emit the v2 shape. So the latest document is the one we can
-		 * honestly be compared against — and "we serve only the latest version" is a real limitation,
+		 * honestly be compared against - and "we serve only the latest version" is a real limitation,
 		 * recorded here rather than hidden by comparing against whichever file sorted first.
 		 */
 		const documents = documentsIn(compiled.openapiDir);
@@ -573,9 +573,9 @@ async function compareEverything(): Promise<Comparison> {
 			versionedSourcesNarrowed.push(`${scenario.name} (${documents.length} documents)`);
 		}
 		/**
-		 * ⚠️ **The document the emitter corresponds to, chosen by DECLARED version order.**
+		 * **The document the emitter corresponds to, chosen by DECLARED version order.**
 		 *
-		 * This was `documents.at(-1)` — the last filename alphabetically — and for
+		 * This was `documents.at(-1)` - the last filename alphabetically - and for
 		 * `versioning/removed` that is `openapi.v2preview.json`. The spec declares `v1, v2preview, v2`,
 		 * so the current version is v2, and the emitter emits v2. The oracle was comparing correct
 		 * output against a PREVIEW and reporting the difference as our defect. Seven sources are
@@ -600,21 +600,21 @@ async function compareEverything(): Promise<Comparison> {
 
 		const declaredOperations = operationsInDocument(document);
 		/**
-		 * ⚠️ **The generated SERVER, which no oracle had ever read.** `schemas.gen.ts` holds the
+		 * **The generated SERVER, which no oracle had ever read.** `schemas.gen.ts` holds the
 		 * component validators; the per-route path, query and header validators live here, and until
 		 * they were exported nothing outside this file could name one. Two live defects were sitting
-		 * in that gap — a header validator keyed on the TypeSpec name rather than the wire name, and a
+		 * in that gap - a header validator keyed on the TypeSpec name rather than the wire name, and a
 		 * hyphenated path parameter that mounted an unreachable route.
 		 */
 		/**
 		 * **Every operation the document declares, against the validators emitted for it.**
 		 *
-		 * ⚠️ **This arm used to mount the generated Hono server and read `app.routes`.** That was the
+		 * **This arm used to mount the generated Hono server and read `app.routes`.** That was the
 		 * right measurement for a server generator and it is not this package's to make: whether a
 		 * route can be reached is a router's property, and belongs to the emitter that writes one.
 		 *
 		 * What IS this package's is narrower and was the original defect anyway. `collectRoutes` once
-		 * skipped every operation whose success body it could not resolve, silently — measured across
+		 * skipped every operation whose success body it could not resolve, silently - measured across
 		 * the corpus, the document declared 540 operations and 284 produced nothing at all, 282 of them
 		 * merely bodyless. A bodyless success is ordinary HTTP, not an edge case.
 		 *
@@ -627,7 +627,7 @@ async function compareEverything(): Promise<Comparison> {
 		operations.emitted += withArms;
 		if (withArms !== declaredOperations) {
 			/**
-			 * ⚠️ **Not always a defect, and saying so is the point.** openapi3 merges several TypeSpec
+			 * **Not always a defect, and saying so is the point.** openapi3 merges several TypeSpec
 			 * operations onto one document entry when they share a route and negotiate on content type,
 			 * so a negotiated scenario legitimately emits MORE arms than the document has entries. Only
 			 * the other direction is a dropped operation.
@@ -641,14 +641,14 @@ async function compareEverything(): Promise<Comparison> {
 			}
 		}
 
-		/** Lets a property's EFFECTIVE constraints be read through a named scalar — see `shape.ts`. */
+		/** Lets a property's EFFECTIVE constraints be read through a named scalar - see `shape.ts`. */
 		const schemas = document.components?.schemas ?? {};
 		const resolve: RefResolver = (ref) => schemas[ref.replace("#/components/schemas/", "")];
 
 		/**
 		 * **Every parameter the document declares, against the validator that actually guards it.**
 		 *
-		 * ⚠️ **This surface was ungraded for the entire life of the oracle.** The loop below iterates
+		 * **This surface was ungraded for the entire life of the oracle.** The loop below iterates
 		 * `components.schemas`; a parameter schema is not a component, so nothing compared what the
 		 * validator guards a path, a query string or a header. Only route COUNTS were checked, which is
 		 * how a route mounted at the literal string `/things/{thing-id}` passed as present while
@@ -720,8 +720,8 @@ async function compareEverything(): Promise<Comparison> {
 				/**
 				 * **What a caller may SEND, compared against the validator that guards it.**
 				 *
-				 * ⚠️ **This surface had no arm at all.** Parameters were graded, responses were graded, and
-				 * the request body — the largest surface of most APIs — was compared by nothing. A body
+				 * **This surface had no arm at all.** Parameters were graded, responses were graded, and
+				 * the request body - the largest surface of most APIs - was compared by nothing. A body
 				 * the document publishes as a string and the validator requires as an object rejects every
 				 * conformant caller, and would have passed here.
 				 *
@@ -773,8 +773,8 @@ async function compareEverything(): Promise<Comparison> {
 				/**
 				 * **The content-negotiation headers, compared against the KEYS that state them.**
 				 *
-				 * ⚠️ **This surface was counted and not graded.** `@header contentType: "application/json"`
-				 * emits a validator property, and the document declares no such parameter — it declares
+				 * **This surface was counted and not graded.** `@header contentType: "application/json"`
+				 * emits a validator property, and the document declares no such parameter - it declares
 				 * `requestBody.content["application/json"]`. So the parameter arm removes them, which is
 				 * correct, and for a long time that was the end of it: a number called
 				 * `contentHeadersSkipped` that nobody could act on.
@@ -785,7 +785,7 @@ async function compareEverything(): Promise<Comparison> {
 				 * refuses nothing it should and accepts something it should not; the reverse rejects a
 				 * conformant caller.
 				 *
-				 * ⚠️ **`accept` is absent on a NEGOTIATED route, by design.** There it selects which
+				 * **`accept` is absent on a NEGOTIATED route, by design.** There it selects which
 				 * operation answers, so validating it against one member's literal would 400 a
 				 * well-formed request whose real answer is 406. Absent is the correct reading, and only
 				 * a PRESENT validator is compared.
@@ -819,11 +819,11 @@ async function compareEverything(): Promise<Comparison> {
 				}
 
 				/**
-				 * **What the operation may ANSWER with — the surface no oracle had opened.**
+				 * **What the operation may ANSWER with - the surface no oracle had opened.**
 				 *
-				 * ⚠️ Every arm in this file until now graded the request: components, and then path,
-				 * query and header parameters. What the operation is allowed to answer with — which statuses it
-				 * declares and which body each one carries — was compared against nothing, even though
+				 * Every arm in this file until now graded the request: components, and then path,
+				 * query and header parameters. What the operation is allowed to answer with - which statuses it
+				 * declares and which body each one carries - was compared against nothing, even though
 				 * the emitter passes exactly that to `deps.respond` and an application checks its own
 				 * output against it. A status the document declares and the emitter omits is a response
 				 * a runtime cannot validate at all; a status the emitter invents is one the contract
@@ -851,9 +851,9 @@ async function compareEverything(): Promise<Comparison> {
 							);
 						}
 						/**
-						 * ⚠️ **Which BODY each status carries, not merely that the status exists.** The
+						 * **Which BODY each status carries, not merely that the status exists.** The
 						 * arms used to hand every failure the service-wide error schema, so a document
-						 * naming a different component per status was answered with the wrong one — and
+						 * naming a different component per status was answered with the wrong one - and
 						 * because both shapes were separately correct as components, the component walk
 						 * agreed about each of them individually.
 						 *
@@ -878,7 +878,7 @@ async function compareEverything(): Promise<Comparison> {
 							}
 							const component = responseComponentOf(response);
 							/**
-							 * ⚠️ **A NEGOTIATED entry genuinely cannot be attributed here** — openapi3 lists
+							 * **A NEGOTIATED entry genuinely cannot be attributed here** - openapi3 lists
 							 * one body per media type against members that each carry their own, so there is
 							 * no single arm to compare it to. That stays counted, and the status arm above
 							 * still covers it.
@@ -888,7 +888,7 @@ async function compareEverything(): Promise<Comparison> {
 								continue;
 							}
 							/**
-							 * An INLINE body names no component, so there is no name to compare — but there is
+							 * An INLINE body names no component, so there is no name to compare - but there is
 							 * a shape, and comparing shapes is what the component walk already does. This was
 							 * counted and skipped for 76 positions; comparing them is what closes it.
 							 */
@@ -900,7 +900,7 @@ async function compareEverything(): Promise<Comparison> {
 									arm.schema === undefined ? undefined : describeZodObject(arm.schema, nameOf);
 								if (inline === undefined || fromDocument === undefined || fromZod === undefined) {
 									/**
-									 * Not an object on one side or both — a scalar body, a stream, a union. The
+									 * Not an object on one side or both - a scalar body, a stream, a union. The
 									 * shape walk has nothing to say, but the KIND does: a body the document
 									 * publishes as `{"type": "string"}` and the emitter validates as a number
 									 * is a defect nothing else here would see.
@@ -942,15 +942,15 @@ async function compareEverything(): Promise<Comparison> {
 							}
 							const expected = component.split(".").at(-1) ?? component;
 							/**
-							 * ⚠️ **openapi3 publishes a component for things this emitter inlines**, and a
+							 * **openapi3 publishes a component for things this emitter inlines**, and a
 							 * name comparison would read that as a wrong body. `encode/bytes` declares the
 							 * scalar `base64urlBytes` as a component; we emit `z.string()` at the position,
 							 * which is the same contract and has no name to be compared by.
 							 *
-							 * ⚠️ **The test is what the component IS, never whether we happened to declare
+							 * **The test is what the component IS, never whether we happened to declare
 							 * it.** The first cut skipped when `emitted[identifier]` was absent, which reads
 							 * "the emitter inlines this by design" and "the emitter declared nothing at all"
-							 * as the same thing — and a control proved it: handing every failure arm the
+							 * as the same thing - and a control proved it: handing every failure arm the
 							 * service-wide error schema, the exact defect this arm exists to catch, went
 							 * unreported because the component it should have named had also stopped being
 							 * declared. A guard that looks present.
@@ -962,7 +962,7 @@ async function compareEverything(): Promise<Comparison> {
 							 *
 							 * Excused only when the emitter declared nothing AND the document's component is
 							 * not one a declaration is owed for. A component that IS owed one and does not
-							 * have it stays compared, and reports the wrong body — which is exactly what the
+							 * have it stays compared, and reports the wrong body - which is exactly what the
 							 * control above demands.
 							 */
 							const target = schemas[component] ?? {};
@@ -1044,7 +1044,7 @@ async function compareEverything(): Promise<Comparison> {
 
 			if (fromDocument === undefined) continue;
 			if (fromZod === undefined) {
-				// A component nothing on the wire can reach needs no validator — but the reduction in
+				// A component nothing on the wire can reach needs no validator - but the reduction in
 				// what this arm checks is a number, not a silence.
 				if (reachable.has(component)) {
 					add("no-zod-declaration", `${scenario.name}:${component}`, `expected ${identifier}`);
@@ -1142,7 +1142,7 @@ function compareShapes(
 				`document=${expected.nullable} validator=${actual.nullable}`,
 			);
 		}
-		// Through `allOf` as well as the object's own properties — see `propertySchemaOf`. Reading only
+		// Through `allOf` as well as the object's own properties - see `propertySchemaOf`. Reading only
 		// `json.properties` skipped every INHERITED property here, so the whole tail below (kind,
 		// element, format, constraints) went unread for the inherited half of every derived model.
 		const property = propertySchemaOf(json, name, resolve);
@@ -1159,15 +1159,15 @@ function compareShapes(
 		 * as compared: an arm that finds no elements to look at is not an arm that found agreement.
 		 */
 		/**
-		 * ⚠️ **Compared only when BOTH sides could be read, and every skip is counted.**
+		 * **Compared only when BOTH sides could be read, and every skip is counted.**
 		 *
-		 * The first cut of these arms reported `document=undefined validator=string` — 17 of 28 hits
+		 * The first cut of these arms reported `document=undefined validator=string` - 17 of 28 hits
 		 * were the describer failing on a nullable array or an unresolvable `$ref`, not the emitter
 		 * disagreeing. Baselining those would have published describer gaps as emitter defects and
 		 * buried the three real ones among them.
 		 */
 		/**
-		 * ⚠️ **`"any"` is a READING, so these comparisons happen — and until they did, a validator
+		 * **`"any"` is a READING, so these comparisons happen - and until they did, a validator
 		 * that OVER-constrained an open value was invisible.** The document's empty schema `{}` says
 		 * "anything"; the harness used to collapse that to `undefined` and skip, and the skip counted
 		 * as coverage. Under-constraining was always caught, because both sides read; the blindness
@@ -1217,9 +1217,9 @@ interface Baseline {
 	readonly note: string;
 	/** Scenarios OUR emitter cannot compile. Each must name the diagnostic it produces. */
 	readonly ourFailures: readonly string[];
-	/** Scenarios `@typespec/openapi3` itself cannot compile — no oracle, and not our defect. */
+	/** Scenarios `@typespec/openapi3` itself cannot compile - no oracle, and not our defect. */
 	readonly oracleFailures: readonly string[];
-	/** `kind` → the exact `where` strings known to diverge. */
+	/** `kind` -> the exact `where` strings known to diverge. */
 	readonly divergences: Readonly<Record<string, readonly string[]>>;
 	/**
 	 * Warnings THIS emitter raised across the corpus. Every one means "the output is knowingly not
@@ -1234,11 +1234,11 @@ interface Baseline {
 	readonly operations: { document: number; emitted: number };
 	/** Negotiated response bodies, which no single arm can be attributed to. Pinned. */
 	readonly negotiatedResponseBodies: number;
-	/** Inline response bodies whose SHAPE is compared. Coverage — may only grow. */
+	/** Inline response bodies whose SHAPE is compared. Coverage - may only grow. */
 	readonly inlineResponseBodiesCompared: number;
 	/** Bodies neither side reduces to an object OR a readable kind. Pinned. */
 	readonly unreadableResponseBodies: number;
-	/** Non-object response bodies whose top-level KIND is compared. Coverage — may only grow. */
+	/** Non-object response bodies whose top-level KIND is compared. Coverage - may only grow. */
 	readonly responseBodyKindsCompared: number;
 	readonly requestBodiesCompared: number;
 	readonly requestBodyKindsCompared: number;
@@ -1260,7 +1260,7 @@ beforeAll(async () => {
 			baselinePath,
 			`${JSON.stringify(
 				{
-					note: "Generated by UPDATE_CONFORMANCE_BASELINE=1. This file may only SHRINK — an addition needs a named reason in the commit message. See differential.test.ts.",
+					note: "Generated by UPDATE_CONFORMANCE_BASELINE=1. This file may only SHRINK - an addition needs a named reason in the commit message. See differential.test.ts.",
 					unenforcedFormats: comparison.unenforcedFormats,
 					negotiatedResponseBodies: comparison.negotiatedResponseBodies,
 					inlineResponseBodiesCompared: comparison.inlineResponseBodiesCompared,
@@ -1297,11 +1297,11 @@ describe("the validator and the document agree, over a corpus we did not write",
 		expect(comparison.elements.compared).toBeGreaterThanOrEqual(30);
 		expect(comparison.kinds.compared).toBeGreaterThanOrEqual(250);
 		/**
-		 * ⚠️ **The arm that did not exist, held open by its own floor.**
+		 * **The arm that did not exist, held open by its own floor.**
 		 *
 		 * The document's empty schema `{}` states that a value is unconstrained. That reading used to
 		 * collapse to "unreadable" and skip, so a validator OVER-constraining an open value was
-		 * invisible — measured: typing binary multipart parts as `z.string()` reddened three
+		 * invisible - measured: typing binary multipart parts as `z.string()` reddened three
 		 * behavioural arms and nothing here.
 		 *
 		 * Without a floor the fix is one refactor away from silently reverting: a predicate that stops
@@ -1309,27 +1309,27 @@ describe("the validator and the document agree, over a corpus we did not write",
 		 * Placed under the measured count so a real reduction in coverage fails rather than passes.
 		 */
 		/**
-		 * ⚠️ **The route surface, held open by its own floor.** The differential iterated
+		 * **The route surface, held open by its own floor.** The differential iterated
 		 * `components.schemas` and route COUNTS and never opened `document.paths`, so every path, query
 		 * and header validator the emitter produces was graded by nothing. Two live defects
-		 * were sitting there — a header validator keyed on the TypeSpec name rather than the wire name,
+		 * were sitting there - a header validator keyed on the TypeSpec name rather than the wire name,
 		 * which 400'd every conformant request, and a hyphenated path parameter that mounted an
 		 * unreachable route. Without a floor, a refactor that stops resolving `app.gen.ts` takes this
 		 * whole arm with it and the suite still reports agreement.
 		 */
 		expect(comparison.parametersCompared).toBeGreaterThanOrEqual(90);
 		/**
-		 * ⚠️ **The floor that turns a counted surface into a graded one.** This arm replaced a bare
+		 * **The floor that turns a counted surface into a graded one.** This arm replaced a bare
 		 * `contentHeadersSkipped`, which was a gap dressed as a measurement; without a floor here it
 		 * would be the same gap with a different name.
 		 */
 		expect(comparison.contentHeaders.compared).toBeGreaterThanOrEqual(70);
 		/**
-		 * ⚠️ **The response surface, held open by its own floor.** Until this arm existed, nothing in
+		 * **The response surface, held open by its own floor.** Until this arm existed, nothing in
 		 * this package compared what an operation is allowed to ANSWER with. The emitter hands
 		 * `deps.respond` a list of arms and an application validates its own output against them, and
 		 * the mapping from a declared status to the body that status carries had been graded by
-		 * nothing — which is how status RANGES came to be dropped silently and how every failure arm
+		 * nothing - which is how status RANGES came to be dropped silently and how every failure arm
 		 * came to carry the service-wide error schema regardless of what the document named.
 		 *
 		 * Two floors, because the arm has two halves and the cheaper one would otherwise stand in for
@@ -1339,9 +1339,9 @@ describe("the validator and the document agree, over a corpus we did not write",
 		expect(comparison.responsesCompared).toBeGreaterThanOrEqual(550);
 		expect(comparison.responseBodiesCompared).toBeGreaterThanOrEqual(190);
 		/**
-		 * ⚠️ **An upper bound, because this number SUPPRESSES findings.** Every other floor here guards
+		 * **An upper bound, because this number SUPPRESSES findings.** Every other floor here guards
 		 * against an arm going quiet; this one guards the opposite failure. A reachability walk that
-		 * broke — a changed `$ref` prefix, an early return — would report nothing as reachable and
+		 * broke - a changed `$ref` prefix, an early return - would report nothing as reachable and
 		 * silently excuse every component that has no validator, which is the exact defect class the
 		 * arm exists to catch. Four are unreachable today; a jump means the walk stopped walking.
 		 */
@@ -1355,23 +1355,23 @@ describe("the validator and the document agree, over a corpus we did not write",
 	});
 
 	it("records separately the scenarios where openapi3 itself fails", () => {
-		// Not our defect and never counted as one — if these move, Microsoft changed something.
+		// Not our defect and never counted as one - if these move, Microsoft changed something.
 		expect([...comparison.oracleFailures].toSorted()).toEqual(
 			[...baseline.oracleFailures].toSorted(),
 		);
 	});
 
 	/**
-	 * ⚠️ **This was a hand-written list, and it silently stopped covering what the harness produces.**
+	 * **This was a hand-written list, and it silently stopped covering what the harness produces.**
 	 *
 	 * Every arm below is generated per kind, so a kind missing from the list had **no assertion at
 	 * all**: the divergences were counted, written into the baseline, and never checked by anything.
-	 * `discriminator-values` was in exactly that state for a whole commit — four real defects recorded
-	 * and unasserted — and `element-type` would have joined it. The failure mode is the worst kind: a
+	 * `discriminator-values` was in exactly that state for a whole commit - four real defects recorded
+	 * and unasserted - and `element-type` would have joined it. The failure mode is the worst kind: a
 	 * green suite over a file that lists the problems.
 	 *
 	 * Derived from the baseline now, so a kind cannot exist in the file without an arm reading it, and
-	 * `asserts every kind of divergence it can produce` closes the other direction — a kind appearing
+	 * `asserts every kind of divergence it can produce` closes the other direction - a kind appearing
 	 * for the first time has no baseline key, so nothing above would notice it.
 	 */
 	const kinds = Object.keys(
@@ -1381,13 +1381,13 @@ describe("the validator and the document agree, over a corpus we did not write",
 		it(`agrees about ${kind}`, () => {
 			const actual = comparison.divergences
 				.filter((divergence) => divergence.kind === kind)
-				.map((divergence) => `${divergence.where} — ${divergence.detail}`)
+				.map((divergence) => `${divergence.where} - ${divergence.detail}`)
 				.toSorted();
 			const known = new Set(baseline.divergences[kind] ?? []);
-			const regressions = actual.filter((line) => !known.has(line.split(" — ")[0] ?? ""));
+			const regressions = actual.filter((line) => !known.has(line.split(" - ")[0] ?? ""));
 			expect(regressions).toEqual([]);
 			const fixed = [...known].filter(
-				(where) => !actual.some((line) => line.startsWith(`${where} —`)),
+				(where) => !actual.some((line) => line.startsWith(`${where} -`)),
 			);
 			// A baseline entry that no longer diverges is a fix that was never recorded. Deleting the
 			// entry is part of the fix, or the file stops meaning anything.
@@ -1395,11 +1395,11 @@ describe("the validator and the document agree, over a corpus we did not write",
 		});
 	}
 
-	it("ships no compromise of its own — zero emitter warnings across the corpus", () => {
+	it("ships no compromise of its own - zero emitter warnings across the corpus", () => {
 		/**
-		 * ⚠️ **Everything else in this file measures ACCIDENTAL disagreement. This measures deliberate
+		 * **Everything else in this file measures ACCIDENTAL disagreement. This measures deliberate
 		 * disagreement, which is worse**, because it is indistinguishable from correct behaviour unless
-		 * somebody wrote it down — and writing it down is what makes it feel handled.
+		 * somebody wrote it down - and writing it down is what makes it feel handled.
 		 *
 		 * For one commit this arm asserted a list of four such divergences and passed, which was the
 		 * whole problem: an injected discriminator, a warning, a citation of the rule openapi3 breaks,
@@ -1414,7 +1414,7 @@ describe("the validator and the document agree, over a corpus we did not write",
 	it("asserts EVERY kind of divergence it can produce, not a hand-kept list", () => {
 		/**
 		 * The arms above are generated from the baseline's keys, so a kind that has never diverged has
-		 * no arm — and the first time it does, nothing would fail. This is that check: any kind the
+		 * no arm - and the first time it does, nothing would fail. This is that check: any kind the
 		 * comparison produced which no arm reads is itself the defect, whatever it happens to say.
 		 *
 		 * Fixing one means baselining it with a named reason, which creates the key, which creates the
@@ -1426,7 +1426,7 @@ describe("the validator and the document agree, over a corpus we did not write",
 
 	it("agrees about every constraint keyword", () => {
 		// Baseline-aware like every other arm, and for the same reason: the entries here are a real
-		// defect with a fix pending — the emitter anchors `@pattern` and the document does not — and a
+		// defect with a fix pending - the emitter anchors `@pattern` and the document does not - and a
 		// hard assertion would have to be deleted to reach green, which loses the record. The stale arm
 		// makes them disappear the moment the fix lands.
 		const known = new Set(
@@ -1438,7 +1438,7 @@ describe("the validator and the document agree, over a corpus we did not write",
 			.filter((divergence) => divergence.kind.startsWith("constraint:"))
 			.map((divergence) => ({
 				key: `${divergence.kind} ${divergence.where}`,
-				line: `${divergence.kind} ${divergence.where} — ${divergence.detail}`,
+				line: `${divergence.kind} ${divergence.where} - ${divergence.detail}`,
 			}));
 		const regressions = actual.filter(({ key }) => !known.has(key)).map(({ line }) => line);
 		expect(regressions.toSorted()).toEqual([]);
@@ -1451,7 +1451,7 @@ describe("the validator and the document agree, over a corpus we did not write",
 		 * The headline, kept as a number rather than left implicit in the per-scenario arm above.
 		 *
 		 * A component-by-component differential can be entirely green while the emitter mounts nothing
-		 * at all — `payload/multipart` emitted `GENERATED_ROUTES = []` against seventeen declared
+		 * at all - `payload/multipart` emitted `GENERATED_ROUTES = []` against seventeen declared
 		 * operations and every other arm was satisfied. This is the arm that makes "the surface is
 		 * covered" a claim somebody checked.
 		 */
@@ -1476,12 +1476,12 @@ describe("the validator and the document agree, over a corpus we did not write",
 		/**
 		 * **A response body read by status but not by component.** An inline schema has no component to
 		 * be named by, and a negotiated entry lists one body per media type against members that each
-		 * carry their own — neither is a defect, and neither is coverage. Pinned rather than bounded,
+		 * carry their own - neither is a defect, and neither is coverage. Pinned rather than bounded,
 		 * because a change in either direction means the arm is reading a different set of responses
 		 * than it was.
 		 *
-		 * ⚠️ **The inline half of this used to be counted and is now COMPARED.** 76 positions named no
-		 * component, so a name comparison had nothing to say about them — and an inline response schema
+		 * **The inline half of this used to be counted and is now COMPARED.** 76 positions named no
+		 * component, so a name comparison had nothing to say about them - and an inline response schema
 		 * is a real shape the emitter still has to get right. They go through the same shape walk the
 		 * components do, and the number below is coverage rather than a gap.
 		 */
@@ -1494,9 +1494,9 @@ describe("the validator and the document agree, over a corpus we did not write",
 			baseline.responseBodyKindsCompared,
 		);
 		/**
-		 * ⚠️ **The request body had no arm at all until now, so it gets a floor like every other
+		 * **The request body had no arm at all until now, so it gets a floor like every other
 		 * counting arm.** An arm without one reports agreement about nothing the day its predicate
-		 * stops firing — which is how the content-header arm compared zero positions and passed.
+		 * stops firing - which is how the content-header arm compared zero positions and passed.
 		 */
 		expect(comparison.requestBodiesCompared).toBeGreaterThanOrEqual(baseline.requestBodiesCompared);
 		expect(comparison.requestBodyKindsCompared).toBeGreaterThanOrEqual(
@@ -1510,14 +1510,14 @@ describe("the validator and the document agree, over a corpus we did not write",
 
 	it("actually READ constraints, on both sides, before saying they agree", () => {
 		/**
-		 * ⚠️ **The arm above passed for a week's worth of work while measuring nothing.**
+		 * **The arm above passed for a week's worth of work while measuring nothing.**
 		 *
-		 * Across 230 properties of the corpus it extracted **zero** constraints from either artefact —
+		 * Across 230 properties of the corpus it extracted **zero** constraints from either artefact -
 		 * `http-specs` tests protocol behaviour and declares none, and its only `@minValue`/`@maxValue`
 		 * sit on a `@statusCode`, which is metadata and never reaches a body. "No divergences" was
 		 * true and worthless.
 		 *
-		 * The previous guard — skips fewer than objects — could not have caught it, because it says
+		 * The previous guard - skips fewer than objects - could not have caught it, because it says
 		 * nothing about whether a single constraint was ever read. This one names the quantity the arm
 		 * depends on. The material comes from the depth fixtures; if they stop supplying it, this fails rather
 		 * than the comparison quietly going hollow.

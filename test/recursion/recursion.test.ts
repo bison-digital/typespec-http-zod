@@ -14,10 +14,10 @@ import { compileFixture, type CompiledFixture } from "../support/compile-fixture
  * proves the emitted *shape* matches the document, and shape agreement cannot tell you whether the
  * module even loads, let alone whether it still rejects anything.
  *
- * ⚠️ **Three ways this can look green while being broken**, all of them guarded below:
+ * **Three ways this can look green while being broken**, all of them guarded below:
  *
  * - **It throws on import.** A `const` cannot read itself while initialising, so the reference has to
- *   be deferred behind a getter. Nothing about the emitted *text* reveals this — the failure is
+ *   be deferred behind a getter. Nothing about the emitted *text* reveals this - the failure is
  *   `ReferenceError: Cannot access 'treeNodeSchema' before initialization`, at import.
  * - **The getter silently un-seals the model.** Measured on Zod 4.4.3: `.strict()`, `.loose()` and
  *   `.catchall()` all read `shape` eagerly and therefore fire the getter too early, so a recursive
@@ -37,7 +37,7 @@ describe("a recursive model is emitted as a reference, not refused and not inlin
 
 	beforeAll(async () => {
 		compiled = await compileFixture(here, "tree");
-		// If the emitted module defers nothing, THIS is where it fails — before a single assertion.
+		// If the emitted module defers nothing, THIS is where it fails - before a single assertion.
 		schemas = (await import(join(compiled.outDir, "schemas.gen.ts"))) as Record<string, ZodType>;
 	});
 
@@ -68,7 +68,7 @@ describe("a recursive model is emitted as a reference, not refused and not inlin
 		).toBe(true);
 	});
 
-	it("REJECTS a wrong type at depth — proving the recursion is not `unknown`", () => {
+	it("REJECTS a wrong type at depth - proving the recursion is not `unknown`", () => {
 		// The shallow case is the control: if this one passed, the arm below would prove nothing.
 		expect(accepts(schemas.treeNodeSchema as ZodType, { label: 42 })).toBe(false);
 		expect(
@@ -79,10 +79,10 @@ describe("a recursive model is emitted as a reference, not refused and not inlin
 		).toBe(false);
 	});
 
-	it("REJECTS an undeclared key at depth — proving the seal survives the getter", () => {
+	it("REJECTS an undeclared key at depth - proving the seal survives the getter", () => {
 		/**
-		 * The one that would rot silently. `z.object({…}).strict()` throws on a recursive getter, so
-		 * the emitter switches to `z.strictObject({…})`; switching to a bare `z.object` instead would
+		 * The one that would rot silently. `z.object({...}).strict()` throws on a recursive getter, so
+		 * the emitter switches to `z.strictObject({...})`; switching to a bare `z.object` instead would
 		 * pass every other assertion in this file and strip unknown keys forever.
 		 */
 		expect(accepts(schemas.treeNodeSchema as ZodType, { label: "root", nope: true })).toBe(false);
@@ -123,7 +123,7 @@ describe("a recursive model is emitted as a reference, not refused and not inlin
 	});
 
 	it("keeps a permissive recursive model permissive", () => {
-		// The `.loose()` → `z.looseObject` half. Paired with the strict arm above over the same input,
+		// The `.loose()` -> `z.looseObject` half. Paired with the strict arm above over the same input,
 		// because an assertion that something is *accepted* passes on a schema that accepts everything.
 		expect(accepts(schemas.openNodeSchema as ZodType, { label: "a", extra: 1 })).toBe(true);
 		expect(accepts(schemas.openNodeSchema as ZodType, { label: "a", child: { label: 1 } })).toBe(
@@ -134,19 +134,19 @@ describe("a recursive model is emitted as a reference, not refused and not inlin
 
 describe("a cycle with nowhere to put a getter is SERVED, not refused", () => {
 	/**
-	 * **`Node` → `Branch` → `Node` closes through a union declaration, which has no properties.**
+	 * **`Node` -> `Branch` -> `Node` closes through a union declaration, which has no properties.**
 	 *
-	 * ⚠️ **This was `circular-model`, and the refusal was wrong.** A getter needs an object property
-	 * to sit on and a union has none, so the reference could not be deferred — but `z.lazy()` does not
+	 * **This was `circular-model`, and the refusal was wrong.** A getter needs an object property
+	 * to sit on and a union has none, so the reference could not be deferred - but `z.lazy()` does not
 	 * need a property, and deferring the whole declaration is the place to put it. `@typespec/openapi3`
 	 * publishes this spec without complaint, so refusing it made the same source representable by one
 	 * emitter and not the other.
 	 *
-	 * ⚠️ **Three ways this can look green while being broken**, all guarded below:
+	 * **Three ways this can look green while being broken**, all guarded below:
 	 *
 	 * - **It throws on import**, because a `const` read itself while initialising. The arms here import
 	 *   the module, so that fails before any assertion.
-	 * - **It infers `any`.** `z.lazy()` alone typechecks as `any` — `TS7022` — and that is worse than
+	 * - **It infers `any`.** `z.lazy()` alone typechecks as `any` - `TS7022` - and that is worse than
 	 *   not compiling, because the wire assertions would pass while proving nothing. The emitted file is
 	 *   compiled under `strict` by `emit.test.ts`; the arm here checks the annotation that makes it
 	 *   sound is actually present.
@@ -189,14 +189,14 @@ describe("a cycle with nowhere to put a getter is SERVED, not refused", () => {
 
 	it("annotates the deferred declaration, which is what keeps it from inferring `any`", () => {
 		/**
-		 * ⚠️ **Asserted on the emitted TEXT, because the failure it guards is invisible at run time.**
+		 * **Asserted on the emitted TEXT, because the failure it guards is invisible at run time.**
 		 * `z.lazy()` without the annotation parses identically and infers `any`, so every behavioural
 		 * arm above would still pass while `wire-contract.gen.ts` silently stopped checking anything.
 		 */
 		const source = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
 		expect(source).toMatch(/export const \w+: z\.ZodType<\w+> = z\.lazy\(/);
 		// Every member of the cycle carries a written-out type rather than a `z.infer` alias, or the
-		// annotation closes the loop again — `TS2456`, measured.
+		// annotation closes the loop again - `TS2456`, measured.
 		expect(source).not.toMatch(/export type Branch = z\.infer</);
 		expect(source).not.toMatch(/export type Node = z\.infer</);
 	});

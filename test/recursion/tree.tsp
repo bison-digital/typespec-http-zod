@@ -7,13 +7,13 @@ using Http;
  *
  * The conformance corpus covers self-recursion through an array and through a dictionary
  * (`type/array`, `type/dictionary`, both `model InnerModel { children?: InnerModel[] }`). It does
- * **not** cover mutual recursion, and it declares no recursive model that is also sealed — so the
+ * **not** cover mutual recursion, and it declares no recursive model that is also sealed - so the
  * two things most likely to break are the two nothing was watching.
  */
 @service(#{ title: "recursion" })
 namespace Recursion;
 
-/** Self-recursion through an array, and the model is sealed — the combination that has to be lazy. */
+/** Self-recursion through an array, and the model is sealed - the combination that has to be lazy. */
 model TreeNode {
   label: string;
   children?: TreeNode[];
@@ -25,7 +25,7 @@ model TreeIndex {
   byName?: Record<TreeIndex>;
 }
 
-/** Self-recursion through a bare property — no container between the model and itself. */
+/** Self-recursion through a bare property - no container between the model and itself. */
 model Chain {
   label: string;
   next?: Chain;
@@ -43,7 +43,7 @@ model Book {
 }
 
 /**
- * A permissive recursive model, so the `.loose()` → `z.looseObject` half of the switch is exercised.
+ * A permissive recursive model, so the `.loose()` -> `z.looseObject` half of the switch is exercised.
  * Without this the loose arm is written and never run.
  */
 model OpenNode {

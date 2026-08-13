@@ -6,7 +6,7 @@ using Http;
  * Model inheritance, in the shapes that decide whether a derived validator is usable.
  *
  * `baseModel` appeared **nowhere** in this emitter, so a derived model was emitted carrying only its
- * own properties — and, because it is a leaf, sealed against the ones it inherits. The failure is not
+ * own properties - and, because it is a leaf, sealed against the ones it inherits. The failure is not
  * a missing field: it is a `400` naming a key the published contract requires.
  */
 @service(#{ title: "inheritance" })
@@ -17,7 +17,7 @@ model Building {
   floors?: int32;
 }
 
-/** One level, and sealed — the case that rejected a conformant body. */
+/** One level, and sealed - the case that rejected a conformant body. */
 model House extends Building {
   garden: boolean;
 }
@@ -28,7 +28,7 @@ model Mansion extends House {
 }
 
 /**
- * A LEAF, which is the only kind openapi3 seals — sealing a base would make a subtype's own
+ * A LEAF, which is the only kind openapi3 seals - sealing a base would make a subtype's own
  * properties "unevaluated" against it. So this is the model that must both accept what it inherits
  * and still reject what nobody declared.
  */
@@ -44,7 +44,7 @@ model Annex extends Building {
 
 /**
  * Inheriting an indexer, not just properties. `model X extends Record<string>` puts the catchall on
- * the base, and openapi3 publishes the base's `unevaluatedProperties` — which, measured with Ajv
+ * the base, and openapi3 publishes the base's `unevaluatedProperties` - which, measured with Ajv
  * 2020-12, makes the derived model's own seal inert. So the derived validator must carry the
  * catchall too.
  */

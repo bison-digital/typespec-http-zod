@@ -6,8 +6,8 @@ using Http;
  * `@discriminator` bases, in the shapes that decide whether polymorphism is validated at all.
  *
  * A discriminated base is a **choice** between its subtypes, not a shape of its own. Emitted as its
- * own properties it becomes `z.object({kind: z.string(), …})`, which accepts `{kind: "eagle"}` while
- * checking nothing `Eagle` declares — a polymorphic endpoint validating none of its polymorphism.
+ * own properties it becomes `z.object({kind: z.string(), ...})`, which accepts `{kind: "eagle"}` while
+ * checking nothing `Eagle` declares - a polymorphic endpoint validating none of its polymorphism.
  */
 @service(#{ title: "polymorphism" })
 namespace Polymorphism;
@@ -61,7 +61,7 @@ model Salmon extends Fish {
 
 /**
  * A discriminator nobody extends. openapi3 emits an ordinary object with no `mapping`, and a union
- * over zero options would validate nothing — so this must stay a plain object.
+ * over zero options would validate nothing - so this must stay a plain object.
  */
 @discriminator("kind")
 model Reptile {

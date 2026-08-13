@@ -4,15 +4,15 @@ Published OpenAPI documents, vendored so the round-trip suite is hermetic. A sui
 at run time decides whether it passes using a value it did not supply, and then fails for reasons that
 have nothing to do with the code under test.
 
-⚠️ **Every digest below is ASSERTED by `test/vendored.test.ts`, over every file in this directory as
+**Every digest below is ASSERTED by `test/vendored.test.ts`, over every file in this directory as
 a class.** The version of this record inherited from the un-split package documented digests that
-nothing checked — and one of them had never matched the file it described, from the commit that
+nothing checked - and one of them had never matched the file it described, from the commit that
 introduced it. A provenance record whose digests are not verified is prose claiming to be a guard.
 
 | file | source | retrieved | sha256 |
 | --- | --- | --- | --- |
-| `oai-petstore.yaml` | <https://raw.githubusercontent.com/OAI/learn.openapis.org/main/examples/v3.0/petstore.yaml> — the OpenAPI Initiative's own teaching example | 2026-08-10 | `cefaafa05eee75b1888762dea08a295f245e9f3e4bdb8777f4bdfed09e335339` |
-| `swagger-petstore.json` | <https://petstore3.swagger.io/api/v3/openapi.json> — the canonical Swagger Petstore, the most widely implemented reference API there is | 2026-08-10 | `b5e9a5da3d7a7491958099627bc976db0ec42f2464da3b46b178ab06e3da38b5` |
+| `oai-petstore.yaml` | <https://raw.githubusercontent.com/OAI/learn.openapis.org/main/examples/v3.0/petstore.yaml> - the OpenAPI Initiative's own teaching example | 2026-08-10 | `cefaafa05eee75b1888762dea08a295f245e9f3e4bdb8777f4bdfed09e335339` |
+| `swagger-petstore.json` | <https://petstore3.swagger.io/api/v3/openapi.json> - the canonical Swagger Petstore, the most widely implemented reference API there is | 2026-08-10 | `b5e9a5da3d7a7491958099627bc976db0ec42f2464da3b46b178ab06e3da38b5` |
 
 ## Why these two
 

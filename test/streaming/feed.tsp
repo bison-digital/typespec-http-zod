@@ -13,7 +13,7 @@ using SSE;
 /**
  * Streamed responses, whose payloads are NOT reachable from the response body.
  *
- * Under OpenAPI 3.1 the body of an SSE operation is `{"type": "string"}` — the event stream itself —
+ * Under OpenAPI 3.1 the body of an SSE operation is `{"type": "string"}` - the event stream itself -
  * so a walk that follows bodies sees a scalar and stops. The event payloads are published as
  * components all the same, and nothing here could validate them.
  */

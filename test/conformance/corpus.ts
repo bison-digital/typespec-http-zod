@@ -9,11 +9,11 @@ import { getVersions } from "@typespec/versioning";
  *
  * **Why a first-party corpus rather than more fixtures of our own.** A fixture we write tests what
  * we already thought of; `@typespec/http-specs` is Microsoft's own scenario set for validating
- * emitters, organised by the axes that actually break them — encoding, body-root and spread
+ * emitters, organised by the axes that actually break them - encoding, body-root and spread
  * parameters, multipart, content negotiation, encoded names, special words, streaming, versioning,
  * visibility, inheritance. It is the oracle precisely because we did not choose its contents.
  *
- * ⚠️ **Pinned exactly, and it must stay that way.** Every package here is `0.x` or `alpha`. A
+ * **Pinned exactly, and it must stay that way.** Every package here is `0.x` or `alpha`. A
  * floating range turns the committed baseline into a number that changes for reasons unrelated to
  * this emitter, which is the fastest way to make a gate meaningless.
  */
@@ -26,7 +26,7 @@ const specsRoot = join(packageRoot, "node_modules", "@typespec", "http-specs", "
 export const corpusOutDir = join(here, ".out");
 
 export interface Scenario {
-	/** `serialization/encoded-name/json` — stable, and what the baseline is keyed on. */
+	/** `serialization/encoded-name/json` - stable, and what the baseline is keyed on. */
 	readonly name: string;
 	readonly mainFile: string;
 }
@@ -57,15 +57,15 @@ export function discoverScenarios(): readonly Scenario[] {
 /**
  * The depth sources: fixtures compiled by BOTH emitters, alongside the corpus.
  *
- * ⚠️ **The corpus gives breadth and cannot give depth, and assuming otherwise made an arm vacuous.**
+ * **The corpus gives breadth and cannot give depth, and assuming otherwise made an arm vacuous.**
  * `@typespec/http-specs` tests protocol behaviour. Measured across every scenario it compiles, the
- * differential extracts **zero** constraints from either side — no `minLength`, no `pattern`, no
+ * differential extracts **zero** constraints from either side - no `minLength`, no `pattern`, no
  * `minItems`. The constraint arm reported agreement while reading nothing at all.
  *
  * `test/reference/constraints.tsp` is written for exactly that gap: every constraint keyword the
  * emitter supports, once, on the type it is legal on. `service.tsp` joins it because the constructs
- * it carries — a discriminated base, a recursive model, an overlapping status set, content
- * negotiation — are ones this corpus does not reach either.
+ * it carries - a discriminated base, a recursive model, an overlapping status set, content
+ * negotiation - are ones this corpus does not reach either.
  *
  * These ARE ours, unlike the corpus, and that is a real weakness worth naming: a fixture we wrote
  * tests what we already thought of. They are depth on top of independent breadth, never a substitute
@@ -82,9 +82,9 @@ export function depthSources(): readonly Scenario[] {
 /**
  * Who failed, which is a different question from whether the scenario passed.
  *
- * ⚠️ **`oracle` is not our defect and must never be counted as one.** Measured on
+ * **`oracle` is not our defect and must never be counted as one.** Measured on
  * `http-specs@0.1.0-alpha.40`: `routes` is refused by openapi3 itself
- * (`@typespec/openapi3/path-query` — OpenAPI cannot express a path containing a query string), and
+ * (`@typespec/openapi3/path-query` - OpenAPI cannot express a path containing a query string), and
  * `special-words` **crashes** openapi3 (`Cannot read properties of undefined (reading '0')`). For
  * those two there is no document to differentiate against, so the scenario is undifferentiable
  * rather than failing. Folding them into one number is how a corpus starts lying: the count would
@@ -100,7 +100,7 @@ export interface CompiledScenario {
 		readonly code: string;
 		readonly detail: string;
 	};
-	/** Directory holding this emitter's artefacts — `schemas.gen.ts` and its siblings. */
+	/** Directory holding this emitter's artefacts - `schemas.gen.ts` and its siblings. */
 	readonly zodDir: string;
 	/** Directory holding the OpenAPI document openapi3 produced from the same program. */
 	readonly openapiDir: string;
@@ -109,8 +109,8 @@ export interface CompiledScenario {
 	/**
 	 * The LAST version the service declares, when it is versioned.
 	 *
-	 * ⚠️ **Not the last document by filename, which is what this used to mean.** `versioning/removed`
-	 * declares `v1, v2preview, v2`, so v2 is current — but the files sort as `openapi.v1.json`,
+	 * **Not the last document by filename, which is what this used to mean.** `versioning/removed`
+	 * declares `v1, v2preview, v2`, so v2 is current - but the files sort as `openapi.v1.json`,
 	 * `openapi.v2.json`, `openapi.v2preview.json`, and taking the last one compared us against a
 	 * PREVIEW. The emitter had it right and the oracle was reading the wrong document, which is worth
 	 * more than the one divergence it produced: seven sources are versioned, and any of them could as
@@ -119,7 +119,7 @@ export interface CompiledScenario {
 	readonly latestVersion?: string;
 }
 
-/** `@typespec/openapi3/path-query` → `@typespec/openapi3`; our own codes have no prefix. */
+/** `@typespec/openapi3/path-query` -> `@typespec/openapi3`; our own codes have no prefix. */
 function ownerOfCode(code: string): FailureOwner {
 	return code.startsWith("@typespec/") ? "oracle" : "ours";
 }
@@ -136,8 +136,8 @@ function ownerOfCrash(message: string): FailureOwner {
 /**
  * Compile one scenario with BOTH emitters, from one program.
  *
- * ⚠️ **One program, not two compiles.** The differential is only meaningful if both artefacts
- * describe the same types — recompiling would compare our output against a document built from a
+ * **One program, not two compiles.** The differential is only meaningful if both artefacts
+ * describe the same types - recompiling would compare our output against a document built from a
  * separately-resolved program, and any disagreement would be ambiguous between "the emitter is
  * wrong" and "the two compiles differed".
  *
@@ -149,9 +149,9 @@ export async function compileScenario(
 	/**
 	 * Where this caller's corpus output lands.
 	 *
-	 * ⚠️ **A parameter, because a suite must never read output another suite wrote.** Vitest runs test
+	 * **A parameter, because a suite must never read output another suite wrote.** Vitest runs test
 	 * files in parallel with nothing ordering them, so a sweep reading `corpusOutDir` would grade
-	 * whichever build happened to be on disk — the defect that let a control pass green with the fix
+	 * whichever build happened to be on disk - the defect that let a control pass green with the fix
 	 * deleted from `src/`. Every caller owns a directory nobody else writes, and `isolation.test.ts`
 	 * asserts it.
 	 */
@@ -163,20 +163,20 @@ export async function compileScenario(
 	try {
 		program = await compile(NodeHost, scenario.mainFile, {
 			outputDir,
-			// Ours FIRST, deliberately — see `ownerOfCrash`.
+			// Ours FIRST, deliberately - see `ownerOfCrash`.
 			emit: ["typespec-http-zod", "@typespec/openapi3"],
 			options: {
 				"typespec-http-zod": {
 					"emitter-output-dir": dirs.zodDir,
 					/**
-					 * ⚠️ **The emitted module must be self-contained, or the differential cannot load it.**
+					 * **The emitted module must be self-contained, or the differential cannot load it.**
 					 *
 					 * A scenario declaring an enum emits `z.enum(SPEC_VOCABULARIES.Colors)`, which resolves
 					 * only where the named contracts package exports `Colors`. Writing the vocabularies
 					 * beside the schemas and importing them relatively is what makes the output stand alone
-					 * — measured, 7 of 61 scenarios need it.
+					 * - measured, 7 of 61 scenarios need it.
 					 *
-					 * ⚠️ **`contracts-package` has no default for exactly this reason.** It once defaulted to
+					 * **`contracts-package` has no default for exactly this reason.** It once defaulted to
 					 * one repository's package name, so a consumer who configured nothing got validators
 					 * importing from a package they had never heard of.
 					 */
@@ -213,19 +213,19 @@ export async function compileScenario(
 		};
 	}
 	/**
-	 * ⚠️ **Our own warnings are collected, not ignored, and there should be none.**
+	 * **Our own warnings are collected, not ignored, and there should be none.**
 	 *
-	 * The corpus raises warnings we neither own nor can fix — deprecations, and `metadata-ignored` on
-	 * the very models that prove the metadata-position defect — so those are filtered out below. A
+	 * The corpus raises warnings we neither own nor can fix - deprecations, and `metadata-ignored` on
+	 * the very models that prove the metadata-position defect - so those are filtered out below. A
 	 * warning THIS emitter raises is a different thing entirely: it means "the output is knowingly not
 	 * what the document says, and we are shipping it anyway". There was one such warning for exactly
-	 * one commit, marking an injected discriminator, and it was the wrong answer — a custom track with
+	 * one commit, marking an injected discriminator, and it was the wrong answer - a custom track with
 	 * a label on it. Counting them keeps the next one from arriving quietly.
 	 */
 	/**
 	 * Which version the emitter actually emitted, asked of the compiler rather than inferred.
 	 *
-	 * `getVersions` returns the versions in DECLARED order, which is the order that means anything —
+	 * `getVersions` returns the versions in DECLARED order, which is the order that means anything -
 	 * a version name sorts however its author spelled it.
 	 */
 	const latestVersion = ((): string | undefined => {
