@@ -682,6 +682,27 @@ function isCollectionParameter(property: ModelProperty): boolean {
 }
 
 /**
+ * Whether the values arrive one per OCCURRENCE (RFC 6570 explode) rather than joined into one.
+ *
+ * The distinction matters because of what `zValidator` hands the schema: for a repeated key it
+ * builds an array, but for a single occurrence it hands the bare string - and one `key=value` pair
+ * is exactly what a one-member exploded array looks like on the wire. A bare `z.array()` therefore
+ * refused a conformant request while accepting the same list sent twice, which no document
+ * describes. Found by the first consumer's `?topics=ip` (#1).
+ */
+function isExplodedCollection(parameter: {
+	type: string;
+	param: ModelProperty;
+	explode?: boolean;
+}): boolean {
+	return (
+		isCollectionParameter(parameter.param) &&
+		(parameter.type === "query" || parameter.type === "header") &&
+		parameter.explode === true
+	);
+}
+
+/**
  * The delimiter a parameter's values were joined with, or `undefined` when they were not joined.
  *
  * Defaults matter as much as the encodings: a query parameter with no `@encode` and no explode is
@@ -854,8 +875,16 @@ function parameterSchemasOf(
 			parameter.type === "header" && parameter.name.toLowerCase() === "content-type"
 				? mediaTypeDecoded(declared)
 				: wireDecoded(declared);
-		const expression =
-			delimiter === undefined
+		/**
+		 * The boxing half of the same principle: an exploded array's single occurrence arrives as a
+		 * bare string, so it is boxed into the one-element array the document describes before the
+		 * schema runs - every constraint on the list still applies to the result. Several
+		 * occurrences arrive already an array and pass through untouched, exactly as the delimiter
+		 * arm leaves a pre-split value alone.
+		 */
+		const expression = isExplodedCollection(parameter)
+			? `z.preprocess((raw) => (typeof raw === "string" ? [raw] : raw), ${decoded})`
+			: delimiter === undefined
 				? decoded
 				: `z.preprocess((raw) => (typeof raw === "string" ? raw.split(${JSON.stringify(delimiter)}) : raw), ${decoded})`;
 		const entry = `\t${objectKey(parameter.name)}: ${expression},`;

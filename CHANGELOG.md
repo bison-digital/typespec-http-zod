@@ -10,7 +10,18 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.4.0`.
+A minor when released: `schemas.gen.ts` changes shape for exploded array parameters.
+
+### Fixed
+
+- **A single occurrence of an exploded array parameter validates as the one-element list it is.**
+  (#1) `zValidator` hands a repeated key over as an array and a single occurrence as a bare string -
+  and one `key=value` pair is exactly what a one-member exploded array looks like on the wire. The
+  emitted `z.array()` accepted `?topics=a&topics=b` and refused `?topics=a`: the same list refused
+  or admitted by its length, which no document describes. The validator now boxes a lone string
+  into the one-element array before the schema runs, the mirror of the delimiter split - and like
+  it, a wire decode of a documented `style`/`explode` fact, so the vocabulary guard permits the
+  shape and carries its own non-vacuity floor.
 
 ## [0.4.0] - 2026-08-13
 
