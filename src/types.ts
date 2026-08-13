@@ -223,11 +223,20 @@ function modelToTs(program: Program, model: Model): string {
 	return entries.length === 0 ? "{}" : `{\n${entries.join("\n")}\n}`;
 }
 
-/** A property line, including its optionality marker. */
-export function propertyToTs(program: Program, property: ModelProperty): string {
+/**
+ * A property line, including its optionality marker.
+ *
+ * `wireName` overrides the key for an HTTP PARAMETER, whose wire name comes from `@header("x-thing")`
+ * or `@query("$select")` rather than from any JSON encoding. `resolveEncodedName` cannot see those,
+ * so a header renamed on the wire was keyed here by its TypeScript property name while the emitted
+ * validator keyed it by the wire name. A consumer checking its handlers against the generated input
+ * types then failed to typecheck against a server that was correct: `z.object({ "x-thing": ... })`
+ * on one side and `{ thing: string }` on the other.
+ */
+export function propertyToTs(program: Program, property: ModelProperty, wireName?: string): string {
 	// The WIRE name, resolved exactly as `zod.ts` resolves it - `wire-contract.gen.ts` asserts the
 	// emitted Zod infers this type, so the two must name every property identically or it fails.
-	const key = objectKey(resolveEncodedName(program, property, "application/json"));
+	const key = objectKey(wireName ?? resolveEncodedName(program, property, "application/json"));
 	// `@encode` changes the wire TYPE, resolved exactly as `zod.ts` resolves it - a property encoded as
 	// a string on one side and an array on the other fails the emitted assertion, and deserves to.
 	const encoded = getEncode(program, property)?.type;

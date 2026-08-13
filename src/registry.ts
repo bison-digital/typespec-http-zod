@@ -500,13 +500,14 @@ export class TypeRegistry {
 	 * `ModelProperty`s belonging to no model. Without routing them through the registry a named model
 	 * or enum in a parameter position is inlined rather than referenced.
 	 */
-	expressionForProperty(property: ModelProperty): string {
+	/** `wireName` names an HTTP parameter as the wire does - see {@link propertyToTs}. */
+	expressionForProperty(property: ModelProperty, wireName?: string): string {
 		return withTsRefResolver(
 			(candidate) => {
 				if (declaredNameOf(candidate) === undefined) return undefined;
 				return this.expressionFor(candidate);
 			},
-			() => propertyToTs(this.#program, property),
+			() => propertyToTs(this.#program, property, wireName),
 		);
 	}
 

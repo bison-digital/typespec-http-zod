@@ -1358,23 +1358,43 @@ function collectRequestTypes(
 					(parameter) =>
 						parameter.type === "path" || parameter.type === "query" || parameter.type === "header",
 				)
-				.map((parameter) => registry.expressionForProperty(parameter.param));
+				/**
+				 * Named as the WIRE names it, which is what the emitted validator keys on.
+				 * `@header("x-thing") thing: string` is `"x-thing"` in `schemas.gen.ts`, so it has to be
+				 * `"x-thing"` here too: a consumer checking its handlers against these types otherwise
+				 * fails to typecheck against a server that is correct.
+				 */
+				.map((parameter) => registry.expressionForProperty(parameter.param, parameter.name));
 			if (body === undefined && extraProperties.length === 0) continue;
 			/**
-			 * A `bytes` body reaches the use-case as a NAMED property holding the unparsed text, not as
-			 * a bare string - so the wire type is `{ rawBody: string }`, matching what a server
-			 * actually builds. Referencing the scalar directly would type the whole input as `string`
-			 * and quietly drop the headers beside it.
+			 * A `bytes` body reaches the use-case as a NAMED property holding the unparsed body, not as
+			 * a bare value, so the wire type is `{ rawBody: ... }`, matching what a server actually
+			 * builds. Referencing the scalar directly would type the whole input as that value and
+			 * quietly drop the headers beside it.
 			 */
 			const rawBody =
 				body?.kind === "Scalar" && body.name === "bytes"
 					? (operation.parameters.body?.property?.name ?? "body")
 					: undefined;
+			/**
+			 * **Raw binary is `ArrayBuffer`; base64 inside a JSON payload is `string`.** The same
+			 * `isRawBinaryMediaType` rule the response side and the multipart parts already follow,
+			 * applied here for the first time.
+			 *
+			 * This type said `string` for every `bytes` body whatever it was served as. A server reading
+			 * an `application/octet-stream` body hands the handler bytes, so a consumer checking its
+			 * handlers against these types could not typecheck against a correct server. It is the
+			 * request half of the corruption already fixed on the reader: decoding raw bytes as text
+			 * replaces every byte outside ASCII, and typing them as text is what invites it.
+			 */
+			const rawBodyType = isRawBinaryMediaType([...(operation.parameters.body?.contentTypes ?? [])])
+				? "ArrayBuffer"
+				: "string";
 			entries.push({
 				operationId: resolveOperationId(program, operation.operation),
 				bodyRef:
 					rawBody !== undefined
-						? `{\n\t${rawBody}: string;\n}`
+						? `{\n\t${rawBody}: ${rawBodyType};\n}`
 						: body === undefined
 							? undefined
 							: registry.expressionFor(body),
