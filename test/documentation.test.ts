@@ -106,6 +106,27 @@ describe("the README documents everything this package can do to you", () => {
 		});
 	});
 
+	/**
+	 * ⚠️ **The version being published must have a CHANGELOG entry, and this nearly shipped without
+	 * one.** `0.1.0` was tagged in `package.json` while the changelog still read "Nothing is published
+	 * yet. `0.1.0` will be the first release" — so the first thing a reader met on the npm page would
+	 * have been a document saying the thing they had just installed did not exist.
+	 *
+	 * Keyed on `package.json`'s own version rather than on a literal, so the next bump fails this
+	 * suite until it is written down — the same mechanism as the diagnostics and options above, and
+	 * for the same reason: the cost of documenting is paid by the person who knows why.
+	 */
+	it("has a changelog entry for the version it is about to publish", () => {
+		const changelog = readFileSync(join(packageRoot, "CHANGELOG.md"), "utf8");
+		const { version } = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
+			version: string;
+		};
+		// Non-vacuity: a missing or empty changelog would otherwise pass the match below by accident.
+		expect(changelog.length).toBeGreaterThanOrEqual(500);
+		expect(version).toMatch(/^\d+\.\d+\.\d+/);
+		expect(changelog).toMatch(new RegExp(`^## \\[${version.replace(/\./g, "\\.")}\\]`, "m"));
+	});
+
 	it("states each counted-but-ungraded surface as a limit, with its number", () => {
 		/**
 		 * ⚠️ **A number in a baseline file is not a stated limitation.** Inside a private package these
