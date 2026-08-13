@@ -173,7 +173,7 @@ const diagnostics = {
 	"unsupported-default": {
 		severity: "error",
 		messages: {
-			default: paramMessage`Cannot emit a default value of ${"why"}. Only scalar defaults and empty collections are representable.`,
+			default: paramMessage`Cannot emit a default value of ${"why"}. Scalars, arrays and objects are emitted as literals; a default built by a scalar constructor has no literal form. The property keeps its declared shape and loses only the fallback.`,
 		},
 	},
 	/**

@@ -12,6 +12,7 @@ import {
 	type Scalar,
 	type Type,
 	type Union,
+	type Value,
 } from "@typespec/compiler";
 import { createMetadataInfo, isQueryParam, type MetadataInfo, Visibility } from "@typespec/http";
 import { applyConstraints } from "./constraints.js";
@@ -939,46 +940,71 @@ export function propertyToZod(program: Program, property: ModelProperty): string
 	return property.optional || isOptionalAt(program, property) ? `${base}.optional()` : base;
 }
 
-/** A property's declared default, as a JS literal, or `undefined` when it has none. */
-function defaultOf(program: Program, property: ModelProperty): string | undefined {
-	const value = property.defaultValue;
-	if (value === undefined) return undefined;
+/**
+ * A default value as a JS literal, or `undefined` where this emitter cannot render one.
+ *
+ * ⚠️ **Composite defaults used to be REFUSED, and the refusal was wrong on the emitter's own
+ * governing rule.** `#["a", "b"]` and `#{ x: 1 }` were reported as `unsupported-default` with the
+ * reason "a populated literal default would need each element rendered, and no schema here has one".
+ * That was a statement about this function rather than about what can be represented: `.default()`
+ * takes any JS value, and `@typespec/openapi3` publishes these exactly —
+ * `default: ["a","b"]`, `default: {"x":1,"label":"hi"}`, and nested arrays too, measured from one
+ * compile of a spec carrying all three. So the document could say it, Zod could enforce it, and only
+ * this emitter refused — which is the same spec being representable by one emitter and not the other,
+ * the one thing a differential between them cannot tolerate.
+ *
+ * ⚠️ **The refusal also emitted `.default(z.never())`**, because `UNREPRESENTABLE` is a schema
+ * expression and this position wants a VALUE. Had the diagnostic ever been downgraded to a warning,
+ * that would have compiled and set every such default to a Zod object.
+ *
+ * A value is pure data — strings, numbers, booleans, null, and arrays and objects of those — so it
+ * renders as JSON. Anything else stays a refusal, and `ScalarValue` is the live case: a default like
+ * `utcDateTime.fromISO(...)` is a constructor call rather than a literal.
+ */
+function renderValue(value: Value): string | undefined {
 	if (value.valueKind === "StringValue") return JSON.stringify(value.value);
 	if (value.valueKind === "NumericValue") return String(value.value.asNumber());
 	if (value.valueKind === "BooleanValue") return String(value.value);
+	if (value.valueKind === "NullValue") return "null";
 	if (value.valueKind === "EnumValue") {
 		const member = value.value as { value?: string | number; name: string };
 		return JSON.stringify(member.value ?? member.name);
 	}
-	// `attendees?: string[] = #[]` — an empty-collection default, emitted as `.default([])`.
-	// Only empty ones: a populated literal default would need each element rendered, and no schema here
-	// has one, so it stays unsupported rather than half-implemented.
 	if (value.valueKind === "ArrayValue") {
-		const values = (value as { values?: readonly unknown[] }).values ?? [];
-		if (values.length === 0) return "[]";
-		reportDiagnostic(program, {
-			code: "unsupported-default",
-			target: property,
-			format: { why: "a non-empty array" },
-		});
-		return UNREPRESENTABLE;
+		const rendered = value.values.map(renderValue);
+		// One unrenderable element makes the whole literal unrenderable — a partial array would be a
+		// different default from the one the spec declares, which is worse than refusing.
+		return rendered.some((entry) => entry === undefined) ? undefined : `[${rendered.join(", ")}]`;
 	}
 	if (value.valueKind === "ObjectValue") {
-		const properties = (value as { properties?: Map<string, unknown> }).properties;
-		if (properties === undefined || properties.size === 0) return "{}";
-		reportDiagnostic(program, {
-			code: "unsupported-default",
-			target: property,
-			format: { why: "a non-empty object" },
-		});
-		return UNREPRESENTABLE;
+		const entries: string[] = [];
+		for (const [name, descriptor] of value.properties) {
+			const rendered = renderValue(descriptor.value);
+			if (rendered === undefined) return undefined;
+			entries.push(`${JSON.stringify(name)}: ${rendered}`);
+		}
+		return `{${entries.join(", ")}}`;
 	}
+	return undefined;
+}
+
+/** A property's declared default, as a JS literal, or `undefined` when it has none. */
+function defaultOf(program: Program, property: ModelProperty): string | undefined {
+	const value = property.defaultValue;
+	if (value === undefined) return undefined;
+	const rendered = renderValue(value);
+	if (rendered !== undefined) return rendered;
 	reportDiagnostic(program, {
 		code: "unsupported-default",
 		target: property,
 		format: { why: `kind "${value.valueKind}"` },
 	});
-	return UNREPRESENTABLE;
+	/**
+	 * ⚠️ **No `.default(...)` at all, rather than a default this emitter invented.** Returning
+	 * `UNREPRESENTABLE` here put a schema expression where a value belongs. The property keeps its
+	 * declared shape and loses only the fallback, which the diagnostic names.
+	 */
+	return undefined;
 }
 
 /** The non-null half of a two-variant `T | null` union, or `undefined` if it is not one. */
