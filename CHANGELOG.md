@@ -10,7 +10,36 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.3.0`.
+A minor when released: `schemas.gen.ts` changes shape for exploded array parameters.
+
+### Fixed
+
+- **A single occurrence of an exploded array parameter validates as the one-element list it is.**
+  (#1) `zValidator` hands a repeated key over as an array and a single occurrence as a bare string -
+  and one `key=value` pair is exactly what a one-member exploded array looks like on the wire. The
+  emitted `z.array()` accepted `?topics=a&topics=b` and refused `?topics=a`: the same list refused
+  or admitted by its length, which no document describes. The validator now boxes a lone string
+  into the one-element array before the schema runs, the mirror of the delimiter split - and like
+  it, a wire decode of a documented `style`/`explode` fact, so the vocabulary guard permits the
+  shape and carries its own non-vacuity floor.
+
+## [0.4.0] - 2026-08-13
+
+Additive. `0.3.0` remains correct and installable; nothing it emits changes.
+
+### Added
+
+- **A third conformance axis, comparing the emitted validators to the document through neither side's
+  describers.** Every existing arm reads the emitted Zod through describers written here, and those
+  describers have produced more defects than the emitter has. `z.toJSONSchema()` is Zod's own
+  serialiser, so converting each emitted validator back to JSON Schema and comparing it against
+  openapi3's component puts two independent implementations either side of the comparison. **247
+  components compared, 0 divergences.** Floored, and shown to go red by dropping a real constraint
+  from the emitter.
+- **`docs/oracles.md`**, naming every artefact this emitter produces and what would catch it
+  disagreeing with the thing it has to agree with. Every row was checked by planting a defect and
+  confirming the named arm fails. Both defects that reached a consumer were pairs nobody compared, so
+  the list exists to make an uncompared pair visible before a consumer finds it.
 
 ## [0.3.0] - 2026-08-13
 

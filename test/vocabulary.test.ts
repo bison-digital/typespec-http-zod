@@ -45,6 +45,14 @@ const DELIMITER_SPLIT =
 	/z\.preprocess\(\(raw\) => \(typeof raw === "string" \? raw\.split\("(?:[^"\\]|\\.)*"\) : raw\), /g;
 
 /**
+ * An exploded list's single occurrence boxed into the one-element array the document describes -
+ * `zValidator` hands one occurrence over as a bare string, several as an array (#1). The mirror of
+ * the split above: both re-establish the list shape the wire flattened, from the document's own
+ * `style`/`explode` facts.
+ */
+const EXPLODED_BOX = /z\.preprocess\(\(raw\) => \(typeof raw === "string" \? \[raw\] : raw\), /g;
+
+/**
  * A path, query or header scalar decoded from the only thing HTTP can carry: text.
  *
  * **`type: integer` on a query parameter describes the DECODED value, not the wire.** Without this
@@ -116,7 +124,7 @@ describe("the generated validator says only what the document can say", () => {
 	});
 
 	it("permits `z.preprocess` only as a wire decode of a known shape", () => {
-		const permitted = [DELIMITER_SPLIT, ...SCALAR_DECODE, ...MEDIA_TYPE_DECODE];
+		const permitted = [DELIMITER_SPLIT, EXPLODED_BOX, ...SCALAR_DECODE, ...MEDIA_TYPE_DECODE];
 		for (const file of files) {
 			const source = readFileSync(file, "utf8");
 			const all = (source.match(/z\.preprocess\(/g) ?? []).length;
@@ -145,6 +153,17 @@ describe("the generated validator says only what the document can say", () => {
 			0,
 		);
 		expect(decodes).toBeGreaterThanOrEqual(20);
+	});
+
+	it("finds the exploded boxes it is meant to permit", () => {
+		// Same rule as the two floors above: a permitted shape the emitter stops emitting is the
+		// defect coming back, and a total of zero has to fail here rather than pass quietly. The
+		// corpus carries exploded array parameters in the collection-format and routes scenarios.
+		const boxes = files.reduce(
+			(total, file) => total + countOf(readFileSync(file, "utf8"), [EXPLODED_BOX]),
+			0,
+		);
+		expect(boxes).toBeGreaterThanOrEqual(3);
 	});
 
 	it("finds the media type decodes it is meant to permit", () => {

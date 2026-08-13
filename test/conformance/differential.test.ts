@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
 	compileScenario,
 	depthSources,
@@ -427,9 +428,337 @@ interface Divergence {
 	readonly detail: string;
 }
 
+/**
+ * **The third oracle axis: the emitted validator, converted BACK to JSON Schema by Zod itself.**
+ *
+ * **Every other arm in this file compares the two artefacts through describers WE wrote, and that
+ * is the weak point rather than a theoretical one.** Four of the defects found during the extraction
+ * were in those describers and every one accused the emitter falsely - a constraint reader that
+ * stopped at an `anyOf`, an optionality reader that could not see through `z.preprocess`, a test that
+ * demanded `"$select"` be quoted. `shape.ts` reconstructs a schema by hand from Zod's INTERNAL
+ * `._zod.def` across 788 lines; nothing obliges Zod to keep that stable across the `^4.0.0` range
+ * this package advertises.
+ *
+ * `z.toJSONSchema()` is Zod's own supported serialiser, so this arm compares two independent
+ * implementations - openapi3's TypeSpec->JSON Schema against Zod's Zod->JSON Schema - with nothing of
+ * ours in between. A defect the two SHARE is still invisible, but a defect in our reading of either
+ * side is not, and that is the class that has actually bitten.
+ *
+ * **`io: "input"` is the correct mode and the choice is load-bearing.** In output mode
+ * `z.strictObject` and `z.object` both report `additionalProperties: false` - measured - because the
+ * output of a stripping object has only known keys, so openness would silently stop being compared.
+ * In input mode the three are distinct: `false`, absent, and `{}` respectively. Input is also what a
+ * request contract states: what the validator ACCEPTS.
+ */
+
+/** A generated module exports schemas beside plain values; only a schema can be serialised. */
+function isZodType(value: unknown): value is z.ZodType {
+	return value instanceof z.ZodType;
+}
+
+/** What Zod adds or the document annotates - neither is an assertion, so neither is compared. */
+const ANNOTATION_KEYWORDS = new Set([
+	"$schema",
+	"description",
+	"title",
+	"example",
+	"examples",
+	"deprecated",
+	"readOnly",
+	"writeOnly",
+	"externalDocs",
+	"xml",
+	"discriminator",
+	/**
+	 * **`format` is an ANNOTATION under JSON Schema 2020-12, not an assertion**, and not enforcing
+	 * it is this package's stated decision - 136 annotations, asserted as a class elsewhere. The
+	 * document carries `format: "int32"`; the validator says nothing. Comparing it here would re-open a
+	 * settled decision as a divergence.
+	 */
+	"format",
+	/**
+	 * **`contentEncoding` and `contentMediaType` are annotations too**, by the same clause of the
+	 * same specification. The document publishes `contentEncoding: "base64"` for a `bytes` property in
+	 * a JSON body; it asserts nothing about the string, and this package's raw-binary decision already
+	 * rests on exactly that reading.
+	 */
+	"contentEncoding",
+	"contentMediaType",
+]);
+
+/**
+ * **Sealed, spelled two ways, meaning one thing.**
+ *
+ * **`@typespec/openapi3` writes `unevaluatedProperties: {not: {}}` where Zod writes
+ * `additionalProperties: false`.** Both say "no property beyond those declared". openapi3 uses the
+ * `unevaluated*` form because it composes with `allOf` - an `additionalProperties: false` beside an
+ * `allOf` forbids the INHERITED properties too, which is a different and wrong contract. Zod has no
+ * `allOf`, so it has no such problem and uses the simpler keyword.
+ *
+ * Treating the two as a disagreement made this arm report 206 divergences out of 218 comparisons on
+ * its first run, against 0 from every other arm over the same components. The gate was wrong, not the
+ * emitter - which is this file's most-repeated lesson.
+ */
+
+/**
+ * **What a schema says about properties it did not declare, from whichever keyword carries it.**
+ *
+ * Both emitters answer the same two questions - may there be extra properties, and what must they be -
+ * and they answer them under different keywords. openapi3 uses `unevaluatedProperties` when the
+ * schema composes with `allOf` or when `seal-object-schemas` is on; Zod has no composition and always
+ * writes `additionalProperties`.
+ *
+ * Reading the openness flag from one keyword while reading the VALUE schema only from the other lost
+ * the value of every dictionary in the conformance corpus: `unevaluatedProperties: {type: "number"}`
+ * read as "open" with no value type, against a Zod side that correctly said the values are numbers.
+ * That accounted for 30 of the 67 residual divergences and every one accused the emitter falsely.
+ */
+function extraPropertyRule(
+	source: Record<string, unknown>,
+): { sealed: boolean; values?: unknown } | undefined {
+	for (const key of ["unevaluatedProperties", "additionalProperties"]) {
+		const rule = source[key];
+		if (rule === undefined) continue;
+		if (rule === false) return { sealed: true };
+		if (rule === true) return { sealed: false };
+		if (typeof rule !== "object" || rule === null) continue;
+		// `{"not": {}}` is openapi3's way of writing "nothing further is permitted".
+		if (JSON.stringify(rule) === '{"not":{}}') return { sealed: true };
+		// An empty schema permits anything and asserts nothing about it.
+		return Object.keys(rule).length === 0 ? { sealed: false } : { sealed: false, values: rule };
+	}
+	return undefined;
+}
+
+/**
+ * **The document composes with `allOf`; Zod cannot, so the emitter flattens.**
+ *
+ * **Not a disagreement - a difference in what the two languages can say.** openapi3 publishes a
+ * derived model as `allOf: [{$ref: Base}]` plus its own properties, because JSON Schema composes.
+ * Zod has no `allOf`, so the emitter writes the whole effective shape, base properties included.
+ * `Eagle` reads as `allOf[Bird] + {kind}` on one side and as `{kind, wingspan, ...}` on the other, and
+ * both describe the same object.
+ *
+ * Merging the base INTO the document's side is the only comparison that means anything. Properties
+ * and `required` union; a cycle stops the walk rather than hanging, and a base that cannot be
+ * resolved leaves the `allOf` in place so the difference is reported rather than silently dropped.
+ */
+function flattenAllOf(
+	schema: Record<string, unknown>,
+	resolve: RefResolver,
+	seen: ReadonlySet<string> = new Set(),
+): Record<string, unknown> {
+	const composed = schema["allOf"];
+	if (!Array.isArray(composed)) return schema;
+	const properties: Record<string, unknown> = {};
+	const required = new Set<string>();
+	/**
+	 * **`unevaluatedProperties` is `allOf`-AWARE, and that is the whole reason openapi3 uses it.**
+	 * A model extending `Record<float32>` is published as `allOf: [{$ref: TheRecord}]` with
+	 * `unevaluatedProperties: {not: {}}`, which does NOT seal the object - the base's
+	 * `additionalProperties` has already evaluated those keys, so the typed catchall survives
+	 * inheritance. Zod has no such composition, so the emitter writes `.catchall(z.number())` on the
+	 * derived model directly, and the two agree.
+	 *
+	 * Reading the derived model's `{not:{}}` as "sealed" made this arm accuse the emitter on 30
+	 * components in `type/property/additional-properties` alone. The emitter was right; the oracle had
+	 * flattened the properties and dropped the openness they were inherited with.
+	 */
+	let inheritedValues: unknown;
+	let inheritedOpen = false;
+	const merge = (source: Record<string, unknown>): void => {
+		const own = source["properties"];
+		if (typeof own === "object" && own !== null) Object.assign(properties, own);
+		const needs = source["required"];
+		if (Array.isArray(needs)) for (const name of needs) required.add(String(name));
+		const rule = extraPropertyRule(source);
+		if (rule !== undefined && !rule.sealed) {
+			inheritedOpen = true;
+			if (rule.values !== undefined) inheritedValues = rule.values;
+		}
+	};
+	for (const member of composed) {
+		if (typeof member !== "object" || member === null) return schema;
+		const ref = (member as { $ref?: unknown }).$ref;
+		if (typeof ref !== "string") {
+			merge(member as Record<string, unknown>);
+			continue;
+		}
+		if (seen.has(ref)) return schema;
+		const target = resolve(ref);
+		if (target === undefined) return schema;
+		merge(flattenAllOf(target as Record<string, unknown>, resolve, new Set([...seen, ref])));
+	}
+	merge(schema);
+	const { allOf: _allOf, ...rest } = schema;
+	const flattened: Record<string, unknown> = { ...rest, properties };
+	if (required.size > 0) flattened["required"] = [...required];
+	if (inheritedOpen) {
+		/**
+		 * The base's rule survives the composition, so the flattened form carries it. A base spread from
+		 * `Record<unknown>` is open with no value constraint, and reading the derived model's
+		 * `unevaluatedProperties: {not: {}}` as sealed loses that.
+		 */
+		flattened["additionalProperties"] = inheritedValues ?? {};
+		delete flattened["unevaluatedProperties"];
+	}
+	return flattened;
+}
+
+/**
+ * Zod stamps every `.int()` with JavaScript's safe-integer range. The document states a bound only
+ * where the SPEC states one, so the sentinel pair is Zod's artefact rather than a disagreement -
+ * removed only when it is exactly the sentinel, so a real `@maxValue(9007199254740991)` still counts.
+ */
+const SAFE_INTEGER = 9007199254740991;
+
+interface NormaliseContext {
+	/** Resolves a `#/components/schemas/X` pointer to the schema it names. */
+	readonly resolve: RefResolver;
+	/** Whether this emitter declares a component of that name, or inlines it at every use. */
+	readonly declared: (name: string) => boolean;
+	/** The component currently being compared, which Zod writes as the self-pointer `#`. */
+	readonly self: string;
+}
+
+/**
+ * **Collapse an `anyOf` of single-valued enums into one enum, where the two spell one assertion.**
+ *
+ * `z.union([z.literal(43.125), z.literal(46.875)])` serialises as `anyOf` of two `const`s; openapi3
+ * writes `enum: [43.125, 46.875]` with a single `type`. Both say "one of these values". Collapsed
+ * only when every member is a bare enum of the same `type` and carries nothing else, so a union of
+ * genuinely different shapes still compares as a union.
+ */
+function collapseLiteralUnion(node: Record<string, unknown>): Record<string, unknown> {
+	const members = node["anyOf"];
+	if (!Array.isArray(members) || members.length < 2) return node;
+	/**
+	 * Grouped BY TYPE rather than collapsed to one, because a union may mix them. `"a" | 2 | 3.3 | true`
+	 * is published by openapi3 as three members - one per JSON type, with the two numbers sharing an
+	 * `enum` - and by Zod as four, one per literal. Both accept exactly the same four values. Grouping
+	 * is the canonical form of "a union of literals" whichever way the two chose to split it.
+	 */
+	const byType = new Map<unknown, unknown[]>();
+	for (const member of members) {
+		if (typeof member !== "object" || member === null) return node;
+		const entry = member as Record<string, unknown>;
+		const keys = Object.keys(entry).toSorted().join(",");
+		// `const` has not been folded into `enum` yet when this runs, so accept both spellings.
+		const literals =
+			keys === "enum,type" && Array.isArray(entry["enum"])
+				? entry["enum"]
+				: keys === "const,type"
+					? [entry["const"]]
+					: undefined;
+		if (literals === undefined) return node;
+		const existing = byType.get(entry["type"]);
+		if (existing === undefined) byType.set(entry["type"], [...literals]);
+		else existing.push(...literals);
+	}
+	const grouped = [...byType].map(([type, values]) => ({ enum: values, type }));
+	const { anyOf: _anyOf, ...rest } = node;
+	// One type left means the union was of a single type, and an `anyOf` of one is that one.
+	return grouped.length === 1 ? { ...rest, ...grouped[0] } : { ...rest, anyOf: grouped };
+}
+
+/**
+ * **One `$ref` wrapped in `allOf` and nothing else is that `$ref`.**
+ *
+ * openapi3 wraps a reference in a single-member `allOf` wherever it needs a place to hang siblings,
+ * which it does for XML-annotated properties among others. Zod writes the bare reference. With one
+ * member and no other assertion beside it the two are the same schema.
+ */
+function collapseSingletonAllOf(node: Record<string, unknown>): Record<string, unknown> {
+	const composed = node["allOf"];
+	if (!Array.isArray(composed) || composed.length !== 1) return node;
+	const only = composed[0];
+	if (typeof only !== "object" || only === null) return node;
+	const inner = only as Record<string, unknown>;
+	if (Object.keys(inner).length !== 1 || typeof inner["$ref"] !== "string") return node;
+	const { allOf: _allOf, ...rest } = node;
+	// `xml` and friends are annotations; openapi3 hangs them beside the `allOf` it wrapped the
+	// reference in, and they assert nothing.
+	if (Object.keys(rest).some((key) => !ANNOTATION_KEYWORDS.has(key))) return node;
+	return { $ref: inner["$ref"] };
+}
+
+function normaliseJsonSchema(value: unknown, ctx: NormaliseContext): unknown {
+	if (Array.isArray(value)) return value.map((entry) => normaliseJsonSchema(entry, ctx));
+	if (value === null || typeof value !== "object") return value;
+	let source = value as Record<string, unknown>;
+	source = collapseSingletonAllOf(source);
+	source = collapseLiteralUnion(source);
+
+	/**
+	 * **A reference this emitter does not declare is compared INLINE, because that is what it emits.**
+	 *
+	 * openapi3 names a component for a constrained scalar - `$ref: "Trimmed"`, `$ref: "base64urlBytes"`
+	 * - and Zod has no named scalars, so the emitter writes the primitive with its constraints at every
+	 * use. Comparing a pointer against the thing it points at would report a divergence on every one.
+	 * Only pointers to components the emitter DOES declare stay as pointers, where both sides name the
+	 * same thing.
+	 */
+	const pointer = source["$ref"];
+	if (typeof pointer === "string") {
+		const name = pointer.replace("#/components/schemas/", "").replace("#/$defs/", "");
+		// Zod writes `#` for a component referring to itself; the document names it.
+		if (name === "#" || name === "") return { $ref: ctx.self };
+		if (!ctx.declared(name)) {
+			const target = ctx.resolve(`#/components/schemas/${name}`);
+			if (target !== undefined) {
+				const { $ref: _ref, ...siblings } = source;
+				return normaliseJsonSchema({ ...(target as Record<string, unknown>), ...siblings }, ctx);
+			}
+		}
+		return { $ref: name };
+	}
+
+	const out: Record<string, unknown> = {};
+	/**
+	 * **Absent means OPEN, and both dialects rely on that.** JSON Schema leaves an object unconstrained
+	 * when neither keyword appears, so openapi3 omitting them and Zod emitting `{}` say the same thing.
+	 * Recorded explicitly on every object so a sealed schema still compares against an open one.
+	 */
+	if (source["type"] === "object" || source["properties"] !== undefined) {
+		const extra = extraPropertyRule(source);
+		out["<openness>"] = extra?.sealed === true ? "sealed" : "open";
+		if (extra?.values !== undefined) out["<values>"] = normaliseJsonSchema(extra.values, ctx);
+	}
+	for (const key of Object.keys(source).sort()) {
+		if (ANNOTATION_KEYWORDS.has(key)) continue;
+		if (key === "unevaluatedProperties" || key === "additionalProperties") continue;
+		const entry = source[key];
+		// An empty `required` asserts nothing; openapi3 writes it, Zod omits it.
+		if (key === "required" && Array.isArray(entry) && entry.length === 0) continue;
+		if (source["type"] === "integer" && key === "maximum" && entry === SAFE_INTEGER) continue;
+		if (source["type"] === "integer" && key === "minimum" && entry === -SAFE_INTEGER) continue;
+		if (key === "const") {
+			out["enum"] = [normaliseJsonSchema(entry, ctx)];
+			continue;
+		}
+		if (key === "enum" && Array.isArray(entry) && entry.length === 1) {
+			out["enum"] = [normaliseJsonSchema(entry[0], ctx)];
+			continue;
+		}
+		if (key === "$defs") continue;
+		// `z.record(z.string(), ...)` emits `propertyNames: {type: "string"}`, which constrains nothing
+		// that JSON could violate. A non-trivial `propertyNames` is kept and compared.
+		if (key === "propertyNames" && JSON.stringify(entry) === '{"type":"string"}') continue;
+		out[key] = normaliseJsonSchema(entry, ctx);
+	}
+	return out;
+}
+
 interface Comparison {
 	readonly scenariosDifferentiated: number;
 	readonly objectsCompared: number;
+	/**
+	 * Components compared as JSON Schema, by Zod's own serialiser against openapi3's - no describer of
+	 * ours on either side. Zero means the strongest arm in this file is inert.
+	 */
+	readonly jsonSchemaCompared: number;
+	/** Components `z.toJSONSchema()` cannot serialise at all. Counted, never silently skipped. */
+	readonly jsonSchemaUnserialisable: number;
 	/** Polymorphic components compared as a choice. Zero means the discriminator arm is inert. */
 	readonly unionsCompared: number;
 	readonly refConstraintSkips: number;
@@ -513,6 +842,8 @@ async function compareEverything(): Promise<Comparison> {
 	const oracleFailures: string[] = [];
 	let scenariosDifferentiated = 0;
 	let objectsCompared = 0;
+	let jsonSchemaCompared = 0;
+	let jsonSchemaUnserialisable = 0;
 	let unionsCompared = 0;
 	let refConstraintSkips = 0;
 	let parametersCompared = 0;
@@ -989,6 +1320,17 @@ async function compareEverything(): Promise<Comparison> {
 		}
 
 		const reachable = componentsReachableFromPaths(document);
+		/**
+		 * Every component's validator under the name the DOCUMENT gives it, so a nested reference
+		 * serialises as `#/$defs/<Name>` rather than being inlined. Inlining would compare a nested
+		 * model against a `$ref` and diverge on every one of them, and would not terminate on the
+		 * recursive fixtures at all.
+		 */
+		const jsonSchemaRegistry = z.registry<{ id: string }>();
+		for (const component of Object.keys(document.components?.schemas ?? {})) {
+			const validator = emitted[identifierFor(component)];
+			if (isZodType(validator)) jsonSchemaRegistry.add(validator, { id: component });
+		}
 		const claimed = new Map<string, string>();
 		for (const [component, json] of Object.entries(document.components?.schemas ?? {})) {
 			const identifier = identifierFor(component);
@@ -1051,6 +1393,54 @@ async function compareEverything(): Promise<Comparison> {
 				} else unreachableComponents++;
 				continue;
 			}
+			/**
+			 * **The third axis, on the same pair the shape arm is about to compare.**
+			 *
+			 * Run here rather than in a suite of its own so both sides come from ONE compile: comparing
+			 * against a second compile would make every disagreement ambiguous, which is the same reason
+			 * both emitters already run from one program.
+			 */
+			const validator = emitted[identifierFor(component)];
+			if (isZodType(validator)) {
+				let serialised: unknown;
+				try {
+					serialised = z.toJSONSchema(validator, {
+						io: "input",
+						metadata: jsonSchemaRegistry,
+					});
+				} catch {
+					/**
+					 * **Counted, not swallowed.** Zod refuses to serialise some constructs - a
+					 * transform has no JSON Schema meaning. This emitter emits none, so this should stay
+					 * at zero; if it climbs, the arm is quietly comparing less than it reports.
+					 */
+					jsonSchemaUnserialisable++;
+					serialised = undefined;
+				}
+				if (serialised !== undefined) {
+					jsonSchemaCompared++;
+					const normaliseContext = {
+						resolve,
+						declared: (name: string) => emitted[identifierFor(name)] !== undefined,
+						self: component,
+					};
+					const fromDocumentJson = JSON.stringify(
+						normaliseJsonSchema(
+							flattenAllOf(json as Record<string, unknown>, resolve),
+							normaliseContext,
+						),
+					);
+					const fromZodJson = JSON.stringify(normaliseJsonSchema(serialised, normaliseContext));
+					if (fromDocumentJson !== fromZodJson) {
+						add(
+							"json-schema",
+							`${scenario.name}:${component}`,
+							`document=${fromDocumentJson} validator=${fromZodJson}`,
+						);
+					}
+				}
+			}
+
 			objectsCompared++;
 			refConstraintSkips += compareShapes(
 				scenario.name,
@@ -1071,6 +1461,8 @@ async function compareEverything(): Promise<Comparison> {
 	return {
 		scenariosDifferentiated,
 		objectsCompared,
+		jsonSchemaCompared,
+		jsonSchemaUnserialisable,
 		parametersCompared,
 		responsesCompared,
 		responseBodiesCompared,
@@ -1318,6 +1710,18 @@ describe("the validator and the document agree, over a corpus we did not write",
 		 * whole arm with it and the suite still reports agreement.
 		 */
 		expect(comparison.parametersCompared).toBeGreaterThanOrEqual(90);
+		/**
+		 * **The third axis, and the only arm here with nothing of ours between the two sides.** Zod's
+		 * own serialiser against openapi3's, so a defect in a describer we wrote cannot hide a
+		 * disagreement or invent one. Floored like every other counting arm: at zero it would report
+		 * agreement about nothing, which is precisely how the describers went uncompared for so long.
+		 */
+		expect(comparison.jsonSchemaCompared).toBeGreaterThanOrEqual(200);
+		/**
+		 * Zod refuses to serialise a construct with no JSON Schema meaning, such as a transform. This
+		 * emitter emits none, so any climb here is the arm quietly comparing less than it reports.
+		 */
+		expect(comparison.jsonSchemaUnserialisable).toBe(0);
 		/**
 		 * **The floor that turns a counted surface into a graded one.** This arm replaced a bare
 		 * `contentHeadersSkipped`, which was a gap dressed as a measurement; without a floor here it
