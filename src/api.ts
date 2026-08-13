@@ -1083,12 +1083,24 @@ function renderSchemas(
 	routeDeclarations: readonly string[],
 	runtimeModule: string,
 ): string {
-	const declarations = registry
-		.declarations()
-		.map(
-			(d) =>
-				`\nexport const ${d.identifier} = ${d.source};\nexport type ${d.typeName} = z.infer<typeof ${d.identifier}>;\n`,
-		);
+	const declarations = registry.declarations().map((d) => {
+		/**
+		 * ⚠️ **A declaration on a CYCLE cannot take its type from `z.infer`, because that is the loop.**
+		 * The ordinary form — `const x = …; type X = z.infer<typeof x>` — is circular the moment `x`'s
+		 * own initialiser depends on `X`, and TypeScript says so: `TS2456`, `TS2502`, `TS7022`. So a
+		 * cyclic declaration carries the type written out, and the deferred one is annotated with it,
+		 * which is the recipe Zod documents for exactly this. Everything else is unchanged, so a spec
+		 * with no cycle emits byte-identical output to before.
+		 */
+		if (d.structural === undefined) {
+			return `\nexport const ${d.identifier} = ${d.source};\nexport type ${d.typeName} = z.infer<typeof ${d.identifier}>;\n`;
+		}
+		const declared = d.structural.startsWith("{")
+			? `export interface ${d.typeName} ${d.structural}`
+			: `export type ${d.typeName} = ${d.structural};`;
+		const annotation = d.annotated === true ? `: z.ZodType<${d.typeName}>` : "";
+		return `\n${declared}\nexport const ${d.identifier}${annotation} = ${d.source};\n`;
+	});
 	const parts = [GENERATED_BANNER, '\nimport { z } from "zod";\n'];
 	/**
 	 * A TYPE import, so nothing of this package's survives into the emitted JavaScript.

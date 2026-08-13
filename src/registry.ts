@@ -1,6 +1,5 @@
 import type { Model, ModelProperty, Program, Type } from "@typespec/compiler";
 import { getVisibilitySuffix, Visibility } from "@typespec/http";
-import { reportDiagnostic } from "./lib.js";
 import { propertyToTs, typeToTsBody, withTsRefResolver } from "./types.js";
 import {
 	captureBackEdges,
@@ -23,27 +22,52 @@ import {
  */
 
 /**
- * A cycle that reaches a declaration through nothing that can defer it.
+ * **A cycle with no property on its path — and it used to be refused.**
  *
  * ⚠️ **A recursive model is NOT this.** `model InnerModel { children?: InnerModel[] }` is an ordinary
  * tree — `@typespec/openapi3` publishes a self-`$ref` for it and the document is valid — so it is
  * emitted as a reference, made lazy by a getter on the property that closes the loop (see
- * `modelToZod`). This placeholder is only for a cycle with no property on its path: a named **union**
- * whose variant refers back to a model that is still being rendered has nowhere to hang a getter, so
- * the reference cannot be deferred and the declaration would read itself while initialising.
+ * `modelToZod`). What this handles is a cycle with no property to hang a getter on: a named **union**
+ * whose variant refers back to a model still being rendered, or a dictionary VALUE that does.
  *
- * Reported rather than thrown, so the walk names every such cycle instead of dying inside the first.
+ * ⚠️ **`circular-model` claimed this was unrepresentable, and it was merely unimplemented.** Measured
+ * on Zod 4.4.3, `z.lazy()` closes every one of these at run time — a union-variant cycle and a
+ * dictionary-value cycle both parse nested values and, importantly, still **reject at depth**, so the
+ * schema has not quietly degraded to something that accepts anything.
+ *
+ * ⚠️ **But `z.lazy()` alone does not TYPECHECK, and that is the whole difficulty.** Measured with
+ * `tsc` under `strict`:
+ *
+ * ```
+ * TS7022: 'branchSchema' implicitly has type 'any' because it does not have a type annotation
+ *         and is referenced directly or indirectly in its own initializer.
+ * TS7022: 'nodeSchema'   implicitly has type 'any' ...        <- it poisons the sibling too
+ * ```
+ *
+ * Inferring `any` is worse than failing to compile, because `wire-contract.gen.ts` asserts
+ * `Identical<z.infer<typeof X>, Contracts.X>` — against `any` that assertion PASSES while proving
+ * nothing, which is the one outcome this package treats as worse than a red test.
+ *
+ * The fix is the recipe Zod documents: give the deferred declaration an explicit `z.ZodType<T>` and
+ * declare `T` structurally. Measured, `tsc` exit 0 with the identity assertion still holding.
+ *
+ * ⚠️ **EVERY member of the cycle needs its structural type, not only the deferred one.** Leaving the
+ * others as `export type X = z.infer<typeof xSchema>` reintroduces the loop through the annotation —
+ * measured: `TS2456: Type alias 'Branch' circularly references itself` plus `TS2502` and `TS7022`. So
+ * cycle membership, not merely deferral, decides which declarations are emitted structurally.
  */
-const CYCLE_PLACEHOLDER_SCHEMA = "z.never()";
-
-function reportCycle(program: Program, type: Type, name: string): void {
-	reportDiagnostic(program, { code: "circular-model", target: type, format: { name } });
-}
 
 interface Declaration {
 	readonly identifier: string;
 	readonly typeName: string;
 	readonly source: string;
+	/**
+	 * The structural TypeScript body for a declaration on a cycle, emitted INSTEAD of the
+	 * `z.infer<typeof …>` alias — which cannot be used here without closing the type-level loop.
+	 */
+	readonly structural?: string;
+	/** Whether the declaration is annotated `: z.ZodType<typeName>`, which `z.lazy()` requires. */
+	readonly annotated?: boolean;
 }
 
 /**
@@ -192,6 +216,8 @@ export class SchemaRegistry {
 	readonly #order: Declaration[] = [];
 	/** Key → the identifier it is *going* to bind, so a back edge can name a declaration in flight. */
 	readonly #inProgress = new Map<string, string>();
+	/** Keys on a cycle — every one needs a structural type rather than a `z.infer` alias. */
+	readonly #cyclic = new Set<string>();
 
 	constructor(program: Program) {
 		this.#program = program;
@@ -234,6 +260,14 @@ export class SchemaRegistry {
 		const pending = this.#inProgress.get(key);
 		if (pending !== undefined) {
 			noteBackEdge();
+			/**
+			 * ⚠️ **Every declaration currently in flight is ON this cycle**, and all of them need a
+			 * structural type — not only the one that ends up deferred. `#inProgress` is exactly the path
+			 * from the cycle's entry point down to here, so recording it wholesale is both correct and
+			 * cheap. Recording only the deferred declaration leaves the others as `z.infer` aliases and
+			 * closes the loop again at the type level — `TS2456`, measured.
+			 */
+			for (const inFlight of this.#inProgress.keys()) this.#cyclic.add(inFlight);
 			return pending;
 		}
 
@@ -245,16 +279,18 @@ export class SchemaRegistry {
 		this.#inProgress.delete(key);
 		/**
 		 * A back edge that survived the whole body reached this declaration by a path with no object
-		 * property on it — a named union variant, or a dictionary value — so nothing could make it
-		 * lazy and the emitted `const` would read itself while initialising.
+		 * property on it — a named union variant, or a dictionary value — so nothing could make it lazy
+		 * and the emitted `const` would read itself while initialising. `z.lazy()` defers the whole body
+		 * instead, which is the only place left to put the deferral once no property can hold it.
 		 */
-		if (rendered.deferred) reportCycle(this.#program, type, bare);
-		const source = rendered.deferred ? CYCLE_PLACEHOLDER_SCHEMA : rendered.value;
+		const source = rendered.deferred ? `z.lazy(() => ${rendered.value})` : rendered.value;
 
 		const declaration: Declaration = {
 			identifier,
 			typeName: name,
 			source,
+			...(this.#cyclic.has(key) ? { structural: this.#structuralBodyOf(type) } : {}),
+			...(rendered.deferred ? { annotated: true } : {}),
 		};
 		this.#declarations.set(key, declaration);
 		this.#order.push(declaration);
@@ -332,6 +368,27 @@ export class SchemaRegistry {
 		this.#declarations.set(key, declaration);
 		this.#order.push(declaration);
 		return identifier;
+	}
+
+	/**
+	 * The structural TypeScript body for a type on a cycle.
+	 *
+	 * ⚠️ **The same walk `requests.gen.ts` uses, resolving named types to their NAMES rather than
+	 * declaring them.** A cyclic declaration cannot take its type from `z.infer<typeof …>` — that is
+	 * the loop — so it needs a type written out. Every name this body references is declared in the
+	 * same file either structurally (if it is on the cycle too) or as the ordinary `z.infer` alias (if
+	 * it is not), so nothing further has to be emitted for it.
+	 *
+	 * Sharing `types.ts` rather than writing a second TypeScript renderer is what keeps the annotation
+	 * agreeing with the validator: those two walks are already paired against each other by
+	 * `wire-contract.gen.ts`, and a third spelling of "what this shape is" would be a third thing to
+	 * drift.
+	 */
+	#structuralBodyOf(type: Type): string {
+		return withTsRefResolver(
+			(candidate) => declaredNameOf(candidate),
+			() => typeToTsBody(this.#program, type),
+		);
 	}
 
 	/**

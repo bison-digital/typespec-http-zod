@@ -24,58 +24,87 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const referenceDir = join(here, "reference");
 
 let compiled: CompiledFixture;
+let cyclic: CompiledFixture;
 
 beforeAll(async () => {
 	// ⚠️ Its own output directory. This and `reference.test.ts` both compiled `service` into
 	// `reference/.out/service/`, in parallel, and the loser's options decided what the winner
 	// graded — measured as TS2305s against a `schemas.gen.ts` written under different options.
 	compiled = await compileFixture(referenceDir, "service", { outName: "service-emit" });
+	/**
+	 * ⚠️ **A cycle emits a SHAPE OF OUTPUT nothing else here compiles**, and it is the shape most
+	 * likely to typecheck wrongly rather than not at all. A declaration on a cycle carries a written-out
+	 * type and a `z.ZodType<T>` annotation; drop the annotation and the module still loads, still parses,
+	 * still rejects — and infers `any`, at which point `wire-contract.gen.ts` asserts nothing. Measured:
+	 * `TS7022` on the deferred declaration AND on the sibling it poisons.
+	 *
+	 * This arm existed for one fixture, so that whole class was uncompiled.
+	 */
+	cyclic = await compileFixture(join(here, "recursion"), "union-cycle", { outName: "cycle-emit" });
 });
+
+/** Run `tsc` over one emitted directory, under the settings a consumer builds with. */
+function typecheckEmitted(outDir: string): { output: string; failed: boolean } {
+	/**
+	 * A tsconfig written beside the output, so the compiler sees exactly the generated files and
+	 * nothing of this package's own source. `strict` and `exactOptionalPropertyTypes` because an
+	 * emitter whose output only compiles under lenient settings has pushed its problem downstream.
+	 */
+	const config = join(outDir, "tsconfig.emitted.json");
+	writeFileSync(
+		config,
+		JSON.stringify(
+			{
+				compilerOptions: {
+					target: "es2023",
+					module: "nodenext",
+					moduleResolution: "nodenext",
+					strict: true,
+					exactOptionalPropertyTypes: true,
+					noUncheckedIndexedAccess: true,
+					noEmit: true,
+					skipLibCheck: true,
+					types: [],
+				},
+				include: ["./*.ts"],
+			},
+			null,
+			"\t",
+		),
+	);
+
+	let output = "";
+	let failed = false;
+	try {
+		output = execFileSync(
+			join(here, "..", "node_modules", ".bin", "tsc"),
+			["-p", config, "--ignoreConfig"],
+			{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+		);
+	} catch (error) {
+		failed = true;
+		const asExec = error as { stdout?: string; stderr?: string };
+		output = `${asExec.stdout ?? ""}${asExec.stderr ?? ""}`;
+	}
+	return { output, failed };
+}
 
 describe("the emitted output compiles", () => {
 	it("passes tsc under the settings a consumer builds with", () => {
-		/**
-		 * A tsconfig written beside the output, so the compiler sees exactly the four generated files
-		 * and nothing of this package's own source. `strict` and `exactOptionalPropertyTypes` because an
-		 * emitter whose output only compiles under lenient settings has pushed its problem downstream.
-		 */
-		const config = join(compiled.outDir, "tsconfig.emitted.json");
-		writeFileSync(
-			config,
-			JSON.stringify(
-				{
-					compilerOptions: {
-						target: "es2023",
-						module: "nodenext",
-						moduleResolution: "nodenext",
-						strict: true,
-						exactOptionalPropertyTypes: true,
-						noUncheckedIndexedAccess: true,
-						noEmit: true,
-						skipLibCheck: true,
-						types: [],
-					},
-					include: ["./*.ts"],
-				},
-				null,
-				"\t",
-			),
-		);
-
-		let output = "";
-		let failed = false;
-		try {
-			output = execFileSync(
-				join(here, "..", "node_modules", ".bin", "tsc"),
-				["-p", config, "--ignoreConfig"],
-				{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-			);
-		} catch (error) {
-			failed = true;
-			const asExec = error as { stdout?: string; stderr?: string };
-			output = `${asExec.stdout ?? ""}${asExec.stderr ?? ""}`;
-		}
+		const { output, failed } = typecheckEmitted(compiled.outDir);
 		// The output is the evidence — a bare `toBe(false)` would report "expected true to be false".
+		expect(output.trim(), output).toBe("");
+		expect(failed).toBe(false);
+	});
+
+	it("compiles a CYCLE without inferring `any`", () => {
+		/**
+		 * ⚠️ **`noImplicitAny` is what makes this arm bite, and `strict` already implies it.** The
+		 * failure is not a missing declaration — the module loads and behaves correctly either way. It is
+		 * `TS7022`, "implicitly has type 'any' because it is referenced directly or indirectly in its own
+		 * initializer", which is the compiler refusing to pretend it resolved a type it did not.
+		 */
+		const { output, failed } = typecheckEmitted(cyclic.outDir);
 		expect(output.trim(), output).toBe("");
 		expect(failed).toBe(false);
 	});

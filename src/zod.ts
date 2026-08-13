@@ -776,23 +776,21 @@ function modelToZod(program: Program, model: Model): string {
 	 * `z.looseObject` take the same shape without reading it. The suffix form stays everywhere else,
 	 * so a model that does not recurse emits exactly the text it emitted before.
 	 *
-	 * A **typed** catchall has no constructor form to move to, so there is nowhere safe to put the
-	 * getter and the cycle is genuinely unrepresentable here — that is a refusal, and it is named.
+	 * ⚠️ **A TYPED catchall has no constructor form, and that used to be a refusal.** There is nowhere
+	 * safe to put the getter — `.catchall()` reads `shape` eagerly — so the cycle was reported as
+	 * `circular-model`. `z.lazy()` is the place to put it: wrapping the whole expression defers the
+	 * getter past module initialisation, and by the time the schema is forced every declaration exists.
+	 * Measured on 4.4.3: `z.lazy(() => z.object({ get kid() {…} }).catchall(z.number()))` parses a
+	 * nested value and still applies the catchall.
 	 */
 	const lazily = members.some((member) => member.deferred);
 	const constructible = suffix === "" || suffix === ".loose()";
-	if (lazily && !constructible) {
-		reportDiagnostic(program, {
-			code: "circular-model",
-			target: model,
-			format: { name: model.name === "" ? "an anonymous model" : model.name },
-		});
-	}
 	const shape = entries.length === 0 ? "{}" : `{\n${entries.join("\n")}\n}`;
-	const body =
-		lazily && constructible
+	const body = lazily
+		? constructible
 			? `${suffix === ".loose()" ? "z.looseObject" : strict === ".strict()" ? "z.strictObject" : "z.object"}(${shape})`
-			: `z.object(${shape})${suffix}${strict}`;
+			: `z.lazy(() => z.object(${shape})${suffix}${strict})`
+		: `z.object(${shape})${suffix}${strict}`;
 	return applyConstraints(program, body, model);
 }
 

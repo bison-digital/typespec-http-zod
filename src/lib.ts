@@ -212,23 +212,14 @@ const diagnostics = {
 			default: paramMessage`A union with no representable variants (${"why"}) has nothing to validate against.`,
 		},
 	},
-	/**
-	 * ⚠️ **Most cycles are not this.** A recursive model is an ordinary construct — `@typespec/openapi3`
-	 * publishes a self-`$ref` and the document is valid — so it is emitted as a reference, deferred
-	 * behind a getter on the property that closes the loop. This diagnostic is for the remainder: a
-	 * cycle whose path holds **no object property**, and so has nowhere to put that getter. A named
-	 * union whose variant refers back to a model still being rendered is the reachable case.
-	 *
-	 * Reported rather than thrown so the walk names every such cycle instead of dying inside the
-	 * first — and, before the getters existed, so an inline cycle produced this rather than a
-	 * `RangeError: Maximum call stack size exceeded`.
+	/*
+	 * `circular-model` was declared here and has been RETIRED, because it refused something that can
+	 * be represented. It fired on a cycle whose path holds no object property — a union variant or a
+	 * dictionary value — on the grounds that a getter needs a property to sit on. True, and beside the
+	 * point: `z.lazy()` needs no property, and deferring the whole declaration is where the laziness
+	 * goes once nothing smaller can hold it. See `registry.ts` for the measurements, including why the
+	 * fix needs a structural type and an annotation rather than `z.lazy()` alone.
 	 */
-	"circular-model": {
-		severity: "error",
-		messages: {
-			default: paramMessage`'${"name"}' closes a cycle through a declaration that cannot defer it — a union variant or a dictionary value, neither of which is a property a getter can sit on, so the emitted schema would read itself while initialising. Route the cycle through a model property, or break it in the spec.`,
-		},
-	},
 	/**
 	 * A `key-vocabularies` entry naming no model in the service.
 	 *

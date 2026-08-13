@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -131,15 +132,72 @@ describe("a recursive model is emitted as a reference, not refused and not inlin
 	});
 });
 
-describe("a cycle with nowhere to put a getter is NAMED, not crashed", () => {
-	it("reports circular-model for a loop that closes through a named union", async () => {
+describe("a cycle with nowhere to put a getter is SERVED, not refused", () => {
+	/**
+	 * **`Node` → `Branch` → `Node` closes through a union declaration, which has no properties.**
+	 *
+	 * ⚠️ **This was `circular-model`, and the refusal was wrong.** A getter needs an object property
+	 * to sit on and a union has none, so the reference could not be deferred — but `z.lazy()` does not
+	 * need a property, and deferring the whole declaration is the place to put it. `@typespec/openapi3`
+	 * publishes this spec without complaint, so refusing it made the same source representable by one
+	 * emitter and not the other.
+	 *
+	 * ⚠️ **Three ways this can look green while being broken**, all guarded below:
+	 *
+	 * - **It throws on import**, because a `const` read itself while initialising. The arms here import
+	 *   the module, so that fails before any assertion.
+	 * - **It infers `any`.** `z.lazy()` alone typechecks as `any` — `TS7022` — and that is worse than
+	 *   not compiling, because the wire assertions would pass while proving nothing. The emitted file is
+	 *   compiled under `strict` by `emit.test.ts`; the arm here checks the annotation that makes it
+	 *   sound is actually present.
+	 * - **It degrades to accepting anything.** A lazy that resolves to an unconstrained schema parses
+	 *   every valid document too, so only a rejection AT DEPTH tells the two apart.
+	 */
+	let compiled: CompiledFixture;
+	let schemas: Record<string, ZodType>;
+
+	beforeAll(async () => {
+		compiled = await compileFixture(here, "union-cycle");
+		schemas = (await import(join(compiled.outDir, "schemas.gen.ts"))) as Record<string, ZodType>;
+	}, 120_000);
+
+	it("emits it without a diagnostic", () => {
+		expect(compiled.diagnostics.map((d) => d.code)).not.toContain(
+			"typespec-http-zod/circular-model",
+		);
+		expect(compiled.diagnostics).toEqual([]);
+	});
+
+	it("parses through the cycle, in both directions of the union", () => {
+		const node = schemas["nodeSchema"];
+		expect(node).toBeDefined();
+		expect(node?.parse({ label: "a", branch: { label: "b" } })).toEqual({
+			label: "a",
+			branch: { label: "b" },
+		});
+		// The other variant of `Branch`, so the union has not collapsed to its model arm.
+		expect(node?.parse({ label: "a", branch: "leaf" })).toEqual({ label: "a", branch: "leaf" });
+	});
+
+	it("still rejects at depth, so the cycle has not degraded to `unknown`", () => {
+		const node = schemas["nodeSchema"];
+		expect(node?.safeParse({ label: 1 }).success).toBe(false);
+		// One level down, through the union and back into the model.
+		expect(node?.safeParse({ label: "a", branch: { label: 1 } }).success).toBe(false);
+		expect(node?.safeParse({ label: "a", branch: { label: "b", nope: true } }).success).toBe(false);
+	});
+
+	it("annotates the deferred declaration, which is what keeps it from inferring `any`", () => {
 		/**
-		 * A getter needs an object property to sit on. `Node` → `Branch` → `Node` closes through a
-		 * union declaration, which has no properties, so the reference cannot be deferred. That is a
-		 * real limit — but the emitter's job is to say so. Before this, the same shape was a
-		 * `RangeError: Maximum call stack size exceeded` from inside the walk, which names nothing.
+		 * ⚠️ **Asserted on the emitted TEXT, because the failure it guards is invisible at run time.**
+		 * `z.lazy()` without the annotation parses identically and infers `any`, so every behavioural
+		 * arm above would still pass while `wire-contract.gen.ts` silently stopped checking anything.
 		 */
-		const compiled = await compileFixture(here, "union-cycle");
-		expect(compiled.diagnostics.map((d) => d.code)).toContain("typespec-http-zod/circular-model");
+		const source = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
+		expect(source).toMatch(/export const \w+: z\.ZodType<\w+> = z\.lazy\(/);
+		// Every member of the cycle carries a written-out type rather than a `z.infer` alias, or the
+		// annotation closes the loop again — `TS2456`, measured.
+		expect(source).not.toMatch(/export type Branch = z\.infer</);
+		expect(source).not.toMatch(/export type Node = z\.infer</);
 	});
 });
