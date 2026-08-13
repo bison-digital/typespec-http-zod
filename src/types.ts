@@ -95,12 +95,21 @@ function scalarToTs(program: Program, scalar: Scalar): string {
 		if (mapped !== undefined) return mapped;
 		current = current.baseScalar;
 	}
-	reportDiagnostic(program, {
-		code: "unsupported-scalar",
-		target: scalar,
-		format: { artefact: "a TypeScript type", name: scalar.name },
-	});
-	return UNREPRESENTABLE;
+	/**
+	 * **`unknown`, matching `z.unknown()` on the other side and `{}` in the document.**
+	 *
+	 * ⚠️ **Fixing only the Zod walk left the two artefacts describing different shapes.** `scalarToZod`
+	 * was changed to emit `z.unknown()` for a scalar with no known base, because openapi3 publishes the
+	 * empty schema and that asserts nothing. This walk still refused, so a consumer with
+	 * `contracts-output-dir` set got `value: z.unknown()` in `schemas.gen.ts` and `value: never` in
+	 * `requests.gen.ts` — plus the refusal that was supposed to be gone.
+	 *
+	 * That is the disagreement `wire-contract.gen.ts` exists to catch, reintroduced by the fix for the
+	 * defect beside it. It went unseen for one commit because the verification compile left
+	 * `contracts-output-dir` unset, so this walk never ran — the same shape as the `never` property,
+	 * where the diagnostic came from the walk nobody was looking at.
+	 */
+	return "unknown";
 }
 
 function enumToTs(target: Enum): string {

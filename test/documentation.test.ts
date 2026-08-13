@@ -32,14 +32,14 @@ describe("the README documents everything this package can do to you", () => {
 	it("names every diagnostic it can raise", () => {
 		const codes = Object.keys($lib.diagnostics);
 		/**
-		 * ⚠️ **This floor moved DOWN, from 8 to 7, and that needs saying out loud.** Lowering a floor is
-		 * normally how an arm rots into passing vacuously. Here the measured value genuinely fell:
-		 * `circular-model` was retired because the cycles it refused turned out to be representable, so
-		 * there are seven diagnostics rather than eight. The floor tracks the count to keep the arm
+		 * ⚠️ **This floor has moved DOWN twice, 8 to 7 to 6, and that needs saying out loud.** Lowering a
+		 * floor is normally how an arm rots into passing vacuously. Here the measured value genuinely
+		 * fell each time, because a refusal turned out to refuse something representable and was retired:
+		 * `circular-model` first, then `unsupported-scalar`. The floor tracks the count to keep the arm
 		 * non-vacuous against an empty set; it is not a pin, because adding a diagnostic must not fail
 		 * this arm — it must fail the one below, which requires it to be documented.
 		 */
-		expect(codes.length).toBeGreaterThanOrEqual(7);
+		expect(codes.length).toBeGreaterThanOrEqual(6);
 		expect(codes.filter((code) => !readme.includes(`\`${code}\``)).toSorted()).toEqual([]);
 	});
 

@@ -158,12 +158,13 @@ export const EmitterOptionsSchema: JSONSchemaType<EmitterOptions> = {
  * suppressible by the person writing the spec.
  */
 const diagnostics = {
-	"unsupported-scalar": {
-		severity: "error",
-		messages: {
-			default: paramMessage`Cannot emit ${"artefact"} for scalar '${"name"}': this emitter has no rule for it. Give it a known base with 'extends', or encode it with '@encode'.`,
-		},
-	},
+	/*
+	 * `unsupported-scalar` was declared here and has been RETIRED. A scalar with no known base is not
+	 * unrepresentable: `@typespec/openapi3` publishes `scalar Mystery;` as the empty schema `{}`, which
+	 * asserts nothing and therefore accepts everything. Refusing it emitted `z.never()`, the exact
+	 * inversion — measured, `"hello"`, `42` and `null` all rejected. Both walks now emit the faithful
+	 * reading, `z.unknown()` and `unknown`, and openapi3 raises no diagnostic so neither does this.
+	 */
 	"unsupported-type": {
 		severity: "error",
 		messages: {
