@@ -208,6 +208,23 @@ stated limitation once a package is published. Each is re-measured by the suite.
   silently passed.
 - **A `@head` operation gets validators here and cannot be served by every router.** That is a fact
   about the server, not about this package — see `typespec-hono`, which refuses it and says why.
+- **`int64` and `uint64` are validated as JavaScript numbers, so values above `2^53-1` are refused —
+  and `@encode(string)` is the fix.** The document publishes `type: integer` with `format: int64`,
+  which states no bound; the emitted `z.number().int()` refuses anything beyond
+  `Number.MAX_SAFE_INTEGER`. That is a constraint the document does not state, and it is kept anyway,
+  because it is imposed by the runtime rather than invented here — **above `2^53-1` an integer is no
+  longer uniquely representable as a JavaScript number**, so a validator cannot certify that the value
+  it holds is the value that was sent. Measured: `9007199254740993` reaches a handler as
+  `9007199254740992`, and int64's maximum as `9223372036854776000`, both through `JSON.parse` before
+  any validator runs. Accepting them would stamp "valid" on a number nobody sent, which is the one
+  answer a validator must never give. `z.int64()` is not an alternative: it is `bigint`-based and
+  `JSON.parse` never produces a `bigint`, so it would refuse every JSON body.
+
+  ⚠️ **TypeSpec's own remedy works and costs one decorator.** `@encode(string) value: int64` emits
+  `z.string()`, and openapi3 publishes `type: string` with `format: int64` — the two agree exactly, and
+  the digits survive the wire intact. Use it for any 64-bit integer whose values can exceed `2^53-1`:
+  identifiers, balances in minor units, timestamps in nanoseconds.
+
 - **The emitted output requires `zod`, not `zod/mini`.** The tree-shakeable variant has no chained
   methods at all — measured on 4.4.3, `typeof z.string().optional`, `.nullable` and `.min` are each
   `undefined` — and the emitted validators use `.optional()`, `.nullable()`, `.default()`, `.strict()`,
