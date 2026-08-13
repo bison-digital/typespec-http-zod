@@ -47,7 +47,11 @@ describe("the README documents everything this package can do to you", () => {
 		const linked = [...readme.matchAll(/\]\((docs\/[\w./-]+?\.md)(?:#[\w-]+)?\)/g)].map(
 			(match) => match[1],
 		);
-		expect([...new Set(linked)].toSorted()).toEqual(["docs/guides.md", "docs/reference.md"]);
+		expect([...new Set(linked)].toSorted()).toEqual([
+			"docs/guides.md",
+			"docs/oracles.md",
+			"docs/reference.md",
+		]);
 	});
 
 	it("names every diagnostic it can raise", () => {
