@@ -1,6 +1,7 @@
 import {
 	getDiscriminatedUnion,
 	getEncode,
+	isNeverType,
 	resolveEncodedName,
 	type Enum,
 	type Model,
@@ -182,7 +183,23 @@ function modelToTs(program: Program, model: Model): string {
 	if (indexerKey === "string" && indexer !== undefined && declared.length === 0) {
 		return `Record<string, ${typeToTs(program, indexer.value)}>`;
 	}
-	const entries = declared.map((property) => `\t${propertyToTs(program, property)}`);
+	/**
+	 * ⚠️ **A `never` property is dropped here too, and this walk is where the refusal actually came
+	 * from.** `modelToZod` filters it because `@typespec/openapi3` omits such a property from the
+	 * document entirely — `model N { value: never; other: string }` publishes as `{other}` with
+	 * `required: ["other"]`. This walk had no property filter at all, so it reached `typeToTs`, hit the
+	 * `Intrinsic` case and reported `unsupported-type` from a type with no source node — which is why
+	 * the diagnostic pointed at `<unknown location>` and why filtering the Zod side alone did not
+	 * silence it.
+	 *
+	 * Two walks over one TypeSpec have to agree about which properties exist, or `wire-contract.gen.ts`
+	 * pairs a validator against a type describing a different shape. That assertion is the only thing
+	 * that catches this emitter disagreeing with itself, and it cannot catch a disagreement that
+	 * aborts the compile first.
+	 */
+	const entries = declared
+		.filter((property) => !isNeverType(property.type))
+		.map((property) => `\t${propertyToTs(program, property)}`);
 	/**
 	 * ⚠️ **The indexer is deliberately NOT intersected in.**
 	 *

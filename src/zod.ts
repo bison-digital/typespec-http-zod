@@ -386,12 +386,26 @@ function scalarToZod(program: Program, scalar: Scalar): string {
 		if (mapped !== undefined) return applyConstraints(program, mapped, scalar);
 		current = current.baseScalar;
 	}
-	reportDiagnostic(program, {
-		code: "unsupported-scalar",
-		target: scalar,
-		format: { artefact: "Zod", name: scalar.name },
-	});
-	return UNREPRESENTABLE;
+	/**
+	 * **A scalar with no known base is `z.unknown()`, and it used to be a refusal.**
+	 *
+	 * ⚠️ **`z.never()` was the exact inversion of what the document says.** `scalar Mystery;` is
+	 * published by `@typespec/openapi3` as `"Mystery": {}` — the empty schema, which under JSON Schema
+	 * asserts nothing and therefore accepts **everything**. This emitter refused the compile and, on the
+	 * way, wrote `value: z.never()`, which accepts **nothing**. Measured against the emitted schema:
+	 * `"hello"`, `42` and `null` were all rejected, so a service built on it would answer 400 to every
+	 * request the document calls valid.
+	 *
+	 * Refusing was the wrong answer twice over: the document represents the spec perfectly, so under the
+	 * governing rule this emitter must too — the same source has to be representable by both or by
+	 * neither. And `z.unknown()` is not a guess, it is the precise reading of `{}`: a validator that
+	 * enforces nothing is what a schema asserting nothing means.
+	 *
+	 * No diagnostic, because openapi3 raises none. Copying its rule includes copying its silence; a
+	 * warning here would report a problem the published contract does not have. This is the same
+	 * treatment a raw binary body already gets, for the same reason.
+	 */
+	return applyConstraints(program, "z.unknown()", scalar);
 }
 
 /**
@@ -749,6 +763,22 @@ function modelToZod(program: Program, model: Model): string {
 	 */
 	const members = declared
 		.filter((property) => isPayloadProperty(program, property))
+		/**
+		 * ⚠️ **A `never` property is DROPPED, exactly as the document drops it.** `model N { value:
+		 * never; other: string }` is published by `@typespec/openapi3` as `{other}` with
+		 * `required: ["other"]` — `value` is absent entirely, because a property that can hold no value
+		 * is not part of the payload.
+		 *
+		 * This emitter kept it and wrote `value: z.never()`, which made the model unsatisfiable: measured,
+		 * `{"other":"x"}` — the exact body the document describes — was REJECTED with "expected never,
+		 * received undefined". So the validator generated from a document rejected every request that
+		 * document calls valid, which is the divergence class this package exists to prevent.
+		 *
+		 * Dropping it makes the two artefacts agree and leaves nothing to refuse. `never` in a position
+		 * that is not a property — a body, a variant — is still refused by `typeToZodBody`, because there
+		 * it is not something the document quietly omits.
+		 */
+		.filter((property) => !isNeverType(property.type))
 		.map((property) => {
 			const key = propertyKey(program, property);
 			const { value, deferred } = captureBackEdges(() => propertyToZod(program, property));
