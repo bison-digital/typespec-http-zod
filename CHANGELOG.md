@@ -10,7 +10,21 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Emitted output is unchanged.
+A minor when released: two shapes that emitted TypeScript which does not parse now emit valid
+declarations, so their names and forms change.
+
+### Fixed
+
+- **A discriminated union with the default envelope emitted `export interface X { ... } | { ... }`,
+  which is not valid TypeScript.** Whether a body could be an `interface` was decided by testing the
+  rendered text for an intersection, which the union form does not contain. The file did not parse at
+  all. This is the shape a spec gets from writing `@discriminated` and nothing else, not the
+  `envelope: "none"` form that is refused. Decided by balanced braces now: an interface is valid
+  exactly when the whole body is a single `{...}`, whatever it contains.
+- **A model named after a reserved word emitted `export interface await` and
+  `export type break = ...`.** Both are `TS2427` and the parser gives up after the first. Such names
+  now carry a trailing `_`, applied in one place so both walks agree and the wire assertions still
+  pair by name.
 
 ### Changed
 

@@ -132,9 +132,79 @@ function spreadSourceOf(
 
 const spreadSourceName = (type: Model): string | undefined => spreadSourceOf(type)?.name;
 
+/**
+ * ECMAScript's reserved words, which cannot name a TypeScript declaration.
+ *
+ * **A model may be named after one, and the corpus declares exactly that on purpose.** `special-words`
+ * carries `await`, `break` and the rest, and this emitter wrote `export interface await { ... }` and
+ * `export type break = z.infer<...>`, neither of which parses - `TS2427`, then the parser gives up
+ * and the whole file is lost.
+ *
+ * ⚠️ **This is a LIST, which this package otherwise refuses.** It is defensible here because it is
+ * not a list about our own code that drifts as the code changes: it is a closed set the language
+ * specification fixes. The guard is that `tsc` compiles a fixture declaring models named after these,
+ * so a word missing from the list fails a test rather than reaching a consumer - the list is the
+ * implementation and the compiler is the oracle.
+ *
+ * Contextual keywords are deliberately absent, because they are legal: `interface`, `string`,
+ * `number`, `any`, `never`, `public` and `yield` all name a type without complaint. Measured, rather
+ * than assumed from a language reference.
+ */
+const RESERVED_DECLARATION_NAMES = new Set([
+	"await",
+	"break",
+	"case",
+	"catch",
+	"class",
+	"const",
+	"continue",
+	"debugger",
+	"default",
+	"delete",
+	"do",
+	"else",
+	"enum",
+	"export",
+	"extends",
+	"false",
+	"finally",
+	"for",
+	"function",
+	"if",
+	"import",
+	"in",
+	"instanceof",
+	"new",
+	"null",
+	"return",
+	"super",
+	"switch",
+	"this",
+	"throw",
+	"true",
+	"try",
+	"typeof",
+	"var",
+	"void",
+	"while",
+	"with",
+]);
+
+/**
+ * The name a declaration is emitted under.
+ *
+ * A trailing `_` is appended where the spec's own name cannot be a TypeScript declaration. It is
+ * applied in ONE place so both walks agree: `wire-contract.gen.ts` pairs a validator against a
+ * contract type by name, and a mangling applied to one side only would break that assertion rather
+ * than the file.
+ */
+function safeDeclarationName(name: string): string {
+	return RESERVED_DECLARATION_NAMES.has(name) ? `${name}_` : name;
+}
+
 /** A type earns a name when the spec gave it one - anonymous shapes stay inline where they are used. */
 function declaredNameOf(type: Type): string | undefined {
-	if (type.kind === "Enum") return type.name;
+	if (type.kind === "Enum") return safeDeclarationName(type.name);
 	/**
 	 * A named union earns a declaration too.
 	 *
@@ -143,11 +213,15 @@ function declaredNameOf(type: Type): string | undefined {
 	 * cross-field rule modelled as a discriminated union (which is how `@refine` is being replaced)
 	 * would silently stop being checked at the boundary.
 	 */
-	if (type.kind === "Union") return type.name === undefined ? undefined : type.name;
+	if (type.kind === "Union")
+		return type.name === undefined ? undefined : safeDeclarationName(type.name);
 	if (type.kind !== "Model") return undefined;
 	// `Array`/`Record` are TypeSpec's built-in generic containers, not names worth exporting.
 	if (type.name === "Array" || type.name === "Record") return undefined;
-	if (type.name === "") return spreadSourceName(type);
+	if (type.name === "") {
+		const spread = spreadSourceName(type);
+		return spread === undefined ? undefined : safeDeclarationName(spread);
+	}
 	/**
 	 * **A template INSTANTIATION carries the template's name, and it is not a declaration.**
 	 *
@@ -160,7 +234,7 @@ function declaredNameOf(type: Type): string | undefined {
 	 * Invisible until a spec uses a template; a paged-response envelope is the usual first one.
 	 */
 	if (type.templateMapper !== undefined) return undefined;
-	return type.name;
+	return safeDeclarationName(type.name);
 }
 
 const lowerFirst = (value: string): string => value.charAt(0).toLowerCase() + value.slice(1);
@@ -438,6 +512,43 @@ export interface TsDeclaration {
  * hand back different text. Sharing {@link declaredNameOf} is the part that matters: a model named in
  * one artefact is named the same way in the other, so the emitted assertion can pair them by name.
  */
+/**
+ * Whether a rendered body is ONE object literal, and so may be emitted as an `interface`.
+ *
+ * **This was `source.startsWith("{") && !source.includes("} & ")`, which named the two shapes it had
+ * met rather than the property it needed.** A discriminated union with an envelope renders as
+ * `{ kind: "cat"; value: Cat; } | { kind: "dog"; value: Dog; }`: it starts with a brace and holds no
+ * intersection, so it was emitted as `export interface PetWithEnvelope { ... } | { ... }`. An
+ * interface cannot be a union, so the file did not parse at all - and that is the DEFAULT envelope,
+ * the shape a spec gets from writing `@discriminated` and nothing else.
+ *
+ * Balanced braces answer the question actually being asked: an interface is valid exactly when the
+ * whole body is a single `{...}`, whatever it contains. A composition operator cannot be missed,
+ * because anything following the matching close brace fails the test whatever it happens to be.
+ */
+function isSingleObjectLiteral(source: string): boolean {
+	if (!source.startsWith("{")) return false;
+	let depth = 0;
+	let quoted = false;
+	for (let index = 0; index < source.length; index += 1) {
+		const character = source[index];
+		// A property key may be quoted and may itself contain a brace, which is not a nesting one.
+		if (quoted) {
+			if (character === "\\") index += 1;
+			else if (character === '"') quoted = false;
+			continue;
+		}
+		if (character === '"') quoted = true;
+		else if (character === "{") depth += 1;
+		else if (character === "}") {
+			depth -= 1;
+			// Closing the outermost brace anywhere but at the very end means something follows it.
+			if (depth === 0) return index === source.length - 1;
+		}
+	}
+	return false;
+}
+
 export class TypeRegistry {
 	readonly #program: Program;
 	readonly #declarations = new Map<Type, TsDeclaration>();
@@ -472,7 +583,7 @@ export class TypeRegistry {
 			 * `{ ...pinned } & Record<string, unknown>`, and `export interface X { ... } & ...` does not parse -
 			 * so an intersection is emitted as a type alias instead.
 			 */
-			isObject: source.startsWith("{") && !source.includes("} & "),
+			isObject: isSingleObjectLiteral(source),
 			/**
 			 * **A vocabulary alias is NOT exported.**
 			 *

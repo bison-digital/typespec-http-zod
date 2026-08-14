@@ -26,6 +26,7 @@ const referenceDir = join(here, "reference");
 let compiled: CompiledFixture;
 let cyclic: CompiledFixture;
 let dollars: CompiledFixture;
+let specialWords: CompiledFixture;
 
 beforeAll(async () => {
 	// Its own output directory. This and `reference.test.ts` both compiled `service` into
@@ -49,6 +50,12 @@ beforeAll(async () => {
 	 * That is invisible to every arm except a compiler, and it went live in the sibling package.
 	 */
 	dollars = await compileFixture(referenceDir, "identifiers", { outName: "identifiers-emit" });
+	/**
+	 * Reserved words as model names, and a discriminated union with the default envelope. Both emitted
+	 * TypeScript that does not parse, and neither was visible to any arm that reads emitted output
+	 * without compiling it.
+	 */
+	specialWords = await compileFixture(referenceDir, "specialwords", { outName: "special-emit" });
 });
 
 /** Run `tsc` over one emitted directory, under the settings a consumer builds with. */
@@ -101,6 +108,12 @@ describe("the emitted output compiles", () => {
 	it("passes tsc under the settings a consumer builds with", () => {
 		const { output, failed } = typecheckEmitted(compiled.outDir);
 		// The output is the evidence - a bare `toBe(false)` would report "expected true to be false".
+		expect(output.trim(), output).toBe("");
+		expect(failed).toBe(false);
+	});
+
+	it("compiles a reserved-word model name and an envelope union", () => {
+		const { output, failed } = typecheckEmitted(specialWords.outDir);
 		expect(output.trim(), output).toBe("");
 		expect(failed).toBe(false);
 	});
