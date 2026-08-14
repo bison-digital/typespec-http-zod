@@ -1,7 +1,7 @@
 import { rmSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compile, NodeHost } from "@typespec/compiler";
+import { compile, NodeHost, type Program } from "@typespec/compiler";
 
 /**
  * Compile one `.tsp` fixture with this emitter, and hand back where it landed.
@@ -15,6 +15,12 @@ import { compile, NodeHost } from "@typespec/compiler";
 export interface CompiledFixture {
 	readonly outDir: string;
 	readonly diagnostics: readonly { readonly code: string; readonly severity: string }[];
+	/**
+	 * The compiled program, so a suite can ask the published API what it produced rather than only
+	 * reading the files it wrote. `EmittedRoute` carries facts that reach a consumer without appearing
+	 * in any emitted file - `requestContentTypes` among them - and those were graded by nothing.
+	 */
+	readonly program: Program;
 }
 
 export interface FixtureOptions {
@@ -135,5 +141,6 @@ export async function compileFixture(
 	return {
 		outDir,
 		diagnostics: program.diagnostics.map((d) => ({ code: d.code, severity: d.severity })),
+		program,
 	};
 }
