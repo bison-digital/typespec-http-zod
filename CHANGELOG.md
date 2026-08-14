@@ -13,6 +13,13 @@ change a consumer feels, and is treated as such here rather than as an implement
 A minor when released: two shapes that emitted TypeScript which does not parse now emit valid
 declarations, so their names and forms change.
 
+### Added
+
+- **`portability.test.ts` asserts every tracked file is ASCII**, naming file, line and codepoint. The
+  rule was standing and unguarded: a glyph went back into a `src/registry.ts` docblock the same day
+  the sweep removed 815 of them, and the suite stayed green. It was found by a person reading the
+  file. The report names the codepoint because the character that matters is the one nobody can see.
+
 ### Fixed
 
 - **A discriminated union with the default envelope emitted `export interface X { ... } | { ... }`,

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 import { compileEmittedSet } from "./support/emitted-set.js";
@@ -65,6 +66,41 @@ describe("nothing this package ships names one machine's filesystem", () => {
 			}
 		});
 		expect(offenders).toEqual([]);
+	});
+
+	/**
+	 * **Every tracked file is ASCII, and nothing checked it until now.**
+	 *
+	 * The rule is standing and the sweep that applied it removed 815 em-dashes and 382 warning glyphs
+	 * across 66 files. Nothing then held it: a glyph went back into a `src/registry.ts` docblock the
+	 * same day, in a commit of mine, and `pnpm test` stayed green. It was found by a person reading the
+	 * file rather than by this suite, which is the definition of an unguarded rule.
+	 *
+	 * **This is the same failure as a README claiming something is asserted while nothing asserts
+	 * it**, which this package has shipped once before. A rule everyone follows is a convention; a rule
+	 * something checks is a property.
+	 *
+	 * The report names the file, the line and the codepoint, because a bare count sends the reader
+	 * hunting for an invisible character - and one of them, a zero-width space, held a block comment
+	 * open past its terminator in the sibling package.
+	 */
+	it("carries no non-ASCII character in any tracked file", () => {
+		const offenders: string[] = [];
+		for (const file of tracked) {
+			const contents = readFileSync(join(packageRoot, file), "utf8");
+			contents.split("\n").forEach((line, index) => {
+				for (const character of line) {
+					const code = character.codePointAt(0) ?? 0;
+					if (code > 127) {
+						offenders.push(
+							`${file}:${index + 1} U+${code.toString(16).toUpperCase().padStart(4, "0")}`,
+						);
+						return;
+					}
+				}
+			});
+		}
+		expect(offenders.toSorted()).toEqual([]);
 	});
 
 	it("carries no machine path in anything the emitter GENERATES", () => {
