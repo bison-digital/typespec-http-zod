@@ -870,8 +870,13 @@ function modelToZod(program: Program, model: Model): string {
 	 * Measured on Zod 4.4.3: `.strict()`, `.loose()` and `.catchall()` all read `shape` eagerly, so
 	 * each one fires the getter during module initialisation and throws `Cannot access 'X' before
 	 * initialization` - the very thing the getter exists to avoid. `z.strictObject` and
-	 * `z.looseObject` take the same shape without reading it. The suffix form stays everywhere else,
-	 * so a model that does not recurse emits exactly the text it emitted before.
+	 * `z.looseObject` take the same shape without reading it.
+	 *
+	 * **So the constructor form is used wherever it exists, not only where a cycle forces it.** It is
+	 * also what Zod 4 asks for: its own types say "Consider `z.looseObject(A.shape)` instead" on
+	 * `.loose()` and `.strict()`, and `.passthrough()` is deprecated outright. Emitting one spelling
+	 * means a model that gains a back edge later does not silently change form, and the eager-`shape`
+	 * hazard above stops being something this walk has to keep reasoning about.
 	 *
 	 * **A TYPED catchall has no constructor form, and that used to be a refusal.** There is nowhere
 	 * safe to put the getter - `.catchall()` reads `shape` eagerly - so the cycle was reported as
@@ -883,11 +888,11 @@ function modelToZod(program: Program, model: Model): string {
 	const lazily = members.some((member) => member.deferred);
 	const constructible = suffix === "" || suffix === ".loose()";
 	const shape = entries.length === 0 ? "{}" : `{\n${entries.join("\n")}\n}`;
-	const body = lazily
-		? constructible
-			? `${suffix === ".loose()" ? "z.looseObject" : strict === ".strict()" ? "z.strictObject" : "z.object"}(${shape})`
-			: `z.lazy(() => z.object(${shape})${suffix}${strict})`
-		: `z.object(${shape})${suffix}${strict}`;
+	const body = constructible
+		? `${suffix === ".loose()" ? "z.looseObject" : strict === ".strict()" ? "z.strictObject" : "z.object"}(${shape})`
+		: lazily
+			? `z.lazy(() => z.object(${shape})${suffix}${strict})`
+			: `z.object(${shape})${suffix}${strict}`;
 	return applyConstraints(program, body, model);
 }
 

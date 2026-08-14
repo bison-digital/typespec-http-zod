@@ -725,7 +725,27 @@ function multipartSchemaOf(
 	return name === undefined ? shape : registry.declareNamed(name, () => shape);
 }
 
-/** `bytes`, or a model built on `File` - the parts openapi3 publishes as an empty schema. */
+/**
+ * `bytes`, or a model built on `File` - the parts openapi3 publishes as an empty schema.
+ *
+ * **A narrowed type for a `File` part was tried in `0.17.0` and reverted; do not try it again
+ * without reading this.** The ask was reasonable - `input.file.name` needs a cast today - and every
+ * way of granting it breaks something load-bearing:
+ *
+ * - `z.custom<FileLike>()` throws in `z.toJSONSchema` ("Custom types cannot be represented"),
+ *   which silently removes those schemas from the differential that compares this emitter's
+ *   validators against the document. Measured: four corpus schemas dropped out.
+ * - `z.unknown().refine(guard)` serialises fine and narrows correctly, but REJECTS a value the
+ *   published contract permits, and `test/vocabulary.test.ts` refuses it by class for that reason.
+ * - Narrowing the type without a check makes the two artefacts disagree and asserts a shape nothing
+ *   established.
+ *
+ * The root cause is upstream and visible in this package's own fixtures: `@typespec/openapi3`
+ * publishes a bare `{}` for a File part even in 3.1, where `contentMediaType` could express it, and
+ * even when the part declares a specific content type. **The day the document says what the part is,
+ * the validator may say it too and the type follows for free.** Until then `unknown` is the only
+ * honest answer, and a consumer narrows at the boundary.
+ */
 function isBinaryPart(type: Type): boolean {
 	if (type.kind === "Scalar") {
 		for (let scalar: Scalar | undefined = type; scalar !== undefined; scalar = scalar.baseScalar) {
@@ -1991,6 +2011,10 @@ type Simplify<T> = { [K in keyof T]: T[K] } & {};
  * mutable one. Mutability is not a fact about a wire shape: it says nothing about what a caller
  * receives. Making the TARGET readonly accepts both, which is the permissive direction; the reverse
  * would reject every view a producer actually returns.
+ *
+ * No branch for functions, deliberately: the wire vocabulary is primitives, objects and arrays, so
+ * a call signature cannot appear here. Mapping one would yield \`{}\`, so the day something does
+ * carry a method - a narrowed multipart file part is the near miss - this needs one.
  */
 type Produced<T> = T extends readonly (infer Element)[]
 	? readonly Produced<Element>[]
@@ -2061,7 +2085,7 @@ function renderWireAssertions(
 
 	const assertions = paired.map(
 		(pair) =>
-			`export type Assert${pair.name} = MustHold<Identical<z.infer<typeof ${pair.identifier}>, Contracts.${pair.name}>>;`,
+			`export type Assert${pair.name} = MustHold<Identical<Declared<z.infer<typeof ${pair.identifier}>>, Contracts.${pair.name}>>;`,
 	);
 
 	return `${generatedBanner()}
@@ -2079,6 +2103,45 @@ ${paired.map((pair) => `\t${pair.identifier},`).join("\n")}
 type Identical<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
 	? true
 	: ["the emitted validator and the shared wire type describe different shapes"];
+
+/**
+ * A shape with its index signatures removed, at every depth.
+ *
+ * **The two sides of this contract differ on exactly one axis, deliberately.** For an open model the
+ * validator's output carries \`[key: string]: unknown\`, because a loose parse really does pass
+ * unknown keys through. The shared wire type does not, because it is a FLOOR - the properties a
+ * producer must supply - and an index signature there is an obligation on the producer rather than a
+ * description of the payload. TypeScript gives an interface no implicit index signature, so carrying
+ * it made the published shape unsatisfiable by most domain types.
+ *
+ * So this comparison is over DECLARED PROPERTIES, the only claim both sides make. **That the
+ * validator is open wherever the document is open has not stopped being checked** - it is asserted
+ * directly by the emitter's own suite now, instead of falling out of this comparison as a side
+ * effect. Every other kind of drift still fails here exactly as before.
+ *
+ * Applied to the INFERRED side only. If the shared type ever grew an index signature of its own that
+ * is a real disagreement, and this still catches it.
+ *
+ * Deep, because openness recurs: a nested open model puts one at every level, which is why a single
+ * spread never repaired the shape it was supposed to repair.
+ */
+type Declared<T> = T extends (...args: never[]) => unknown
+	? T
+	: T extends readonly (infer Element)[]
+		? T extends Element[]
+			? Declared<Element>[]
+			: readonly Declared<Element>[]
+		: T extends object
+			? {
+					[K in keyof T as string extends K
+						? never
+						: number extends K
+							? never
+							: symbol extends K
+								? never
+								: K]: Declared<T[K]>;
+				}
+			: T;
 
 /**
  * \u26a0\ufe0f **The constraint is what fails the build.** \`Identical<A, B> & true\` merely produces an odd

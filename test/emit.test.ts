@@ -1,9 +1,8 @@
-import { execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 import { compileFixture, type CompiledFixture } from "./support/compile-fixture.js";
+import { typecheckEmitted } from "./support/typecheck-emitted.js";
 
 /**
  * **The emitted TypeScript has to compile, and nothing else here proves it.**
@@ -57,52 +56,6 @@ beforeAll(async () => {
 	 */
 	specialWords = await compileFixture(referenceDir, "specialwords", { outName: "special-emit" });
 });
-
-/** Run `tsc` over one emitted directory, under the settings a consumer builds with. */
-function typecheckEmitted(outDir: string): { output: string; failed: boolean } {
-	/**
-	 * A tsconfig written beside the output, so the compiler sees exactly the generated files and
-	 * nothing of this package's own source. `strict` and `exactOptionalPropertyTypes` because an
-	 * emitter whose output only compiles under lenient settings has pushed its problem downstream.
-	 */
-	const config = join(outDir, "tsconfig.emitted.json");
-	writeFileSync(
-		config,
-		JSON.stringify(
-			{
-				compilerOptions: {
-					target: "es2023",
-					module: "nodenext",
-					moduleResolution: "nodenext",
-					strict: true,
-					exactOptionalPropertyTypes: true,
-					noUncheckedIndexedAccess: true,
-					noEmit: true,
-					skipLibCheck: true,
-					types: [],
-				},
-				include: ["./*.ts"],
-			},
-			null,
-			"\t",
-		),
-	);
-
-	let output = "";
-	let failed = false;
-	try {
-		output = execFileSync(
-			join(here, "..", "node_modules", ".bin", "tsc"),
-			["-p", config, "--ignoreConfig"],
-			{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-		);
-	} catch (error) {
-		failed = true;
-		const asExec = error as { stdout?: string; stderr?: string };
-		output = `${asExec.stdout ?? ""}${asExec.stderr ?? ""}`;
-	}
-	return { output, failed };
-}
 
 describe("the emitted output compiles", () => {
 	it("passes tsc under the settings a consumer builds with", () => {

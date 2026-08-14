@@ -10,7 +10,58 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.16.0`.
+Nothing since `0.17.0`.
+
+## [0.17.0] - 2026-08-15
+
+A minor, and mostly a reversal: **`0.16.0` put an index signature on an open model's emitted type,
+and that made the published shape unsatisfiable by most of the types a codebase already has.**
+
+### Changed
+
+- **An open model's contract type no longer carries `[key: string]: unknown`.** `0.16.0` added it so
+  the type, the validator and the document all said `additionalProperties`. Two of those describe
+  what is TOLERATED ON ARRIVAL; on the type it reads as an obligation on whoever produces the value.
+  TypeScript gives an `interface` no implicit index signature and a `type` alias one
+  (microsoft/TypeScript#15300), so whether a consumer could satisfy a published shape came to depend
+  on which keyword their own types happened to use. Measured on one service: 58 of 101 components
+  open, 26 of those nesting another open component, so satisfying it meant a structural deep copy of
+  the response tree per response, and a single spread reached only the outermost level.
+
+  **What arrives is still described honestly.** `schemas.gen.ts` exports
+  `Exact<z.infer<typeof x>>`, derived from the validator, and that keeps the index signature because
+  a loose parse really does pass unknown keys through. Two surfaces, two directions, neither lying.
+
+- **`wire-contract.gen.ts` compares declared properties.** With the two sides now describing
+  different directions, the emitted `Identical<>` would no longer compile. It applies a `Declared<>`
+  view to the inferred side only - so a contract type that grew an index signature of its own still
+  fails - and **the openness claim moved to its own arm** rather than disappearing: that an open
+  model gets a permissive validator is asserted directly now, where before it was only ever a side
+  effect of this comparison.
+
+- **`z.looseObject({...})` and `z.strictObject({...})` everywhere**, rather than `.loose()` and
+  `.strict()` suffixes where no cycle forced the constructor form. It is what Zod 4 asks for - its
+  own types say "Consider `z.looseObject(A.shape)` instead", and `.passthrough()` is deprecated - and
+  the constructors do not read `shape` eagerly, so a model that gains a back edge later no longer
+  changes form. Emitted output changes for every model with an indexer or a seal.
+
+### Documented
+
+- **A multipart `File` part stays `unknown`, and now says why in the source.** Reading
+  `input.file.name` needs a narrowing at the boundary. Every way of removing that was built and
+  reverted: `z.custom<T>()` throws in `z.toJSONSchema` ("Custom types cannot be represented"), which
+  silently dropped four corpus schemas out of the differential comparing validators against the
+  document; `z.unknown().refine(guard)` serialises and narrows correctly but refuses a value the
+  published contract permits, which `test/vocabulary.test.ts` forbids by class. The root cause is
+  upstream: `@typespec/openapi3` publishes a bare `{}` for a File part even in 3.1, where
+  `contentMediaType` could express it, and even when the part declares a content type.
+
+### Added
+
+- `test/contractshape/` compiles a hand-written consumer against the emitted output and requires a
+  plain nested `interface` to be assignable to a response type **with no spread at any level**. It is
+  the only arm in the package that asks whether the emitted types are satisfiable rather than
+  well-formed, and it is the arm that would have caught `0.16.0`.
 
 ## [0.16.0] - 2026-08-14
 

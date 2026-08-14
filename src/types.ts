@@ -235,28 +235,25 @@ function modelToTs(program: Program, model: Model): string {
 	 * producer must contain. The contract type is the floor: these fields, at least.
 	 */
 	/**
-	 * **An open model carries its catchall here too, or the two walks disagree.**
+	 * **`0.16.0` added the catchall here and `0.17.0` reverted it. Do not add it again.**
 	 *
-	 * `modelToZod` emits `.loose()` for a `...Record<unknown>` indexer and `.catchall(T)` for a typed
-	 * one, so `z.infer` gains an index signature. This walk emitted the declared properties alone, and
-	 * the emitter's OWN assertion caught it:
-	 * `TS2344: the emitted validator and the shared wire type describe different shapes`. Any spec with
-	 * `...Record<unknown>` on a request model shipped a `wire-contract.gen.ts` that does not compile.
+	 * The argument for it was that the document says `additionalProperties` and the validator says
+	 * `.loose()`, so the type should say it too. Both of those state what is TOLERATED ON ARRIVAL. On
+	 * the type it reads as an obligation on whoever PRODUCES the value, and TypeScript gives an
+	 * interface no implicit index signature (microsoft/TypeScript#15300) - only a type alias gets one
+	 * - so whether a consumer could satisfy our published shape came to depend on which keyword their
+	 * own domain type happened to use, in files this emitter does not own.
 	 *
-	 * **Emitted rather than compared away.** The document says `additionalProperties`, the validator
-	 * says `.loose()`, so the type saying it too is what makes all three agree. Relaxing the comparison
-	 * instead would hide the disagreement rather than remove it, and a looser comparison stops catching
-	 * the drift it exists for.
+	 * Measured on one consumer's document: **58 of 101 components open, 26 of those nesting another
+	 * open component**, so the obligation cost a structural deep copy of the response tree per
+	 * response. One spread satisfies one level and does not reach the next, which is the whole shape
+	 * of the failure - see `test/contractshape/`.
 	 *
-	 * The dictionary case above returns before this: a model with an indexer and NO declared properties
-	 * is a `Record<...>` outright rather than an object with a catchall.
+	 * What arrives is still described honestly, on the surface derived from the validator:
+	 * `schemas.gen.ts` exports `Exact<z.infer<typeof x>>`, which carries the index signature because
+	 * a `.loose()` parse really does. Two surfaces, two directions, neither lying.
 	 */
-	const catchall =
-		indexerKey === "string" && indexer !== undefined && !isNeverType(indexer.value)
-			? [`\t[key: string]: ${typeToTs(program, indexer.value)};`]
-			: [];
-	const all = [...entries, ...catchall];
-	return all.length === 0 ? "{}" : `{\n${all.join("\n")}\n}`;
+	return entries.length === 0 ? "{}" : `{\n${entries.join("\n")}\n}`;
 }
 
 /**
