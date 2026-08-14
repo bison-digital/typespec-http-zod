@@ -1661,14 +1661,18 @@ function responseArmsOf(
 	 * empty list, or every `respond` implementation has to tell "none declared" from "none carried".
 	 */
 	/**
-	 * The media types this status offers. Emitted only where the document names more than one, because
-	 * a single type is what a `respond` already assumes and repeating it on every arm in every service
-	 * would be noise rather than a fact.
+	 * The media types this status offers.
+	 *
+	 * **Emitted whenever the document names any, including a single one.** It was emitted only for
+	 * several, on the reasoning that one type is what a `respond` already assumes - and that reasoning
+	 * was wrong, because it assumed the one type is JSON. A `text/plain` arm and a JSON arm were then
+	 * indistinguishable to a generic `respond`: the document knew and the runtime did not, so consumers
+	 * restated the media type in their own result envelope to get it back.
 	 */
 	const mediaTypesFor = (status: StatusKey): string => {
 		const declared =
 			route.responseMediaTypes.find((entry) => entry.status === status)?.contentTypes ?? [];
-		if (declared.length < 2) return "";
+		if (declared.length === 0) return "";
 		return `, contentTypes: [${declared.map((t) => JSON.stringify(t)).join(", ")}]`;
 	};
 	const headersFor = (status: StatusKey): string => {

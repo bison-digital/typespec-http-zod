@@ -10,7 +10,17 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.13.0`.
+Nothing since `0.14.0`.
+
+## [0.14.0] - 2026-08-14
+
+A minor: every response arm now carries its media types, including where there is only one.
+
+`contentTypes` was emitted only where a status offered several, on the reasoning that one type is
+what an application already assumes. That reasoning assumed the one type is JSON. A `text/plain` arm
+and a JSON arm were therefore indistinguishable to a generic `deps.respond` - the document knew and
+the runtime did not - so consumers restated the media type in their own result envelope to get it
+back. Reported by a consumer who could then delete that code.
 
 ## [0.13.0] - 2026-08-14
 

@@ -66,7 +66,12 @@ describe("a response arm carries what the document declares about it", () => {
 		expect(arms).toContain("text/html");
 	});
 
-	it("leaves a single-media-type arm alone, because one type is what respond assumes", () => {
-		expect(armsFor("plain")).not.toMatch(/contentTypes:/);
+	it("carries a SINGLE media type too, so a text/plain arm is not mistaken for JSON", () => {
+		/**
+		 * This asserted the opposite until a consumer showed why: omitting the single type assumed it
+		 * was JSON, and a generic `respond` could not tell a `text/plain` arm from a JSON one. The
+		 * document knew and the runtime did not.
+		 */
+		expect(armsFor("plain")).toContain('contentTypes: ["application/json"]');
 	});
 });
