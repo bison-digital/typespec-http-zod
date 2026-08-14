@@ -140,7 +140,7 @@ const spreadSourceName = (type: Model): string | undefined => spreadSourceOf(typ
  * `export type break = z.infer<...>`, neither of which parses - `TS2427`, then the parser gives up
  * and the whole file is lost.
  *
- * ⚠️ **This is a LIST, which this package otherwise refuses.** It is defensible here because it is
+ * **This is a LIST, which this package otherwise refuses.** It is defensible here because it is
  * not a list about our own code that drifts as the code changes: it is a closed set the language
  * specification fixes. The guard is that `tsc` compiles a fixture declaring models named after these,
  * so a word missing from the list fails a test rather than reaching a consumer - the list is the

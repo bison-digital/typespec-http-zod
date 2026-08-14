@@ -8,6 +8,7 @@ import {
 	isNeverType,
 	isVoidType,
 	type Model,
+	type Operation,
 	type ModelProperty,
 	type Program,
 	resolvePath,
@@ -23,7 +24,7 @@ import {
 	type HttpOperationResponse,
 	type HttpService,
 } from "@typespec/http";
-import { resolveOperationId } from "@typespec/openapi";
+import { getOperationId, resolveOperationId } from "@typespec/openapi";
 import { type EmitterOptions, reportDiagnostic } from "./lib.js";
 import { SchemaRegistry, TypeRegistry } from "./registry.js";
 import { resolveStreamModule, streamedTypeOf, withStreamModule } from "./streams.js";
@@ -127,6 +128,77 @@ export function successStatusesOf(operation: HttpOperation): number[] {
 		if (typeof code === "number" && code >= 200 && code < 300) codes.push(code);
 	}
 	return [...new Set(codes)].toSorted((a, b) => a - b);
+}
+
+/**
+ * **Operation ids, deduplicated the way `@typespec/openapi3` deduplicates them.**
+ *
+ * `resolveOperationId` derives an id from the immediate parent container, so two interfaces of the
+ * same name in different namespaces both resolve to `Standard_primitive`. Every per-operation
+ * declaration here is keyed on that id, so colliding ids emitted colliding `const`s:
+ * `TS2451: Cannot redeclare block-scoped variable 'Standard_primitiveResponses'`, 72 of them on one
+ * conformance scenario, from a compile that reported success.
+ *
+ * **The document does NOT have this problem, so refusing the spec would be wrong.** Measured on
+ * 1.15.0, openapi3 publishes `Standard_primitive` and `Standard_primitive_2` - it deduplicates, and
+ * the document is valid. The same source is representable there, so it has to be representable here,
+ * and matching its ids is also what keeps the promise that identifiers are named from the operation
+ * id the document publishes.
+ *
+ * The rule is copied from `OperationIdResolver` rather than invented, including the parts that look
+ * incidental: an explicit `@operationId` wins and is NOT deduplicated or reserved, and the suffix
+ * counts from `_2`. It is not exported, so it is reproduced here and the differential compares the
+ * result against the document's own ids.
+ */
+let operationIds:
+	| { readonly used: Set<string>; readonly cache: Map<Operation, string> }
+	| undefined;
+
+/**
+ * Establish a fresh id resolver for one service's emission.
+ *
+ * **Scoped per SERVICE rather than per walk, because the walks see different subsets.**
+ * `collectRoutes` visits every operation with a success status; `collectRequestTypes` skips any with
+ * no body and no parameters. Deduplicating independently would let the two assign a suffix to
+ * different operations, and the artefacts would name one operation two ways.
+ *
+ * A reset rather than a wrapper, because the emission loop is `for (const snapshot of snapshots)`
+ * and awaits each service to completion before the next begins. Nothing interleaves, so there is no
+ * scope to restore, and wrapping an async body would mean threading a callback through every
+ * `emitFile` between the three walks.
+ *
+ * Left `undefined` outside an emission on purpose: `collectRoutes` is exported and a caller reaching
+ * it directly gets `resolveOperationId`'s answer unchanged rather than a suffix that depends on
+ * whatever ran before.
+ */
+function beginOperationIds(): void {
+	operationIds = { used: new Set(), cache: new Map() };
+}
+
+/** The id this operation is emitted under, unique within the emission. */
+function operationIdOf(program: Program, operation: Operation): string {
+	const scope = operationIds;
+	const resolved = resolveOperationId(program, operation);
+	if (scope === undefined) return resolved;
+	const cached = scope.cache.get(operation);
+	if (cached !== undefined) return cached;
+	// An explicit `@operationId` is returned as given: openapi3 neither deduplicates nor reserves it.
+	if (getOperationId(program, operation) !== undefined) return resolved;
+	let name = resolved;
+	if (scope.used.has(name)) {
+		let count = 1;
+		for (;;) {
+			count += 1;
+			const candidate = `${resolved}_${count}`;
+			if (!scope.used.has(candidate)) {
+				name = candidate;
+				break;
+			}
+		}
+	}
+	scope.used.add(name);
+	scope.cache.set(operation, name);
+	return name;
 }
 
 /** The five buckets OpenAPI can express a status RANGE as, in the order it names them. */
@@ -995,7 +1067,7 @@ export function collectRoutes(
 					? (bodyParameter?.property?.name ?? "body")
 					: undefined;
 			routes.push({
-				operationId: resolveOperationId(program, operation.operation),
+				operationId: operationIdOf(program, operation.operation),
 				verb: operation.verb.toUpperCase(),
 				/**
 				 * The path TEMPLATE, exactly as the document publishes it - `/widgets/{widget-id}`.
@@ -1480,7 +1552,7 @@ function collectRequestTypes(
 				? "ArrayBuffer"
 				: "string";
 			entries.push({
-				operationId: resolveOperationId(program, operation.operation),
+				operationId: operationIdOf(program, operation.operation),
 				bodyRef:
 					rawBody !== undefined
 						? `{\n\t${rawBody}: ${rawBodyType};\n}`
@@ -1516,7 +1588,7 @@ function collectResponseTypes(
 			const body = successBodyOf(operation, status);
 			if (body === undefined) continue;
 			entries.push({
-				operationId: resolveOperationId(program, operation.operation),
+				operationId: operationIdOf(program, operation.operation),
 				ref: registry.expressionFor(body),
 			});
 		}
@@ -1836,6 +1908,7 @@ export async function emitHttpZod(
 	 */
 	const distinctServices = new Set(snapshots.map((snapshot) => snapshot.service.namespace.name));
 	for (const snapshot of snapshots) {
+		beginOperationIds();
 		const service = snapshot.service;
 		const serviceName = service.namespace.name;
 		const perService = options.services?.[serviceName];
