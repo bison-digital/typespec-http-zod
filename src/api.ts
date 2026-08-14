@@ -151,7 +151,11 @@ export function successStatusesOf(operation: HttpOperation): number[] {
  * result against the document's own ids.
  */
 let operationIds:
-	| { readonly used: Set<string>; readonly cache: Map<Operation, string> }
+	| {
+			readonly used: Set<string>;
+			readonly assigned: Set<string>;
+			readonly cache: Map<Operation, string>;
+	  }
 	| undefined;
 
 /**
@@ -172,7 +176,7 @@ let operationIds:
  * whatever ran before.
  */
 function beginOperationIds(): void {
-	operationIds = { used: new Set(), cache: new Map() };
+	operationIds = { used: new Set(), assigned: new Set(), cache: new Map() };
 }
 
 /** The id this operation is emitted under, unique within the emission. */
@@ -182,10 +186,10 @@ function operationIdOf(program: Program, operation: Operation): string {
 	if (scope === undefined) return resolved;
 	const cached = scope.cache.get(operation);
 	if (cached !== undefined) return cached;
-	// An explicit `@operationId` is returned as given: openapi3 neither deduplicates nor reserves it.
-	if (getOperationId(program, operation) !== undefined) return resolved;
+	// An explicit `@operationId` is used as given: openapi3 neither deduplicates nor reserves it.
+	const explicit = getOperationId(program, operation) !== undefined;
 	let name = resolved;
-	if (scope.used.has(name)) {
+	if (!explicit && scope.used.has(name)) {
 		let count = 1;
 		for (;;) {
 			count += 1;
@@ -196,8 +200,22 @@ function operationIdOf(program: Program, operation: Operation): string {
 			}
 		}
 	}
-	scope.used.add(name);
+	if (!explicit) scope.used.add(name);
 	scope.cache.set(operation, name);
+	/**
+	 * **Checked after the id is settled, and reachable only through an explicit `@operationId`.** A
+	 * derived id is deduplicated against `used` and cannot arrive here twice; an explicit one is never
+	 * reserved, so it can equal an id already handed out, in either direction. Reported once per
+	 * operation, because the cache above returns before this on every later walk.
+	 */
+	if (scope.assigned.has(name)) {
+		reportDiagnostic(program, {
+			code: "duplicate-operation-id",
+			format: { operationId: name },
+			target: operation,
+		});
+	}
+	scope.assigned.add(name);
 	return name;
 }
 

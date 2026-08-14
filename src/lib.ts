@@ -258,6 +258,29 @@ const diagnostics = {
 			default: paramMessage`Status code range '${"start"}' to '${"end"}' cannot be published: OpenAPI can only key a range as 1XX, 2XX, 3XX, 4XX or 5XX, so no document states what this response carries and no validator may be emitted for it. Cover a whole group (\`@minValue(400) @maxValue(499)\` for 4XX) or declare the codes individually.`,
 		},
 	},
+	/**
+	 * An explicit `@operationId` another operation already answers to.
+	 *
+	 * **Derived ids are deduplicated and this one cannot be.** `resolveOperationId` names an operation
+	 * from its immediate parent container, so two interfaces of the same name collide, and openapi3
+	 * resolves that by appending `_2`. It does NOT do so for an explicit `@operationId`: that id is
+	 * returned exactly as written and is never reserved, because the author asked for that name and
+	 * renaming it silently would break every client generated against the document.
+	 *
+	 * So a colliding explicit id is a document OpenAPI forbids, `operationId` must be unique, and
+	 * openapi3 raises nothing and publishes the duplicate. Every declaration here is keyed on the id,
+	 * so the emitted file declares each name twice and fails with `TS2451: Cannot redeclare
+	 * block-scoped variable` from a compile that reported success.
+	 *
+	 * **This is the one collision worth refusing.** The derived case is representable and is emitted.
+	 * This one cannot be resolved without contradicting what the author explicitly wrote.
+	 */
+	"duplicate-operation-id": {
+		severity: "error",
+		messages: {
+			default: paramMessage`'${"operationId"}' is already the operation id of another operation, and OpenAPI requires it to be unique. An explicit '@operationId' is never renamed to make room, so this cannot be resolved for you. Give this operation an id no other operation uses, or remove the '@operationId' and let it be derived.`,
+		},
+	},
 } as const;
 
 export const $lib = createTypeSpecLibrary({
