@@ -1284,15 +1284,21 @@ function renderSchemas(
 	 * **Written only when something in the file names it**, like the `ResponseArm` import below and for
 	 * the same reason: an unused import fails the lint a generated file has to pass like any other.
 	 *
-	 * `z` is reached through a declaration's source or a route's arms, so a service whose every
-	 * operation takes nothing and returns `void` declares neither and named it never:
+	 * `z` is reached through a declaration's source or a route arm's schema, and a service whose every
+	 * operation takes nothing and returns `void` has neither: its arms are
+	 * `{ status: 204, schema: undefined }`, which names nothing.
 	 * `TS6133: 'z' is declared but its value is never read`, from a compile that reported success. Two
 	 * bare `GET`s is where a health check starts, so it is where a new consumer starts.
 	 *
-	 * Decided from the declarations rather than by searching the rendered text, which is the mistake
-	 * this file has made four times.
+	 * **Counting declarations is not sufficient and was the first attempt.** A void-only service HAS
+	 * route declarations; they simply do not use Zod. The content decides, and it is TOKENISED on the
+	 * language's own identifier rule rather than searched for a substring, so `z` cannot be found
+	 * inside `zValidator` or missed beside a bracket. `renderExternalImports` below reads the same
+	 * rendered content for the same reason.
 	 */
-	const usesZod = declarations.length > 0 || routeDeclarations.length > 0;
+	const usesZod = new Set(
+		[...declarations, ...routeDeclarations].join("").match(/[A-Za-z_$][\w$]*/g) ?? [],
+	).has("z");
 	const parts = [GENERATED_BANNER];
 	if (usesZod) parts.push('\nimport { z } from "zod";\n');
 	/**

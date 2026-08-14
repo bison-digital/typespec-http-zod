@@ -10,7 +10,29 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.8.0`.
+Nothing since `0.9.0`.
+
+## [0.9.0] - 2026-08-14
+
+**`0.8.0` announced a fix it did not deliver. This is that fix.**
+
+A minor rather than a patch because emitted output changes relative to `0.8.0`, and a caret range on
+`0.x` does not cross a minor, so a consumer opts in rather than receiving it.
+
+### Fixed
+
+- **The Zod import is decided by whether the emitted content names `z`, not by whether there are
+  declarations to emit.** `0.8.0` counted declarations, which is not the same question: a service
+  whose every operation returns `void` HAS route declarations, they are just
+  `{ status: 204, schema: undefined }` and name nothing. So the import was still written and still
+  unused, and `0.8.0` shipped with the defect it claimed to close.
+
+  The content decides now, tokenised on the language's own identifier rule rather than searched as a
+  substring, so `z` can be neither found inside `zValidator` nor missed beside a bracket.
+
+  Caught by a fixture added to `typespec-hono` minutes after `0.8.0` went out, compiling generated
+  output with `noUnusedLocals` for the first time. The guard existed after the release rather than
+  before it, which is the whole reason a broken fix reached the registry.
 
 ## [0.8.0] - 2026-08-14
 
