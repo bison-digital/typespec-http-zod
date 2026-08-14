@@ -10,7 +10,42 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.9.0`.
+Nothing since `0.10.0`.
+
+## [0.10.0] - 2026-08-14
+
+A minor: `EmittedRoute` gains a required field, and the emitted output of a spec using reserved path
+expansion changes.
+
+### Added
+
+- **`EmittedRoute.reservedPathParameters`**, the wire names of path parameters declared with RFC 6570
+  reserved expansion, so a value may contain `/`. A hierarchical identifier is one value rather than
+  several segments: an Obsidian note is `areas/health.md`, and an S3 key or a GitHub file path is the
+  same shape. Always present, empty when none.
+
+  Read from `allowReserved` on the parameter, never by parsing the template: `@typespec/http` strips
+  the operator before this emitter sees the path, and the flag can also be set with no operator in the
+  template at all, so the template is a derived artefact rather than the source of truth.
+
+  `typespec-hono` renders it as Hono's `:name{.+}`.
+
+- **The conformance differential now runs at OpenAPI 3.1.0 and 3.2.0.** Derived rather than recalled:
+  every version branch read from openapi3's source, then the whole corpus compiled at both versions and
+  the documents diffed structurally, over 72 documents, 665 operations and 372 component schemas.
+  Exactly one scenario differs, `streaming/sse`, where 3.2 replaces a string schema with `itemSchema`
+  describing the event envelope. That turns five previously unreachable components into graded pairs.
+
+  The matrix costs 5 percent rather than double: the TypeSpec compile happens once and only
+  serialisation repeats.
+
+### Fixed
+
+- **A document arm could have passed over zero documents.** Given one entry in `openapi-versions`
+  openapi3 writes `<outDir>/openapi.json`; given more than one it writes
+  `<outDir>/<specVersion>/openapi.json`. The document arms located files with a flat scan, so moving to
+  a matrix without teaching them the layout would have made every one of them find nothing and report
+  success. The per-version floor landed before the version moved.
 
 ## [0.9.0] - 2026-08-14
 
