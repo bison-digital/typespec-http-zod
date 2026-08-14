@@ -41,6 +41,8 @@ export interface FixtureOptions {
 	 */
 	readonly contractsPackage?: string;
 	readonly keyVocabularies?: readonly string[];
+	/** Anything else the emitter accepts, for an option a single suite exercises. */
+	readonly extraOptions?: Readonly<Record<string, unknown>>;
 	/**
 	 * The output directory's name, when it must differ from the spec's.
 	 *
@@ -116,6 +118,7 @@ export async function compileFixture(
 				...(options.keyVocabularies === undefined
 					? {}
 					: { "key-vocabularies": [...options.keyVocabularies] }),
+				...(options.extraOptions ?? {}),
 			},
 		},
 	});

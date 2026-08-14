@@ -81,6 +81,15 @@ export interface EmitterOptions {
 	 */
 	"runtime-module"?: string;
 	/**
+	 * The command that regenerates these files, written into every banner.
+	 *
+	 * **`DO NOT EDIT` says what not to do and not what to do instead.** Only the project knows whether
+	 * that is `pnpm generate`, `npm run api` or a `tsp compile` with three flags, so no emitter can
+	 * supply it, and the generic line standing in its place lost the one thing a reader opening a
+	 * generated file needs. Omitted, the generic line is kept.
+	 */
+	"regenerate-hint"?: string;
+	/**
 	 * Per-`@service` overrides, keyed by the service namespace name.
 	 *
 	 * Two surfaces in one spec do not have to share a destination - an internal API and a public one
@@ -97,6 +106,7 @@ export interface EmitterOptions {
 			"seal-object-schemas"?: boolean;
 			"key-vocabularies"?: string[];
 			"runtime-module"?: string;
+			"regenerate-hint"?: string;
 		}
 	>;
 }
@@ -116,6 +126,7 @@ export const EmitterOptionsSchema: JSONSchemaType<EmitterOptions> = {
 		"seal-object-schemas": { type: "boolean", nullable: true },
 		"key-vocabularies": { type: "array", items: { type: "string" }, nullable: true },
 		"runtime-module": { type: "string", nullable: true },
+		"regenerate-hint": { type: "string", nullable: true },
 		services: {
 			type: "object",
 			nullable: true,
@@ -129,6 +140,7 @@ export const EmitterOptionsSchema: JSONSchemaType<EmitterOptions> = {
 					"seal-object-schemas": { type: "boolean", nullable: true },
 					"key-vocabularies": { type: "array", items: { type: "string" }, nullable: true },
 					"runtime-module": { type: "string", nullable: true },
+					"regenerate-hint": { type: "string", nullable: true },
 				},
 				required: [],
 			},

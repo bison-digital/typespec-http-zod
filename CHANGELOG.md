@@ -10,7 +10,31 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.11.0`.
+Nothing since `0.12.0`.
+
+## [0.12.0] - 2026-08-14
+
+A minor: the emitted type of every optional property changes, and the banner can carry a project's
+own regeneration command.
+
+### Fixed
+
+- **An optional property was typed as admitting an explicit `undefined`.** `z.infer` of `.optional()`
+  gives `p?: T | undefined`, which under `exactOptionalPropertyTypes` means "absent, or T, or
+  explicitly undefined". JSON cannot carry `undefined`, and the document says the same by leaving the
+  property out of `required`, so the emitted type was wider than both the contract and the wire and a
+  consumer had to strip it at the boundary.
+
+  Narrowed by a mapped type derived from the same schema, so there is still one source of truth: a
+  mapped type cannot drift from the thing it maps. The oracle is a compile under
+  `exactOptionalPropertyTypes` asserting all three cases - absent accepted, present accepted,
+  explicitly undefined refused.
+
+### Added
+
+- **`regenerate-hint`**, written into every banner. `DO NOT EDIT` says what not to do and not what to
+  do instead, and only the project knows whether that is `pnpm generate`, `npm run api` or a
+  `tsp compile` with three flags. Omitted, the generic line is kept. Settable per service.
 
 ## [0.11.0] - 2026-08-14
 
