@@ -388,18 +388,34 @@ const SCALARS: Readonly<Record<string, string>> = {
 	decimal128: "z.number()",
 	numeric: "z.number()",
 	/**
-	 * Dates cross the wire as strings and are validated as strings.
+	 * **A declared TYPE is a claim about the value, and these check it.**
 	 *
-	 * Not `z.iso.datetime()`: response schemas are permissive on purpose, and a
-	 * stricter format check here would turn a producer emitting a legal-but-unexpected instant into a
-	 * failed response for a caller who could have parsed it perfectly well.
+	 * These are not strings with a hint attached: they are scalars the document publishes as
+	 * `format: date-time`, `format: uri` and so on. Emitting `z.string()` for them discarded a
+	 * declared type, so a service promising a timestamp accepted `banana` - and a consumer who wanted
+	 * the check had to rewrite the spec as `string` with a `@pattern`, losing `format: date-time` from
+	 * the document AND getting a weaker check, since a hand-written pattern accepts `2026-02-31`. A
+	 * rule that pushes consumers into writing worse specs is the wrong rule.
+	 *
+	 * **`@format("...")` on a plain string is a different case and stays unenforced.** Under JSON
+	 * Schema 2020-12, which OpenAPI 3.1 uses, `format` is an annotation rather than an assertion, so
+	 * enforcing an author's hint would add a rule the contract does not state, and
+	 * `@format("account-number")` proves no general rule exists. A type is a claim; an annotation is a
+	 * hint.
+	 *
+	 * **`{ offset: true }` is measured, not decorative.** The previous comment here warned that a
+	 * stricter check would fail "a legal-but-unexpected instant", and it was right about the risk: a
+	 * bare `z.iso.datetime()` REJECTS `2026-08-14T12:00:00+01:00`, which is valid RFC 3339 and valid
+	 * `format: date-time`. With the offset permitted, every legal instant is accepted and only
+	 * `2026-02-31` and `banana` are refused. `local: true` would go too far, admitting a value with no
+	 * timezone at all, which RFC 3339 does not allow.
 	 */
-	utcDateTime: "z.string()",
-	offsetDateTime: "z.string()",
-	plainDate: "z.string()",
-	plainTime: "z.string()",
-	duration: "z.string()",
-	url: "z.string()",
+	utcDateTime: "z.iso.datetime({ offset: true })",
+	offsetDateTime: "z.iso.datetime({ offset: true })",
+	plainDate: "z.iso.date()",
+	plainTime: "z.iso.time()",
+	duration: "z.iso.duration()",
+	url: "z.url()",
 };
 
 function scalarToZod(program: Program, scalar: Scalar): string {

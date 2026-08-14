@@ -94,3 +94,26 @@ state rather than two an application has to tell apart.
 be dropped from the emitted output entirely, with no diagnostic: the status filter accepted 2xx only,
 so the operation had no status and was skipped. Statuses below 400 are collected now. 4xx and 5xx stay
 out, because those are error arms and a handler does not reach one by returning normally.
+
+## What a declared type checks, and what a `format` annotation does not
+
+A scalar a spec DECLARES is a claim about the value, and the validator checks it:
+
+| declared                        | emitted                            | the document publishes |
+| ------------------------------- | ---------------------------------- | ---------------------- |
+| `utcDateTime`, `offsetDateTime` | `z.iso.datetime({ offset: true })` | `format: date-time`    |
+| `plainDate`                     | `z.iso.date()`                     | `format: date`         |
+| `plainTime`                     | `z.iso.time()`                     | `format: time`         |
+| `duration`                      | `z.iso.duration()`                 | `format: duration`     |
+| `url`                           | `z.url()`                          | `format: uri`          |
+
+**`{ offset: true }` was measured rather than chosen.** A bare `z.iso.datetime()` REJECTS
+`2026-08-14T12:00:00+01:00`, which is valid RFC 3339 and valid `format: date-time`, so it would have
+refused conformant callers. With the offset permitted every legal instant is accepted and only
+genuine nonsense, `2026-02-31` and `banana`, is refused.
+
+**`@format("...")` on a plain string is NOT enforced, and that is deliberate.** Under JSON Schema
+2020-12, which OpenAPI 3.1 uses, `format` is an annotation rather than an assertion, so enforcing an
+author's hint would add a rule the contract does not state. `@format("account-number")` is the case
+proving no general rule exists. Where you need the guarantee, declare the type, or state it in a way
+the document asserts: `@pattern`, `@minLength`, a named scalar with constraints.

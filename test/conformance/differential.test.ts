@@ -493,10 +493,14 @@ const ANNOTATION_KEYWORDS = new Set([
 	"xml",
 	"discriminator",
 	/**
-	 * **`format` is an ANNOTATION under JSON Schema 2020-12, not an assertion**, and not enforcing
-	 * it is this package's stated decision - 136 annotations, asserted as a class elsewhere. The
-	 * document carries `format: "int32"`; the validator says nothing. Comparing it here would re-open a
-	 * settled decision as a divergence.
+	 * **`format` is an ANNOTATION under JSON Schema 2020-12, not an assertion.** An author's
+	 * `@format("...")` hint on a plain string is not enforced, and comparing the keyword here would
+	 * report every one of those as a divergence.
+	 *
+	 * A declared TYPE is different and IS enforced - `utcDateTime` is a claim about the value rather
+	 * than a hint about it - so Zod emits a pattern for those. Those exact patterns are stripped from
+	 * the validator side by `FORMAT_PATTERNS`, because a format fact excluded on the document side and
+	 * compared on the other is a false divergence. `test/formats/` asserts the correspondence.
 	 */
 	"format",
 	/**
@@ -705,10 +709,35 @@ function collapseSingletonAllOf(node: Record<string, unknown>): Record<string, u
 	return { $ref: inner["$ref"] };
 }
 
+/**
+ * The exact `pattern` strings Zod serialises for the format checks this emitter now emits.
+ *
+ * **Generated from the checks themselves, never typed out.** A regex written here by hand would be a
+ * second copy of Zod's, and the day Zod changed one this would silently stop stripping and report a
+ * divergence on every timestamp in the corpus.
+ *
+ * They are stripped for the same reason `format` is stripped from the DOCUMENT side: the comparison
+ * below is about STRUCTURE, and a format fact excluded on one side and compared on the other is a
+ * false divergence rather than a finding. That the emitter honours these types is asserted by
+ * `test/formats/`, against the values themselves rather than against a serialisation.
+ */
+const FORMAT_PATTERNS: ReadonlySet<string> = new Set(
+	[z.iso.datetime({ offset: true }), z.iso.date(), z.iso.time(), z.iso.duration(), z.url()].flatMap(
+		(check) => {
+			const serialised = z.toJSONSchema(check, { io: "output" }) as { pattern?: string };
+			return serialised.pattern === undefined ? [] : [serialised.pattern];
+		},
+	),
+);
+
 function normaliseJsonSchema(value: unknown, ctx: NormaliseContext): unknown {
 	if (Array.isArray(value)) return value.map((entry) => normaliseJsonSchema(entry, ctx));
 	if (value === null || typeof value !== "object") return value;
 	let source = value as Record<string, unknown>;
+	if (typeof source["pattern"] === "string" && FORMAT_PATTERNS.has(source["pattern"])) {
+		const { pattern: _stripped, ...rest } = source;
+		source = rest;
+	}
 	source = collapseSingletonAllOf(source);
 	source = collapseLiteralUnion(source);
 

@@ -180,28 +180,47 @@ describe("the generated validator says only what the document can say", () => {
 		expect(decodes).toBeGreaterThanOrEqual(40);
 	});
 
-	it("enforces no `format`, which is a DECISION and is now checked rather than counted", () => {
+	it("enforces a declared TYPE and never an @format ANNOTATION, which is the DECISION", () => {
 		/**
-		 * **The document's `format` is an annotation, not an assertion** - JSON Schema 2020-12 says
-		 * so - and a validator that turns one into a check enforces something the contract does not
-		 * state. That is the governing rule, and the emitter's compliance with it was a *number*: 133
-		 * annotations counted as unenforced, which says what did not happen rather than what may not.
+		 * **A type is a claim about the value; an annotation is a hint about it.**
 		 *
-		 * A number cannot fail. This can: any Zod call that derives a check from a format is refused as
-		 * a class, so the decision holds by construction instead of by whoever reads the baseline next.
+		 * `utcDateTime`, `url`, `plainDate`, `plainTime` and `duration` are scalars a spec DECLARES, and
+		 * the emitter checks them. Emitting `z.string()` for them discarded a declared type: a service
+		 * promising a timestamp accepted `banana`, and a consumer who wanted the check rewrote the spec
+		 * as `string` with a `@pattern` - losing `format: date-time` from the document AND getting a
+		 * weaker check, since a hand-written pattern accepts `2026-02-31`. A rule that pushes consumers
+		 * into writing worse specs is the wrong rule.
 		 *
-		 * **Not an argument that `format` should never be enforced.** It is an argument that turning
-		 * it on is a deliberate change to what this package claims, and should break a test rather than
-		 * move a counter.
+		 * **`@format("...")` on a plain string is NOT enforced**, and that half of the decision is
+		 * unchanged. Under JSON Schema 2020-12, which OpenAPI 3.1 uses, `format` is an annotation rather
+		 * than an assertion, so enforcing an author's hint would add a rule the contract does not state.
+		 * `@format("account-number")` is the case proving no general rule exists.
+		 *
+		 * This arm previously asserted that NO format-derived check was ever emitted, and its docblock
+		 * said turning that on should break a test rather than move a counter. It did. This is the
+		 * deliberate change, and the arm now holds the new line rather than being deleted: the checks
+		 * that appear must be exactly the ones a declared type justifies.
 		 */
-		const FORMAT_ASSERTIONS =
-			/\.(email|url|uuid|uuidv4|uuidv7|cuid|cuid2|ulid|emoji|base64|base64url|nanoid|jwt|ipv4|ipv6|cidrv4|cidrv6|e164|datetime|date|time|duration)\(|z\.iso\./g;
-		const offenders = files.flatMap((file) =>
-			[...readFileSync(file, "utf8").matchAll(FORMAT_ASSERTIONS)].map(
-				(match) => `${match[0]} in ${file}`,
-			),
-		);
+		const TYPE_DERIVED = /z\.iso\.(datetime|date|time|duration)\(|z\.url\(\)/g;
+		const ANNOTATION_DERIVED =
+			/\.(email|uuid|uuidv4|uuidv7|cuid|cuid2|ulid|emoji|base64|base64url|nanoid|jwt|ipv4|ipv6|cidrv4|cidrv6|e164)\(/g;
+
+		let typeDerived = 0;
+		const offenders: string[] = [];
+		for (const file of files) {
+			const source = readFileSync(file, "utf8");
+			typeDerived += [...source.matchAll(TYPE_DERIVED)].length;
+			offenders.push(
+				...[...source.matchAll(ANNOTATION_DERIVED)].map((match) => `${match[0]} in ${file}`),
+			);
+		}
+		// No check may come from an annotation, in any file the sweep reads.
 		expect(offenders).toEqual([]);
+		/**
+		 * And a floor, because "no annotation-derived checks" is also true of an emitter that stopped
+		 * checking anything at all - which is precisely the state this arm used to assert.
+		 */
+		expect(typeDerived, "no type-derived check was emitted anywhere").toBeGreaterThanOrEqual(10);
 	});
 
 	it("ships no decorator of its own for a spec to depend on", () => {

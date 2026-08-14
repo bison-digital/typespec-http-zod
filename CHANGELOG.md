@@ -10,7 +10,47 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.12.1`.
+Nothing since `0.13.0`.
+
+## [0.13.0] - 2026-08-14
+
+A minor, and a **deliberate reversal of a documented decision**: a scalar the spec declares is now
+checked.
+
+### A declared type is checked
+
+| declared                        | emitted                            |
+| ------------------------------- | ---------------------------------- |
+| `utcDateTime`, `offsetDateTime` | `z.iso.datetime({ offset: true })` |
+| `plainDate`                     | `z.iso.date()`                     |
+| `plainTime`                     | `z.iso.time()`                     |
+| `duration`                      | `z.iso.duration()`                 |
+| `url`                           | `z.url()`                          |
+
+These emitted `z.string()`, so a service promising a timestamp accepted `banana`. The decision was
+argued from `format` being an annotation under JSON Schema 2020-12, which is correct about the
+KEYWORD and wrong about these: `utcDateTime` is not a string carrying a hint, it is a type the spec
+declares, and emitting `z.string()` discarded it.
+
+**What settled it was a consumer's workaround.** They rewrote `utcDateTime` as `string` with a
+`@pattern` to get the check, which lost `format: date-time` from their document AND gave a weaker
+check, since a hand-written pattern accepts `2026-02-31`. A rule that pushes consumers into writing
+worse specs is the wrong rule.
+
+**`{ offset: true }` was measured, and the old comment's warning was right.** A bare
+`z.iso.datetime()` rejects `2026-08-14T12:00:00+01:00`, which the document permits, so it would have
+refused conformant callers. With the offset permitted every legal instant is accepted and only
+`2026-02-31` and `banana` are refused.
+
+### `@format` on a plain string is still not enforced
+
+That half is unchanged and is the other side of the same principle: a type is a claim about the
+value, an annotation is a hint about it. Enforcing an author's `@format("uuid")` would add a rule the
+contract does not state, and `@format("account-number")` proves no general rule exists.
+
+The vocabulary guard that forbade every format-derived check now holds the new line instead of being
+deleted: no check may come from an annotation, and a floor requires the type-derived ones to exist,
+because "no annotation-derived checks" is also true of an emitter that checks nothing.
 
 ## [0.12.1] - 2026-08-14
 
