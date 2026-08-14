@@ -42,6 +42,25 @@ import type { ZodType } from "zod";
  */
 export interface ResponseArm {
 	/**
+	 * The media types this response offers, where the document names more than one.
+	 *
+	 * Absent where it names one, which is what an application already assumes. Present, it is the set
+	 * to negotiate against: `selectContentType` takes the caller's `Accept` and these.
+	 */
+	readonly contentTypes?: readonly string[];
+	/**
+	 * The headers this response declares, as the document publishes them.
+	 *
+	 * **Two names, because two different things need them.** `name` is the WIRE name, which is what
+	 * the response sets; `property` is the name on the value the handler returned, which is where the
+	 * value is read from. `@header("x-correlation-id") correlationId: string` is `x-correlation-id`
+	 * on the wire and `correlationId` in the result.
+	 *
+	 * Absent where the response declares none, so "none declared" and "none carried" are the same
+	 * thing rather than two states an application has to tell apart.
+	 */
+	readonly headers?: readonly { readonly name: string; readonly property: string }[];
+	/**
 	 * The status this arm answers with: an exact code, a `4XX`-style range, or the catch-all.
 	 *
 	 * **`"default"` is carried as itself, not resolved to a number.** OpenAPI's `default` response

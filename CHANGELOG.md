@@ -10,7 +10,43 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.10.0`.
+Nothing since `0.11.0`.
+
+## [0.11.0] - 2026-08-14
+
+A minor: `EmittedRoute` gains two fields, `ResponseArm` gains two, and an operation that used to be
+dropped is now emitted.
+
+Every item was reported by a consumer as blocking, and every one is a fact the OpenAPI document
+already publishes, so nothing here is invented.
+
+### Fixed
+
+- **An operation whose only declared response is a redirect was dropped entirely, with no
+  diagnostic.** Routes were collected from a status filter accepting 2xx only, so a `302` gave no
+  status and the operation was skipped by a bare `continue`. The document declared the route and the
+  emitted output had no trace of it, so a client generated from that document would 404 while the
+  compile reported success. A `Location` on a 302 and an OAuth redirect are the ordinary cases.
+
+  Statuses below 400 are collected now. 4xx and 5xx stay out: those are error arms, and a handler
+  does not reach one by returning normally. Additive by construction, and measured rather than
+  hoped - across the whole conformance corpus, ZERO operations declare a response set without a 2xx,
+  which is why nothing caught it and why no existing count moved.
+
+### Added
+
+- **`ResponseArm.headers`**, so `deps.respond` can set a header the contract promises. A spec may
+  declare `@header` on a response model and the document publishes it under `responses.<code>.headers`;
+  the arm carried a status and a body schema and nothing else. Each entry pairs the WIRE name the
+  response must set with the `property` on the returned value the value is read from, because
+  `@header("x-correlation-id") correlationId` differs in both and an emitter given one would guess the
+  other.
+- **`ResponseArm.contentTypes`**, present where a status offers more than one media type. An operation
+  whose one status offers `application/json` and `text/event-stream` emitted a single arm holding the
+  JSON schema and dropped the alternative from the list, so a non-JSON operation could not be served
+  faithfully. Absent for a single type, which is what an application already assumes.
+- `EmittedRoute.responseHeaders` and `EmittedRoute.responseMediaTypes` carry the same two facts per
+  status for a wrapping emitter.
 
 ## [0.10.0] - 2026-08-14
 

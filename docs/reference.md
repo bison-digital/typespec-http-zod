@@ -74,3 +74,22 @@ two-argument `z.record`, `.catchall()` and `z.lazy()`.
 
 Node 22 or later. The emitter runs on the stable TypeSpec 1.x surface: `$onEmit` plus
 `@typespec/http`.
+
+## What a response arm carries
+
+`deps.respond` receives every arm the document declares for an operation and chooses one. Beyond the
+status and the body schema, an arm carries two facts the document publishes and which used to be
+dropped:
+
+| field          | when it is present                                                                                                                                                                                                          |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `headers`      | the response declares `@header`. Each entry pairs the WIRE name the response must set with the `property` on the returned value the value is read from, because `@header("x-correlation-id") correlationId` differs in both |
+| `contentTypes` | the status offers MORE than one media type. A single type is what an application already assumes, so repeating it on every arm would be noise                                                                               |
+
+A response declaring neither carries neither, so "none declared" and "none carried" are the same
+state rather than two an application has to tell apart.
+
+**A redirect is an arm like any other.** An operation whose only declared response is a `302` used to
+be dropped from the emitted output entirely, with no diagnostic: the status filter accepted 2xx only,
+so the operation had no status and was skipped. Statuses below 400 are collected now. 4xx and 5xx stay
+out, because those are error arms and a handler does not reach one by returning normally.

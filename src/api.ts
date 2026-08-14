@@ -331,6 +331,53 @@ function isSuccessKey(status: StatusKey): boolean {
  * Arms come out in the order OpenAPI resolves them - exact codes, then ranges, then the catch-all -
  * so a consumer scanning for the first match applies the precedence the specification states.
  */
+/**
+ * The headers each response status declares, keyed by the status the arm answers with.
+ *
+ * **Read from `@typespec/http`'s own resolution**, which separates a response's headers from its
+ * body and gives each one under its WIRE name with the declaring property behind it. Deriving either
+ * name any other way would be a second spelling of a fact the compiler already resolved.
+ */
+function responseHeadersOf(
+	operation: HttpOperation,
+): { status: StatusKey; headers: { name: string; property: string }[] }[] {
+	const byStatus = new Map<StatusKey, { name: string; property: string }[]>();
+	for (const response of operation.responses) {
+		const status = response.statusCodes;
+		if (typeof status !== "number") continue;
+		const headers: { name: string; property: string }[] = [];
+		for (const content of response.responses) {
+			for (const [name, property] of Object.entries(content.headers ?? {})) {
+				if (!headers.some((existing) => existing.name === name)) {
+					headers.push({ name, property: property.name });
+				}
+			}
+		}
+		if (headers.length === 0) continue;
+		const existing = byStatus.get(status) ?? [];
+		byStatus.set(status, [
+			...existing,
+			...headers.filter((h) => !existing.some((e) => e.name === h.name)),
+		]);
+	}
+	return [...byStatus].map(([status, headers]) => ({ status, headers }));
+}
+
+/** The media types each numeric response status offers, from the compiler's own resolution. */
+function responseMediaTypesOf(
+	operation: HttpOperation,
+): { status: StatusKey; contentTypes: string[] }[] {
+	const byStatus = new Map<StatusKey, string[]>();
+	for (const response of operation.responses) {
+		const status = response.statusCodes;
+		if (typeof status !== "number") continue;
+		const types = responseContentTypesOf(operation, status);
+		if (types.length === 0) continue;
+		byStatus.set(status, types);
+	}
+	return [...byStatus].map(([status, contentTypes]) => ({ status, contentTypes }));
+}
+
 function errorArmsOf(
 	program: Program,
 	operation: HttpOperation,
@@ -768,6 +815,38 @@ export interface EmittedRoute {
 	readonly errorArms: readonly {
 		readonly status: StatusKey;
 		readonly schema: string | undefined;
+	}[];
+	/**
+	 * The headers each response status declares, as the document publishes them.
+	 *
+	 * **`deps.respond` could not set a header the contract promises.** A spec may declare `@header` on
+	 * a response model - a `Location` on a 302, a `Link`, a correlation echo - and the document
+	 * publishes it under `responses.<code>.headers`, but the arm carried a status and a body schema and
+	 * nothing else. So the server could not answer faithfully, and a redirect could not be served at
+	 * all. Reported as blocking by a consumer, and it is a fact the document already states.
+	 *
+	 * **Both names are carried, because two different things need them.** `name` is the WIRE name,
+	 * which is what the response sets; `property` is the name on the returned value, which is where the
+	 * value is read from. `@header("x-correlation-id") correlationId: string` is `x-correlation-id` on
+	 * the wire and `correlationId` in the handler's result, and an emitter given only one of them would
+	 * have to guess the other.
+	 */
+	readonly responseHeaders: readonly {
+		readonly status: StatusKey;
+		readonly headers: readonly { readonly name: string; readonly property: string }[];
+	}[];
+	/**
+	 * The media types each response status offers.
+	 *
+	 * **`responseContentTypes` above carries this for the PRIMARY status only, and an arm carried
+	 * none at all.** An operation whose one status offers `application/json` and `text/event-stream`
+	 * emitted a single arm holding the JSON schema, and the alternative was dropped from the list
+	 * entirely, so `deps.respond` could not tell what it was answering with and a non-JSON operation
+	 * could not be served faithfully. Reported by two consumers independently.
+	 */
+	readonly responseMediaTypes: readonly {
+		readonly status: StatusKey;
+		readonly contentTypes: readonly string[];
 	}[];
 	/**
 	 * No caller is established, so the operation receives no `ServiceContext`.
@@ -1214,6 +1293,8 @@ export function collectRoutes(
 				errorArms: withVisibility(program, Visibility.Read, () =>
 					errorArmsOf(program, operation, registry),
 				),
+				responseHeaders: responseHeadersOf(operation),
+				responseMediaTypes: responseMediaTypesOf(operation),
 				scopes: [
 					...new Set(
 						(getAuthenticationForOperation(program, operation.operation)?.options ?? []).flatMap(
@@ -1528,14 +1609,41 @@ function responseArmsOf(
 ): string {
 	const arms: string[] = [];
 	const primary = response ?? "undefined";
+	/**
+	 * The headers this status declares, rendered onto the arm that answers with it.
+	 *
+	 * Emitted only where there are some: an arm for a response declaring none must not acquire an
+	 * empty list, or every `respond` implementation has to tell "none declared" from "none carried".
+	 */
+	/**
+	 * The media types this status offers. Emitted only where the document names more than one, because
+	 * a single type is what a `respond` already assumes and repeating it on every arm in every service
+	 * would be noise rather than a fact.
+	 */
+	const mediaTypesFor = (status: StatusKey): string => {
+		const declared =
+			route.responseMediaTypes.find((entry) => entry.status === status)?.contentTypes ?? [];
+		if (declared.length < 2) return "";
+		return `, contentTypes: [${declared.map((t) => JSON.stringify(t)).join(", ")}]`;
+	};
+	const headersFor = (status: StatusKey): string => {
+		const declared = route.responseHeaders.find((entry) => entry.status === status)?.headers ?? [];
+		if (declared.length === 0) return "";
+		const rendered = declared
+			.map((h) => `{ name: ${JSON.stringify(h.name)}, property: ${JSON.stringify(h.property)} }`)
+			.join(", ");
+		return `, headers: [${rendered}]`;
+	};
 	if (route.statusBy === undefined) {
-		arms.push(`{ status: ${route.statusCode}, schema: ${primary} }`);
+		arms.push(
+			`{ status: ${route.statusCode}, schema: ${primary}${mediaTypesFor(route.statusCode)}${headersFor(route.statusCode)} }`,
+		);
 	} else {
 		const alternateSchema = alternate ?? "undefined";
 		const { property, value, status } = route.statusBy;
 		arms.push(
-			`{ status: ${status}, schema: ${alternateSchema}, when: { property: ${JSON.stringify(property)}, value: ${JSON.stringify(value)} } }`,
-			`{ status: ${route.statusCode}, schema: ${primary} }`,
+			`{ status: ${status}, schema: ${alternateSchema}${mediaTypesFor(status)}${headersFor(status)}, when: { property: ${JSON.stringify(property)}, value: ${JSON.stringify(value)} } }`,
+			`{ status: ${route.statusCode}, schema: ${primary}${mediaTypesFor(route.statusCode)}${headersFor(route.statusCode)} }`,
 		);
 	}
 	/**
