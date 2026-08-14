@@ -835,6 +835,22 @@ export interface EmittedRoute {
 	 * what arrived, parsing and re-serialising would verify a different string than the sender signed.
 	 */
 	readonly rawBodyProperty: string | undefined;
+	/**
+	 * The input property a PARSED body arrives under, where it must not be spread into the parameters.
+	 *
+	 * **A body with an indexer cannot be flattened.** `@body body: Record<string>` merged with the
+	 * query and header parameters gives an intersection whose index signature every sibling must
+	 * satisfy, so an optional `@query q?: string` fails with
+	 * `TS2345: 'q' is incompatible with index signature` and the generated server does not compile.
+	 *
+	 * **And flattening it was wrong before it failed to compile.** The document states the parameters
+	 * and the body as separate things; merged, a body key named `q` silently overwrites the query
+	 * parameter of that name. Naming the property keeps them apart, which is what the document says.
+	 *
+	 * `undefined` for an ordinary model body, which is spread as before. Same shape as
+	 * {@link rawBodyProperty}, whose case is the same statement about a different body.
+	 */
+	readonly bodyProperty: string | undefined;
 	/** Declared failures, each with the schema for its OWN body, in OpenAPI's precedence order. */
 	readonly errorArms: readonly {
 		readonly status: StatusKey;
@@ -1230,6 +1246,15 @@ export function collectRoutes(
 				requestType?.kind === "Scalar" && requestType.name === "bytes"
 					? (bodyParameter?.property?.name ?? "body")
 					: undefined;
+			/**
+			 * A body with an indexer is named rather than spread - see `bodyProperty`. Read from the
+			 * resolved model's own indexer rather than from the emitted schema text, which would be a
+			 * decision made by pattern-matching generated output.
+			 */
+			const bodyProperty =
+				requestType?.kind === "Model" && requestType.indexer !== undefined
+					? (bodyParameter?.property?.name ?? "body")
+					: undefined;
 			routes.push({
 				operationId: operationIdOf(program, operation.operation),
 				verb: operation.verb.toUpperCase(),
@@ -1311,6 +1336,7 @@ export function collectRoutes(
 									: registry.expressionFor(responseType),
 							),
 				rawBodyProperty,
+				bodyProperty,
 				// Responses are read at Visibility.Read, exactly as the success body above is. Resolving
 				// them under the ambient request visibility declared six components under the wrong
 				// suffix - measured: type/model/visibility gained six divergences.

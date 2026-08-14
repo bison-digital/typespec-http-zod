@@ -10,7 +10,24 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.14.0`.
+Nothing since `0.15.0`.
+
+## [0.15.0] - 2026-08-14
+
+A minor: `EmittedRoute` gains `bodyProperty`, and a body with an indexer is named rather than spread.
+
+**A `Record` body beside any other parameter emitted a server that does not compile.** Intersected
+with the parameters, the body's index signature is imposed on every sibling, so
+`op x(@query q?: string, @body body: Record<string>)` failed with
+`TS2345: 'q' is incompatible with index signature`.
+
+**It was wrong before it failed to compile.** The document states the parameters and the body as
+separate things; merged, a body key named `q` silently overwrites the query parameter of that name.
+`bodyProperty` names the input property the parsed body arrives under, the same statement
+`rawBodyProperty` already made about a `bytes` body. An ordinary model body is spread as before.
+
+Reported as a header/`Record` interaction; measured, the header is incidental and the trigger is a
+`Record` body beside any other input.
 
 ## [0.14.0] - 2026-08-14
 
