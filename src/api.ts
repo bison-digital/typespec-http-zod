@@ -1280,7 +1280,21 @@ function renderSchemas(
 		const annotation = d.annotated === true ? `: z.ZodType<${d.typeName}>` : "";
 		return `\n${declared}\nexport const ${d.identifier}${annotation} = ${d.source};\n`;
 	});
-	const parts = [GENERATED_BANNER, '\nimport { z } from "zod";\n'];
+	/**
+	 * **Written only when something in the file names it**, like the `ResponseArm` import below and for
+	 * the same reason: an unused import fails the lint a generated file has to pass like any other.
+	 *
+	 * `z` is reached through a declaration's source or a route's arms, so a service whose every
+	 * operation takes nothing and returns `void` declares neither and named it never:
+	 * `TS6133: 'z' is declared but its value is never read`, from a compile that reported success. Two
+	 * bare `GET`s is where a health check starts, so it is where a new consumer starts.
+	 *
+	 * Decided from the declarations rather than by searching the rendered text, which is the mistake
+	 * this file has made four times.
+	 */
+	const usesZod = declarations.length > 0 || routeDeclarations.length > 0;
+	const parts = [GENERATED_BANNER];
+	if (usesZod) parts.push('\nimport { z } from "zod";\n');
 	/**
 	 * A TYPE import, so nothing of this package's survives into the emitted JavaScript.
 	 *

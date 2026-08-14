@@ -10,7 +10,22 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.7.0`.
+Nothing since `0.8.0`.
+
+## [0.8.0] - 2026-08-14
+
+A minor because it changes emitted output: a file that needs no Zod no longer imports it.
+
+### Fixed
+
+- **`import { z } from "zod"` was written unconditionally**, so a service whose every operation takes
+  nothing and returns `void` emitted an import nothing used and failed the consumer's build with
+  `TS6133: 'z' is declared but its value is never read`, from a compile that reported success. It is
+  now decided from the declarations, like the `ResponseArm` import beside it.
+
+  Reported by the copal-gateway migration as an untested hypothesis while reporting the same shape in
+  `typespec-hono`, and confirmed here by measurement. Two bare `GET`s is where a health check starts,
+  so it is where a new consumer starts.
 
 ## [0.7.0] - 2026-08-14
 
