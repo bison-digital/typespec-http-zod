@@ -40,6 +40,19 @@ for, and does not stop the walk, so one compile names every problem rather than 
   media type against members that each carry their own, so there is no single arm to compare them to.
   The status-to-body mapping is still checked.
 - **4 response bodies reduce to no readable kind on one side**, being a stream or a union.
+- **A reserved path parameter is carried in the route record and not in the document, which is the
+  one place this IR deliberately says more than OpenAPI can.** `@route("/vault/{+path}")` states RFC
+  6570 reserved expansion: the parameter matches across `/`, so `GET /vault/areas/health.md` reaches
+  one operation. OpenAPI has no way to express that at **any** version - measured at 3.0.0, 3.1.0 and
+  3.2.0 - so `@typespec/openapi3` publishes `/vault/{path}` and raises `path-reserved-expansion` as a
+  warning, which a consumer suppresses per-operation. `EmittedRoute.reservedPathParameters` carries
+  the wire names so a server emitter can mount a route that actually matches; without it the route is
+  mounted and answers 404 to every request it was written for. This emitter raises no warning of its
+  own: the divergence is the document's limit, not a compromise in the output. The same flag is set by
+  `@path(#{ allowReserved: true })` on a required parameter the route template does not already name;
+  naming it in both places, or marking an optional parameter, is refused by `@typespec/http` with
+  `use-uri-template`.
+
 - **A `@head` operation gets validators here and cannot be served by every router.** That is a
   property of the server rather than of this package.
 - **The emitted output requires `zod`, not `zod/mini`.** The tree-shakeable variant has no chained

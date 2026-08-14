@@ -7,6 +7,8 @@ import {
 	compileScenario,
 	depthSources,
 	discoverScenarios,
+	GRADED_OPENAPI_VERSIONS,
+	openapiDirFor,
 	type CompiledScenario,
 } from "./corpus.js";
 import {
@@ -66,7 +68,9 @@ interface DocumentParameter {
 }
 
 interface DocumentResponse {
-	readonly content?: Readonly<Record<string, { readonly schema?: JsonSchema }>>;
+	readonly content?: Readonly<
+		Record<string, { readonly schema?: JsonSchema; readonly itemSchema?: JsonSchema }>
+	>;
 }
 
 interface DocumentOperation {
@@ -374,6 +378,25 @@ function responseInlineSchema(response: DocumentResponse): JsonSchema | undefine
 		return schema as JsonSchema;
 	}
 	return undefined;
+}
+
+/**
+ * Whether the document describes the ITEMS of a stream rather than a body.
+ *
+ * **OpenAPI 3.2 publishes `itemSchema` for a streamed response and no `schema` at all**, because the
+ * body is a byte stream and what it carries is a sequence of events. 3.1 cannot say that, so openapi3
+ * falls back to `{"type": "string"}` and warns.
+ *
+ * **A third answer, and folding it into "unreadable" would be wrong in both directions.** "We could
+ * not read what the document said" and "the document deliberately describes something other than a
+ * body" are different facts, and only the first is a gap in this harness. Naming it is also what
+ * keeps the number honest: a count moving by three says nothing about WHICH three.
+ */
+function responseDescribesStreamItems(response: DocumentResponse): boolean {
+	for (const media of Object.values(response.content ?? {})) {
+		if (media.itemSchema !== undefined && media.schema === undefined) return true;
+	}
+	return false;
 }
 
 /** Whether the document's response carries a body at all - an empty `content` is a bodyless arm. */
@@ -751,6 +774,7 @@ function normaliseJsonSchema(value: unknown, ctx: NormaliseContext): unknown {
 
 interface Comparison {
 	readonly scenariosDifferentiated: number;
+	readonly documentsRead: number;
 	readonly objectsCompared: number;
 	/**
 	 * Components compared as JSON Schema, by Zod's own serialiser against openapi3's - no describer of
@@ -774,6 +798,7 @@ interface Comparison {
 	readonly inlineResponseBodiesCompared: number;
 	/** Bodies neither side reduces to an object shape - a scalar, a stream, a union. */
 	readonly unreadableResponseBodies: number;
+	readonly streamItemBodies: number;
 	/** Non-object response bodies whose top-level KIND is compared. */
 	readonly responseBodyKindsCompared: number;
 	/** `content-type`/`accept` validators set aside: stated via `content` keys, not as parameters. */
@@ -836,11 +861,13 @@ const documentsIn = (dir: string): string[] =>
 		.filter((name) => name.startsWith("openapi") && name.endsWith(".json"))
 		.sort();
 
-async function compareEverything(): Promise<Comparison> {
+async function compareEverything(specVersion: string): Promise<Comparison> {
 	const divergences: Divergence[] = [];
 	const ourFailures: string[] = [];
 	const oracleFailures: string[] = [];
 	let scenariosDifferentiated = 0;
+	/** Documents actually opened. The floor that makes an empty read impossible to mistake for green. */
+	let documentsRead = 0;
 	let objectsCompared = 0;
 	let jsonSchemaCompared = 0;
 	let jsonSchemaUnserialisable = 0;
@@ -852,6 +879,8 @@ async function compareEverything(): Promise<Comparison> {
 	let negotiatedResponseBodies = 0;
 	let inlineResponseBodiesCompared = 0;
 	let unreadableResponseBodies = 0;
+	/** Responses whose body the document describes as stream ITEMS - a 3.2 shape, not a gap. */
+	let streamItemBodies = 0;
 	let responseBodyKindsCompared = 0;
 	let requestBodiesCompared = 0;
 	let requestBodyKindsCompared = 0;
@@ -897,7 +926,21 @@ async function compareEverything(): Promise<Comparison> {
 		 * honestly be compared against - and "we serve only the latest version" is a real limitation,
 		 * recorded here rather than hidden by comparing against whichever file sorted first.
 		 */
-		const documents = documentsIn(compiled.openapiDir);
+		const versionDir = openapiDirFor(compiled.openapiDir, specVersion);
+		const documents = documentsIn(versionDir);
+		/**
+		 * **A scenario with no document is a harness failure, never a quiet skip.**
+		 *
+		 * openapi3 relocates its output into per-version subdirectories the moment more than one
+		 * version is requested - see `openapiDirFor`. A reader still assuming the flat layout finds an
+		 * empty list, and every arm below then agrees with nothing at all. Named here, and floored by
+		 * `documentsRead`, because the same mistake next door returns early and reports success.
+		 */
+		if (documents.length === 0) {
+			ourFailures.push(`${scenario.name} :: harness :: no document at ${specVersion}`);
+			continue;
+		}
+		documentsRead += documents.length;
 		if (documents.length > 1) {
 			// Not a silent cap: a versioned service is compared against its LATEST document only,
 			// because that is the single shape we emit. Recorded so the reduction stays a number.
@@ -919,7 +962,7 @@ async function compareEverything(): Promise<Comparison> {
 				: (documents.find((name) => name === `openapi.${compiled.latestVersion}.json`) ??
 					documents.at(-1));
 		const document = JSON.parse(
-			readFileSync(join(compiled.openapiDir, chosen ?? ""), "utf8"),
+			readFileSync(join(versionDir, chosen ?? ""), "utf8"),
 		) as OpenApiDocument;
 		const emitted = (await import(join(compiled.zodDir, "schemas.gen.ts"))) as Record<
 			string,
@@ -1241,6 +1284,11 @@ async function compareEverything(): Promise<Comparison> {
 									const zodKind =
 										arm.schema === undefined ? undefined : topLevelKindOfZod(arm.schema);
 									if (documentKind === undefined || zodKind === undefined) {
+										// A streamed response is not unreadable - see `responseDescribesStreamItems`.
+										if (responseDescribesStreamItems(response)) {
+											streamItemBodies++;
+											continue;
+										}
 										// Unreadable on one side. Counted, never silently passed.
 										unreadableResponseBodies++;
 										continue;
@@ -1460,6 +1508,7 @@ async function compareEverything(): Promise<Comparison> {
 
 	return {
 		scenariosDifferentiated,
+		documentsRead,
 		objectsCompared,
 		jsonSchemaCompared,
 		jsonSchemaUnserialisable,
@@ -1469,6 +1518,7 @@ async function compareEverything(): Promise<Comparison> {
 		negotiatedResponseBodies,
 		inlineResponseBodiesCompared,
 		unreadableResponseBodies,
+		streamItemBodies,
 		responseBodyKindsCompared,
 		requestBodiesCompared,
 		requestBodyKindsCompared,
@@ -1638,10 +1688,18 @@ interface Baseline {
 }
 
 let comparison: Comparison;
+/**
+ * The same corpus, compared against the SECOND graded document version.
+ *
+ * One compile produced both documents - see `GRADED_OPENAPI_VERSIONS` - so this is a second reading
+ * of one program rather than a second build of it.
+ */
+let comparisonAtLater: Comparison;
 let baseline: Baseline;
 
 beforeAll(async () => {
-	comparison = await compareEverything();
+	comparison = await compareEverything(GRADED_OPENAPI_VERSIONS[0]);
+	comparisonAtLater = await compareEverything(GRADED_OPENAPI_VERSIONS[1]);
 	if (process.env.UPDATE_CONFORMANCE_BASELINE === "1") {
 		const grouped: Record<string, string[]> = {};
 		for (const divergence of comparison.divergences) {
@@ -1676,12 +1734,102 @@ beforeAll(async () => {
 	baseline = JSON.parse(readFileSync(baselinePath, "utf8")) as Baseline;
 }, 600_000);
 
+/**
+ * **The second graded document version, and what it is actually for.**
+ *
+ * `@typespec/openapi3` accepts 3.0.0, 3.1.0 and 3.2.0, and this corpus compared against 3.1 alone
+ * until now, so nothing had ever looked at what it emits at 3.2. Measured across every scenario, the
+ * documents differ in exactly one place: `streaming/sse`, three operations, where the
+ * `text/event-stream` response loses `schema` and gains `itemSchema`.
+ *
+ * **The reason to grade it is not that diff.** At 3.1 eight of the nine SSE components are
+ * unreachable from `paths`, so the reachability walk excuses them and no arm ever reads them. At 3.2
+ * five become reachable through `itemSchema.oneOf[].properties.data.contentSchema`, and this emitter
+ * already declares all five. Grading the second version turns an existing blind spot into compared
+ * pairs without the emitter changing at all.
+ *
+ * **The divergence set is asserted to be IDENTICAL rather than given a baseline of its own.** A
+ * second copy of the baseline would drift, and would have to be re-approved for every change that
+ * has nothing to do with versions. Equality says the thing actually worth saying: reading the newer
+ * document finds nothing wrong that the older one did not.
+ */
+describe("the same corpus, against the newer document version", () => {
+	it("grades the second version over a real share of the corpus", () => {
+		// The floor that would catch the whole arm reading an empty directory - which is precisely what
+		// the per-version output layout does to a reader that has not been told about it.
+		expect(comparisonAtLater.documentsRead).toBeGreaterThanOrEqual(60);
+		expect(comparisonAtLater.scenariosDifferentiated).toBe(comparison.scenariosDifferentiated);
+		expect(comparisonAtLater.objectsCompared).toBeGreaterThanOrEqual(140);
+	});
+
+	it("finds no divergence the older document version does not also show", () => {
+		const key = (list: readonly Divergence[]): string[] =>
+			list.map((d) => `${d.kind} :: ${d.where} :: ${d.detail}`).toSorted();
+		expect(key(comparisonAtLater.divergences)).toEqual(key(comparison.divergences));
+	});
+
+	it("fails and excuses exactly the same scenarios", () => {
+		expect([...comparisonAtLater.ourFailures].toSorted()).toEqual(
+			[...comparison.ourFailures].toSorted(),
+		);
+		expect([...comparisonAtLater.oracleFailures].toSorted()).toEqual(
+			[...comparison.oracleFailures].toSorted(),
+		);
+		expect(comparisonAtLater.emitterWarnings).toEqual([]);
+	});
+
+	/**
+	 * **The one measured difference, pinned in both directions.**
+	 *
+	 * A streamed response at 3.2 publishes `itemSchema` and no `schema`, so the three SSE bodies that
+	 * 3.1 compares as `{"type": "string"}` against `z.string()` have nothing for the kind walk to read
+	 * and are counted unreadable instead. Predicted before the change and confirmed: unreadable 4 -> 7,
+	 * kinds 44 -> 41, with the total across both buckets unchanged at 48.
+	 *
+	 * **This is a gap, not a target.** The document at 3.2 says more about a stream than 3.1 does, and
+	 * this emitter validates the stream as a string either way. Pinned exactly so that closing it moves
+	 * a number somebody has to explain, rather than passing quietly.
+	 */
+	it("names the streamed bodies as stream items rather than as unreadable ones", () => {
+		// 3.1 cannot express a stream, so nothing is classified this way there.
+		expect(comparison.streamItemBodies).toBe(0);
+		// `streaming/sse` declares three, and naming them is the point: a bare count moving by three
+		// would also be satisfied by three unrelated bodies breaking while these three started working.
+		expect(comparisonAtLater.streamItemBodies).toBe(3);
+		/**
+		 * **Unreadable does not move, which is the whole claim.** These three are not a hole in the
+		 * harness; the document is describing something this emitter validates as a string, and that
+		 * gap is `streamItemBodies` itself rather than a failure to read.
+		 */
+		expect(comparisonAtLater.unreadableResponseBodies).toBe(comparison.unreadableResponseBodies);
+		expect(comparisonAtLater.responseBodyKindsCompared).toBe(
+			comparison.responseBodyKindsCompared - comparisonAtLater.streamItemBodies,
+		);
+		// The three buckets partition one set of positions, so the total may not move.
+		const total = (c: Comparison): number =>
+			c.unreadableResponseBodies + c.responseBodyKindsCompared + c.streamItemBodies;
+		expect(total(comparisonAtLater)).toBe(total(comparison));
+	});
+});
+
 describe("the validator and the document agree, over a corpus we did not write", () => {
 	it("differentiates a real share of the corpus", () => {
 		// Without this the whole file passes vacuously the day discovery, compilation or the name
 		// derivation quietly stops finding anything.
 		expect(discoverScenarios().length).toBeGreaterThanOrEqual(65);
 		expect(comparison.scenariosDifferentiated).toBeGreaterThanOrEqual(55);
+		/**
+		 * **Documents actually opened, which `scenariosDifferentiated` does not imply.**
+		 *
+		 * openapi3 moves its output into per-version subdirectories as soon as a second version is
+		 * graded, and a reader left on the flat layout finds an empty list rather than an error. Both
+		 * halves of that were measured: without this floor the mistake reported success, and it
+		 * reported success even against a CONTROL that reinstated it, because the superseded flat file
+		 * from the previous run was still on disk. `compileScenario` now empties its directory, and
+		 * this is the arm that notices if the reader and the writer ever disagree about where output
+		 * goes.
+		 */
+		expect(comparison.documentsRead).toBeGreaterThanOrEqual(60);
 		expect(comparison.objectsCompared).toBeGreaterThanOrEqual(140);
 		// A discriminated base is compared as a union; if none were, that whole arm proved nothing.
 		expect(comparison.unionsCompared).toBeGreaterThanOrEqual(5);

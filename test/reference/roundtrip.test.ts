@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
+import { GRADED_OPENAPI_VERSIONS, openapiDirFor } from "../conformance/corpus.js";
 import {
 	describeDocumentObject,
 	describeZodObject,
@@ -81,12 +82,22 @@ beforeAll(async () => {
 			});
 			continue;
 		}
-		const file = readdirSync(compiled.openapiDir).find(
+		/**
+		 * The FIRST graded version's directory - see `openapiDirFor`. openapi3 relocates its output
+		 * into per-version subdirectories as soon as more than one version is requested, and this
+		 * reader assumed the flat layout: it read the directory itself and died with `EISDIR`. That is
+		 * the same trap `documentsRead` floors in the differential, found here by the change that
+		 * introduced it. This roundtrip is about converting a document to TypeSpec and back, which is
+		 * a question about shapes rather than about spec versions, so one version is the whole answer.
+		 */
+		const openapiDir = openapiDirFor(compiled.openapiDir, GRADED_OPENAPI_VERSIONS[0]);
+		const file = readdirSync(openapiDir).find(
 			(name) => name.startsWith("openapi") && name.endsWith(".json"),
 		);
-		const emitted = JSON.parse(
-			readFileSync(join(compiled.openapiDir, file ?? ""), "utf8"),
-		) as OpenApi3Document & { components?: { schemas?: Record<string, JsonSchema> } };
+		if (file === undefined) throw new Error(`no document in ${openapiDir}`);
+		const emitted = JSON.parse(readFileSync(join(openapiDir, file), "utf8")) as OpenApi3Document & {
+			components?: { schemas?: Record<string, JsonSchema> };
+		};
 		const schemas = (await import(join(compiled.zodDir, "schemas.gen.ts"))) as Record<
 			string,
 			unknown

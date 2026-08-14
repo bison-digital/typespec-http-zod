@@ -655,6 +655,32 @@ export interface EmittedRoute {
 	readonly operationId: string;
 	readonly verb: string;
 	readonly path: string;
+	/**
+	 * The WIRE names of path parameters that use RFC 6570 reserved expansion, and so match across `/`.
+	 *
+	 * **`path` alone cannot carry this, and that is not an oversight in the spelling.** A note path is
+	 * `areas/health.md`, so a vault route has to be `GET /vault/:path{.+}`; `@typespec/http` resolves
+	 * `@route("/vault/{+path}")` to `path` = `/vault/{path}` with the operator already stripped, and
+	 * `@typespec/openapi3` publishes the same. **Measured at 3.0.0, 3.1.0 and 3.2.0**: OpenAPI cannot
+	 * express reserved expansion at any version, so the document says `/vault/{path}` and openapi3
+	 * raises `path-reserved-expansion` as a warning. The fact exists in the program and reaches no
+	 * artefact, so a server emitter mounts a route that answers 404 to every request it was written
+	 * for. This is the one place the IR deliberately carries more than the document - see
+	 * `docs/reference.md`.
+	 *
+	 * **Read from the parameter, never by parsing `path` or `uriTemplate` for `{+`.** Two forms reach
+	 * `allowReserved`, and only the parameter entry answers for both: the operator in the template
+	 * (`@route("/vault/{+path}")`), and `@path(#{allowReserved: true})` on a required parameter the
+	 * template does not already name, which is what `@typespec/http-specs` itself uses and which
+	 * `@typespec/http` resolves by APPENDING `{+param}` to the template. Deciding this by matching
+	 * emitted text would also be the defect class that produced six others here.
+	 *
+	 * Wire names, so `@path("note-path") notePath` appears as `note-path` - the name a router has to
+	 * match, and the same one `pathSchema` keys on. Empty when the operation has none, never
+	 * `undefined`, so a consumer does not branch. Reserved-ness is per PARAMETER: `/repo/{owner}/{+ref}`
+	 * carries one of each.
+	 */
+	readonly reservedPathParameters: readonly string[];
 	readonly statusCode: number;
 	readonly statusCodes: readonly number[];
 	/** Media types the success body can be served as - the basis for `Accept` negotiation. */
@@ -1101,6 +1127,14 @@ export function collectRoutes(
 				 * particular router can express the path.
 				 */
 				path: operation.path,
+				/**
+				 * Asked of the resolved parameter, which is the only place both marker forms agree -
+				 * see {@link EmittedRoute.reservedPathParameters}. `allowReserved` is a required
+				 * boolean on every path parameter entry, so this reads a fact rather than an absence.
+				 */
+				reservedPathParameters: operation.parameters.parameters
+					.filter((parameter) => parameter.type === "path" && parameter.allowReserved)
+					.map((parameter) => parameter.name),
 				statusCode,
 				statusCodes,
 				responseContentTypes: responseContentTypesOf(operation, statusCode),
