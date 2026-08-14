@@ -17,6 +17,15 @@ namespace Rec;
 @post
 op x(@query q?: string, @body body: Record<string>): void;
 
+/** The form case, which the first fixture missed: a declared content type changes the resolution. */
+@route("/z")
+@post
+op z(
+  @header contentType: "application/x-www-form-urlencoded",
+  @query q?: string,
+  @body body: Record<string>,
+): void;
+
 /** The control: an ordinary model body is still spread, so nothing else moved. */
 model Thing {
   id: string;

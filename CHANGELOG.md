@@ -10,7 +10,16 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.15.0`.
+Nothing since `0.15.1`.
+
+## [0.15.1] - 2026-08-14
+
+A patch: `test/recordbody/` now covers a form body as well as a JSON one.
+
+`0.15.0`'s fixture declared only a JSON `Record` body, and a declared
+`content-type: application/x-www-form-urlencoded` takes a different resolution path. The library
+handled it correctly either way; the fixture simply did not say so, which is how the consumer half of
+the same fix shipped broken.
 
 ## [0.15.0] - 2026-08-14
 

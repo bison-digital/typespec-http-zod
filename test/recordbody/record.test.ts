@@ -25,12 +25,17 @@ beforeAll(async () => {
 
 describe("a request body with an indexer", () => {
 	it("collected both operations, so the arms below compare something", () => {
-		expect(routes.map((route) => route.operationId).toSorted()).toEqual(["x", "y"]);
+		expect(routes.map((route) => route.operationId).toSorted()).toEqual(["x", "y", "z"]);
 	});
 
 	it("is named rather than spread", () => {
 		const x = routes.find((route) => route.operationId === "x");
 		expect(x?.bodyProperty).toBe("body");
+	});
+
+	it("names it for a form body too, where a declared content type changes the resolution", () => {
+		const z = routes.find((route) => route.operationId === "z");
+		expect(z?.bodyProperty).toBe("body");
 	});
 
 	it("leaves an ordinary model body spread, so nothing else moved", () => {
