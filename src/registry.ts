@@ -1,5 +1,6 @@
 import type { Model, ModelProperty, Program, Type } from "@typespec/compiler";
 import { getVisibilitySuffix, Visibility } from "@typespec/http";
+import { reportDiagnostic } from "./lib.js";
 import { propertyToTs, typeToTsBody, withTsRefResolver } from "./types.js";
 import {
 	captureBackEdges,
@@ -602,7 +603,30 @@ export class TypeRegistry {
 			source,
 		};
 		this.#declarations.set(type, declaration);
-		this.#order.push(declaration);
+		/**
+		 * **Declared once per NAME, not once per `Type`, and the two are not the same thing.**
+		 *
+		 * `#declarations` is keyed on the `Type` object so a repeated reference resolves without
+		 * re-walking. Visibility projection produces a DIFFERENT `Type` for the same declaration, so one
+		 * model reached under two visibilities was emitted twice and the file did not compile:
+		 * `parameters/body-optionality` declares one `model BodyModel` and `requests.gen.ts` carried two
+		 * byte-identical `export interface BodyModel`, from a compile that reported success.
+		 *
+		 * **Identical is dropped; DIFFERING is a collision and must not be.** Two declarations sharing a
+		 * name with different bodies are two different types that TypeScript can only express as one, so
+		 * silently keeping the first would publish a contract for a type nothing checks. The document
+		 * distinguishes them and this file cannot, which is a refusal rather than a choice.
+		 */
+		const sameName = this.#order.find((candidate) => candidate.name === declaration.name);
+		if (sameName === undefined) {
+			this.#order.push(declaration);
+		} else if (sameName.source !== declaration.source) {
+			reportDiagnostic(this.#program, {
+				code: "duplicate-declaration",
+				format: { name: declaration.name },
+				target: type,
+			});
+		}
 		return declaration.name;
 	}
 

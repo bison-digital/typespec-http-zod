@@ -281,6 +281,24 @@ const diagnostics = {
 			default: paramMessage`'${"operationId"}' is already the operation id of another operation, and OpenAPI requires it to be unique. An explicit '@operationId' is never renamed to make room, so this cannot be resolved for you. Give this operation an id no other operation uses, or remove the '@operationId' and let it be derived.`,
 		},
 	},
+	/**
+	 * Two declarations claiming one TypeScript name with different bodies.
+	 *
+	 * **A repeat of the SAME declaration is not this and is dropped silently.** Visibility projection
+	 * hands the registry a different `Type` object for one declared model, so a model reached under two
+	 * visibilities is registered twice and renders identically; emitting both produced two
+	 * byte-identical `export interface BodyModel` and a file that does not compile.
+	 *
+	 * This is the other case: one name, two different shapes. The document distinguishes them by
+	 * namespace and a TypeScript module cannot, so keeping the first would publish a contract for a
+	 * type nothing checks, and picking either is a guess about which the author meant.
+	 */
+	"duplicate-declaration": {
+		severity: "error",
+		messages: {
+			default: paramMessage`Two different types are both named '${"name"}', and a TypeScript module cannot declare one name twice. The document tells them apart by namespace; this file cannot. Give one of them a different name, or set an explicit one with '@friendlyName'.`,
+		},
+	},
 } as const;
 
 export const $lib = createTypeSpecLibrary({
