@@ -10,7 +10,29 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.5.0`.
+A minor when released: an emitted parameter validator gains a decoder it did not have.
+
+### Fixed
+
+- **A parameter whose type is a union of numeric or boolean literals is decoded from the wire.**
+  `@query size: 10 | 25 | 50` emits `z.union([z.literal(10), ...])`. Whether to wrap a decoder around
+  a parameter was decided by inspecting the emitted Zod text for a `z.number()` prefix, and that
+  expression has none, so **every conformant caller got a 400**: measured, `?size=25` rejected and
+  `size: 25` accepted, against a document that says the parameter is a number with an enum of three
+  values. No document comparison could see it, because both sides agree - the disagreement is with
+  the wire. The decision now reads the TYPE, resolving `@encode` on the property first, so the
+  spelling of the emitted expression cannot change the answer.
+
+### Added
+
+- **`test/wire/` asserts the class**: every numeric or boolean parameter accepts the string a server
+  hands over, across plain scalars, named scalars with constraints, literal unions, optional and
+  nullable wrappers, and flattened lists. Restoring the text inspection reddens it by name.
+- **`test/mediatypes/` grades `EmittedRoute.requestContentTypes`** against the media types
+  `@typespec/http` resolves for the body. Truncating it to one entry previously left the whole suite
+  green, which mattered because that field exists to stop a server parsing a body as the wrong thing.
+  `compileFixture` now returns the compiled program, since nothing could reach the published API at
+  all.
 
 ## [0.5.0] - 2026-08-14
 

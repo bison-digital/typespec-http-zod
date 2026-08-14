@@ -33,6 +33,7 @@ import {
 	noteDeclaredVocabularies,
 	noteKeyVocabularies,
 	objectKey,
+	wireKindOf,
 	withContractsPackage,
 	withSealedObjects,
 	withVisibility,
@@ -416,6 +417,22 @@ function responseContentTypesOf(operation: HttpOperation, status: number): strin
 	return [...types];
 }
 
+/** The type a parameter actually crosses the wire as, after any `@encode` on the property. */
+function encodedParameterType(program: Program, property: ModelProperty): Type {
+	return getEncode(program, property)?.type ?? property.type;
+}
+
+/**
+ * The wire kind of an ARRAY parameter's elements, or `undefined` where it is not such an array.
+ *
+ * `?ids=1,2,3` splits into strings, so each element needs the same decoding a lone scalar would.
+ */
+function elementKindOf(program: Program, type: Type): "number" | "boolean" | undefined {
+	if (!isArrayType(type) || type.kind !== "Model") return undefined;
+	const element = type.indexer?.value;
+	return element === undefined ? undefined : wireKindOf(program, element);
+}
+
 /** Whether a type is an array - TypeSpec models one as a `Model` carrying an integer indexer. */
 function isArrayType(type: Type): boolean {
 	return type.kind === "Model" && type.indexer?.key.name === "integer";
@@ -755,22 +772,24 @@ function collectionDelimiterOf(
  * `zod.ts` decides what becomes `z.number()`, and a second copy of that list here would stop agreeing
  * with it silently.
  */
-function wireDecoded(declared: string): string {
+function wireDecoded(
+	declared: string,
+	kind: "number" | "boolean" | undefined,
+	elementKind: "number" | "boolean" | undefined,
+): string {
 	const NUMBER =
 		'(raw) => (typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Number(raw)) ? Number(raw) : raw)';
 	const BOOLEAN = '(raw) => (raw === "true" ? true : raw === "false" ? false : raw)';
-	if (declared.startsWith("z.number()")) return `z.preprocess(${NUMBER}, ${declared})`;
-	if (declared.startsWith("z.boolean()")) return `z.preprocess(${BOOLEAN}, ${declared})`;
+	if (kind === "number") return `z.preprocess(${NUMBER}, ${declared})`;
+	if (kind === "boolean") return `z.preprocess(${BOOLEAN}, ${declared})`;
 	/**
 	 * A list whose ELEMENTS are numeric or boolean - `?ids=1,2,3` after the collection split, or a
 	 * repeated `?id=1&id=2`. The elements are strings for exactly the same reason the scalar is, so
 	 * the same decoder applies per element. A non-array value is left alone; the split that produces
 	 * the array runs outside this and may not have happened.
 	 */
-	const element = /^z\.array\((z\.(?:number|boolean)\(\).*)\)$/s.exec(declared);
-	if (element !== null) {
-		const inner = element[1] ?? "";
-		const decoder = inner.startsWith("z.number()") ? NUMBER : BOOLEAN;
+	if (elementKind !== undefined) {
+		const decoder = elementKind === "number" ? NUMBER : BOOLEAN;
 		return `z.preprocess((raw) => (Array.isArray(raw) ? raw.map(${decoder}) : raw), ${declared})`;
 	}
 	return declared;
@@ -874,7 +893,17 @@ function parameterSchemasOf(
 		const decoded =
 			parameter.type === "header" && parameter.name.toLowerCase() === "content-type"
 				? mediaTypeDecoded(declared)
-				: wireDecoded(declared);
+				: wireDecoded(
+						declared,
+						/**
+						 * `@encode` on the PROPERTY changes what crosses the wire, so the encoded type is
+						 * the one to read. `@encode("unixTimestamp", int32) value: utcDateTime` is a number
+						 * on the wire and a date in the spec, and reading the declared type alone stopped
+						 * eighteen such parameters being decoded.
+						 */
+						wireKindOf(program, encodedParameterType(program, parameter.param)),
+						elementKindOf(program, encodedParameterType(program, parameter.param)),
+					);
 		/**
 		 * The boxing half of the same principle: an exploded array's single occurrence arrives as a
 		 * bare string, so it is boxed into the one-element array the document describes before the

@@ -876,6 +876,56 @@ function modelToZod(program: Program, model: Model): string {
 }
 
 /**
+ * **What JSON kind a value of this type arrives as, for a parameter carried in text.**
+ *
+ * A path, query or header value is always a string on the wire, so a numeric or boolean parameter has
+ * to be decoded before the document's schema runs. Deciding WHICH decoder applies used to be done by
+ * inspecting the emitted Zod - `declared.startsWith("z.number()")` - which is a string about a string
+ * and fails silently the moment the expression is spelled any other way.
+ *
+ * It did. `@query size: 10 | 25 | 50` emits `z.union([z.literal(10), ...])`, which starts with
+ * neither, so no decoder was wrapped around it and the validator required the NUMBER 25 from a wire
+ * that can only deliver `"25"`. Measured: `?size=25` rejected, `size: 25` accepted. Every conformant
+ * caller got a 400, and no document comparison could see it, because both sides agree the parameter
+ * is a number - the disagreement is with the wire.
+ *
+ * Reading the TYPE answers the question the emitted text was standing in for. `SCALARS` remains the
+ * single list of what becomes a number, so this cannot drift from what `scalarToZod` emits.
+ */
+export function wireKindOf(program: Program, type: Type): "number" | "boolean" | undefined {
+	if (type.kind === "Scalar") {
+		const encoded = encodedTypeOf(program, type);
+		if (encoded !== undefined && encoded !== type) return wireKindOf(program, encoded);
+		for (
+			let current: Scalar | undefined = type;
+			current !== undefined;
+			current = current.baseScalar
+		) {
+			const mapped = SCALARS[current.name];
+			if (mapped === undefined) continue;
+			if (mapped.startsWith("z.number()")) return "number";
+			if (mapped === "z.boolean()") return "boolean";
+			return undefined;
+		}
+		return undefined;
+	}
+	// A literal is its own type, and a union of them is the enum form a parameter commonly takes.
+	if (type.kind === "Number") return "number";
+	if (type.kind === "Boolean") return "boolean";
+	if (type.kind === "Union") {
+		const kinds = new Set<"number" | "boolean" | undefined>();
+		for (const variant of type.variants.values()) {
+			// `T | null` is still a T on the wire; the null arm needs no decoding.
+			if (variant.type.kind === "Intrinsic" && variant.type.name === "null") continue;
+			kinds.add(wireKindOf(program, variant.type));
+		}
+		if (kinds.size !== 1) return undefined;
+		return [...kinds][0];
+	}
+	return undefined;
+}
+
+/**
  * A name as an object key - quoted when it is not a legal JavaScript identifier.
  *
  * **A TypeSpec property can be named anything**, and the corpus proves it: `parameters/spread`
