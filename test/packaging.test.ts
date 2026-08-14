@@ -175,6 +175,34 @@ describe("the package declares what it needs to run outside this checkout", () =
 		});
 	});
 
+	/**
+	 * **An import is emitted only when the file references the name, and that test is a pattern built
+	 * from the name itself.**
+	 *
+	 * The two directions are not symmetric. Reporting a name present that is absent leaves an unused
+	 * import, which lint refuses loudly. Reporting a name ABSENT that is present drops the import and
+	 * leaves the emitted module referencing an undeclared identifier, which is the failure the
+	 * detection exists to prevent.
+	 *
+	 * Interpolating an identifier straight into a regular expression gets the dangerous direction
+	 * wrong for any name carrying a metacharacter, and `$` is both a valid identifier character and an
+	 * anchor. Asserted here on the exported behaviour rather than on the emitted text, so the rule
+	 * holds for names no fixture happens to declare.
+	 */
+	it("detects a referenced identifier whatever characters it contains", async () => {
+		const { referencedIn } = (await import("../src/api.js")) as unknown as {
+			referencedIn?: (source: string, name: string) => boolean;
+		};
+		// Non-vacuity: an unexported helper would make every assertion below vacuously pass.
+		expect(typeof referencedIn).toBe("function");
+		const check = referencedIn as (source: string, name: string) => boolean;
+		for (const name of ["SPEC_VOCABULARIES", "isParsableInstant", "foo$bar", "$select"]) {
+			expect(check(`const x = ${name};`, name), `${name} present`).toBe(true);
+			expect(check("const x = other;", name), `${name} absent`).toBe(false);
+			expect(check(`const x = ${name}Extra;`, name), `${name} as a prefix`).toBe(false);
+		}
+	});
+
 	it("marks as optional exactly the peers behind a guarded import", () => {
 		/**
 		 * **A guarded `import()` that is a REQUIRED peer forces every consumer to install it.**

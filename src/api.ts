@@ -1114,11 +1114,41 @@ type ExternalImports = ReadonlyMap<string, ReadonlySet<string>>;
  * Emitting the whole set into both would leave unused imports (which lint rejects); emitting it into
  * neither is what left `routes.gen.ts` referencing `isParsableInstant` with no import at all.
  */
+/**
+ * Whether emitted source references `name` as an identifier.
+ *
+ * **The name is ESCAPED before it becomes a pattern, and skipping that is a silent build break.**
+ * This was `new RegExp(`\\b${name}\\b`)`, interpolating an identifier straight into a pattern.
+ * `$` is a valid identifier character in JavaScript and in TypeSpec, and an anchor in a regular
+ * expression, so a name containing one fails to match ITSELF: measured, `foo$bar` and `$select` both
+ * report absent from source that references them verbatim.
+ *
+ * The direction matters. Reporting a name present that is absent yields an unused import, which lint
+ * refuses loudly. Reporting a name ABSENT that is present drops the import and leaves the emitted
+ * module referencing an undeclared identifier - the failure this function exists to prevent, which is
+ * how `routes.gen.ts` once referenced `isParsableInstant` with no import at all.
+ *
+ * Only `SPEC_VOCABULARIES` reaches here today, so the hole was latent rather than live. It sits on a
+ * general seam that any future name flows through, and the reasoning that made it look safe - an
+ * identifier absent from the text is genuinely not needed - is true of the QUESTION and false of the
+ * way it was being asked.
+ */
+export function referencedIn(source: string, name: string): boolean {
+	const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	/**
+	 * Bounded by IDENTIFIER characters rather than `\b`, because `$` is one in JavaScript and not a
+	 * word character in a regular expression - so `\b$select\b` never matches `$select`, there being
+	 * no word boundary before a `$`. The two failure modes have to be closed together or the fix for
+	 * one leaves the other.
+	 */
+	return new RegExp(`(?<![A-Za-z0-9_$])${escaped}(?![A-Za-z0-9_$])`).test(source);
+}
+
 function renderExternalImports(externals: ExternalImports, ...bodies: string[]): string {
 	const haystack = bodies.join("\n");
 	const lines: string[] = [];
 	for (const [module, names] of externals) {
-		const used = [...names].filter((name) => new RegExp(`\\b${name}\\b`).test(haystack));
+		const used = [...names].filter((name) => referencedIn(haystack, name));
 		if (used.length > 0) {
 			lines.push(`import { ${used.toSorted().join(", ")} } from ${JSON.stringify(module)};\n`);
 		}

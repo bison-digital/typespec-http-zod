@@ -34,6 +34,15 @@ A minor when released: an emitted parameter validator gains a decoder it did not
   `compileFixture` now returns the compiled program, since nothing could reach the published API at
   all.
 
+### Changed
+
+- **Import detection bounds an identifier by identifier characters, not by `\b`.** Whether a generated
+  file imports a name was decided by a pattern built from the name itself, interpolated unescaped.
+  `$` is a valid identifier character in JavaScript and in TypeSpec and an anchor in a regular
+  expression, so a name containing one failed to match itself and its import would have been dropped,
+  leaving the emitted module referencing an undeclared identifier. Only `SPEC_VOCABULARIES` reaches
+  that seam today, so it was latent rather than live.
+
 ## [0.5.0] - 2026-08-14
 
 A minor: `schemas.gen.ts` changes shape for exploded array parameters, and a model closed with
