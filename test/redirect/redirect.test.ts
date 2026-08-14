@@ -37,4 +37,18 @@ describe("an operation whose only response is a redirect", () => {
 	it("carries the status the document declares", () => {
 		expect(schemas).toMatch(/goResponses = \[\{ status: 302/);
 	});
+
+	it("declares each status ONCE, so no arm shadows another", () => {
+		/**
+		 * **A redirect was emitted twice**: once as the primary arm, carrying its headers, and once as
+		 * a failure arm, carrying none. `errorArmsOf` excludes 2xx from the failure arms, so widening
+		 * the primary to include 3xx put a 302 in both. Anything taking the first match got the right
+		 * arm by luck of ordering, and anything scanning got a second arm claiming no headers.
+		 */
+		const arms = /goResponses = (\[[\s\S]*?\]) satisfies/.exec(schemas)?.[1] ?? "";
+		expect(arms, "no arms found, so this compares nothing").not.toBe("");
+		const statuses = [...arms.matchAll(/status: ([^,}]+)/g)].map((m) => (m[1] ?? "").trim());
+		expect(statuses.length).toBeGreaterThanOrEqual(1);
+		expect(statuses).toEqual([...new Set(statuses)]);
+	});
 });

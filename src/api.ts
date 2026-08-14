@@ -1704,7 +1704,26 @@ function responseArmsOf(
 	 * declares. Each arm resolves its own body now, so an arm with no schema is a response the document
 	 * says carries no body, and saying `undefined` is the truthful answer rather than a guess.
 	 */
+	/**
+	 * **An error arm whose status the primary arm already answers is dropped, primary winning.**
+	 *
+	 * `errorArmsOf` excludes 2xx from the failure arms, so widening the primary to include 3xx made a
+	 * redirect BOTH: `[{ status: 302, schema: undefined, headers: [...] }, { status: 302, schema:
+	 * undefined }]`, two arms for one status where the second shadows the first's headers for anything
+	 * scanning past the first match.
+	 *
+	 * Widening `isSuccessKey` to match would be wrong in the other direction: an operation declaring a
+	 * 200 AND a 302 has 200 as its primary, so the 302 must stay a failure arm to be emitted at all.
+	 * Deduplicating here keeps both cases, because it asks what was actually emitted rather than what
+	 * might have been.
+	 */
+	const emitted = new Set<string>();
+	for (const arm of arms) {
+		const status = /status: ([^,}]+)/.exec(arm)?.[1]?.trim();
+		if (status !== undefined) emitted.add(status);
+	}
 	for (const arm of route.errorArms) {
+		if (emitted.has(String(arm.status)) || emitted.has(JSON.stringify(arm.status))) continue;
 		arms.push(`{ status: ${JSON.stringify(arm.status)}, schema: ${arm.schema ?? "undefined"} }`);
 	}
 	return `[${arms.join(", ")}]`;

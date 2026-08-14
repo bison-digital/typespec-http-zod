@@ -10,7 +10,22 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.12.0`.
+Nothing since `0.12.1`.
+
+## [0.12.1] - 2026-08-14
+
+A patch: a redirect emitted a duplicate arm.
+
+`errorArmsOf` excludes 2xx from the failure arms, so widening the primary arm to include 3xx in
+`0.11.0` put a redirect in both: `[{ status: 302, schema: undefined, headers: [...] },
+{ status: 302, schema: undefined }]`, two arms for one status where the second claims no headers.
+
+Deduplicated with the primary winning, rather than by widening the exclusion, because an operation
+declaring a 200 AND a 302 has 200 as its primary and needs the 302 to stay a failure arm to be
+emitted at all. Asking what was actually emitted keeps both cases.
+
+Found by compiling a spec from a clean install of the published package, not by the suite, which was
+green over it.
 
 ## [0.12.0] - 2026-08-14
 
