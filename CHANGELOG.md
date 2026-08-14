@@ -10,7 +10,12 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-A minor when released: an emitted parameter validator gains a decoder it did not have.
+Nothing since `0.6.0`.
+
+## [0.6.0] - 2026-08-14
+
+A minor: an emitted parameter validator gains a decoder it did not have, so a consumer who
+regenerates gets different output.
 
 ### Fixed
 
