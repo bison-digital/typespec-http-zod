@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compile, NodeHost } from "@typespec/compiler";
@@ -87,6 +87,16 @@ export async function compileFixture(
 	options: FixtureOptions = {},
 ): Promise<CompiledFixture> {
 	const outDir = options.outDir ?? join(dir, ".out", options.outName ?? name);
+	/**
+	 * **Emptied first, so a suite grades what THIS compile wrote.**
+	 *
+	 * Output accumulated across runs, and a file the emitter has stopped producing stayed on disk
+	 * looking current. Measured: a control that reinstated a defect - two services overwriting one
+	 * another's `schemas.gen.ts` - PASSED, because the per-service directories from the previous green
+	 * run were still there for the assertions to find. A guard that reads a previous run's output is
+	 * not a guard, and nothing about it looks wrong.
+	 */
+	rmSync(outDir, { recursive: true, force: true });
 	const program = await compile(NodeHost, join(dir, `${name}.tsp`), {
 		outputDir: outDir,
 		emit: ["typespec-http-zod"],

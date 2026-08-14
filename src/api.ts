@@ -1757,11 +1757,33 @@ export async function emitHttpZod(
 	 * carrying internal models if you are not paying attention. It is invisible while there is one
 	 * service, which is exactly why it is built this way before the second one lands rather than after.
 	 */
+	/**
+	 * **Two `@service` namespaces wrote one `schemas.gen.ts`, and the second silently won.**
+	 *
+	 * Every service emitted into `emitterOutputDir` under the same file name, so a spec publishing an
+	 * internal surface and a public one produced a single file holding whichever was walked last.
+	 * Measured on two services with no per-service `output-dir`: zero diagnostics, one file, and the
+	 * first service's validators absent entirely. Nothing refused, nothing warned - a consumer would
+	 * find half their API had no validators at all.
+	 *
+	 * The rule is `@typespec/openapi3`'s, copied: its default output path is
+	 * `openapi.{service-name-if-multiple}...`, so a name is inserted only when there is more than one
+	 * service to tell apart. A single-service spec emits exactly where it always did.
+	 *
+	 * The directory is what carries it rather than the file name, because `EmittedService.outputDir`
+	 * is already the published seam a wrapping emitter writes its own files beside. Disambiguating
+	 * there means a server emitter follows without knowing this rule exists.
+	 */
+	const distinctServices = new Set(snapshots.map((snapshot) => snapshot.service.namespace.name));
 	for (const snapshot of snapshots) {
 		const service = snapshot.service;
 		const serviceName = service.namespace.name;
 		const perService = options.services?.[serviceName];
-		const outputDir = perService?.["output-dir"] ?? context.emitterOutputDir;
+		const outputDir =
+			perService?.["output-dir"] ??
+			(distinctServices.size > 1
+				? resolvePath(context.emitterOutputDir, serviceName)
+				: context.emitterOutputDir);
 		const resolved: ResolvedServiceOptions = {
 			contractsOutputDir: perService?.["contracts-output-dir"] ?? options["contracts-output-dir"],
 			contractsPackage: perService?.["contracts-package"] ?? options["contracts-package"],

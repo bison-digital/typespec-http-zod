@@ -35,6 +35,14 @@ A minor: `schemas.gen.ts` changes shape for exploded array parameters, and a mod
   `never` indexer as sealed; the catchall branch was consuming it first. A `never` variant in a union
   is dropped for the same reason, leaving the type it reduces to.
 
+- **A spec with two `@service` namespaces emitted one file, and the second silently won.** Every
+  service wrote `schemas.gen.ts` into `emitter-output-dir` under the same name, so a project
+  publishing an internal surface and a public one got a single file holding whichever was walked last.
+  Measured: two services, zero diagnostics, one file, the first service's validators absent entirely.
+  Output is now disambiguated by service directory when a spec declares more than one, copying
+  `@typespec/openapi3`'s `{service-name-if-multiple}` rule. **A single-service spec emits exactly
+  where it always did**, so no existing consumer's output moves.
+
 ### Changed
 
 - **A refusal points at a declaration rather than at `<unknown location>:1:1`.** An intrinsic has no
