@@ -25,6 +25,7 @@ const referenceDir = join(here, "reference");
 
 let compiled: CompiledFixture;
 let cyclic: CompiledFixture;
+let dollars: CompiledFixture;
 
 beforeAll(async () => {
 	// Its own output directory. This and `reference.test.ts` both compiled `service` into
@@ -41,6 +42,13 @@ beforeAll(async () => {
 	 * This arm existed for one fixture, so that whole class was uncompiled.
 	 */
 	cyclic = await compileFixture(join(here, "recursion"), "union-cycle", { outName: "cycle-emit" });
+	/**
+	 * Identifiers carrying a `$`. Whether an emitted file imports a name is decided by asking whether
+	 * the rendered text mentions it, and asking that with a pattern built from the name reports every
+	 * such identifier absent - so the import is dropped and the module references an undeclared name.
+	 * That is invisible to every arm except a compiler, and it went live in the sibling package.
+	 */
+	dollars = await compileFixture(referenceDir, "identifiers", { outName: "identifiers-emit" });
 });
 
 /** Run `tsc` over one emitted directory, under the settings a consumer builds with. */
@@ -93,6 +101,12 @@ describe("the emitted output compiles", () => {
 	it("passes tsc under the settings a consumer builds with", () => {
 		const { output, failed } = typecheckEmitted(compiled.outDir);
 		// The output is the evidence - a bare `toBe(false)` would report "expected true to be false".
+		expect(output.trim(), output).toBe("");
+		expect(failed).toBe(false);
+	});
+
+	it("compiles identifiers carrying a `$`, whose imports a pattern would drop", () => {
+		const { output, failed } = typecheckEmitted(dollars.outDir);
 		expect(output.trim(), output).toBe("");
 		expect(failed).toBe(false);
 	});

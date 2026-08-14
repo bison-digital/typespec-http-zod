@@ -1115,33 +1115,34 @@ type ExternalImports = ReadonlyMap<string, ReadonlySet<string>>;
  * neither is what left `routes.gen.ts` referencing `isParsableInstant` with no import at all.
  */
 /**
- * Whether emitted source references `name` as an identifier.
+ * Every identifier the emitted source mentions.
  *
- * **The name is ESCAPED before it becomes a pattern, and skipping that is a silent build break.**
- * This was `new RegExp(`\\b${name}\\b`)`, interpolating an identifier straight into a pattern.
- * `$` is a valid identifier character in JavaScript and in TypeSpec, and an anchor in a regular
- * expression, so a name containing one fails to match ITSELF: measured, `foo$bar` and `$select` both
- * report absent from source that references them verbatim.
+ * **Tokenised once on the language's own identifier rule, then tested by equality.** The question is
+ * "does this file reference this name", and the two obvious ways to ask it are both wrong in ways
+ * that only appear for particular names.
  *
- * The direction matters. Reporting a name present that is absent yields an unused import, which lint
- * refuses loudly. Reporting a name ABSENT that is present drops the import and leaves the emitted
- * module referencing an undeclared identifier - the failure this function exists to prevent, which is
- * how `routes.gen.ts` once referenced `isParsableInstant` with no import at all.
+ * A pattern built from the name is wrong when the name carries a regular-expression metacharacter.
+ * `$` is a valid identifier character in JavaScript and in TypeSpec, and an anchor in a pattern, so
+ * `new RegExp(`\b${name}\b`)` reports `foo$bar` absent from source that references it verbatim -
+ * and the import is dropped, leaving the emitted module referencing an undeclared name. Escaping
+ * alone does not fix it either, because `\b` is a WORD boundary and `$` is not a word character, so
+ * there is no boundary before it to match.
  *
- * Only `SPEC_VOCABULARIES` reaches here today, so the hole was latent rather than live. It sits on a
- * general seam that any future name flows through, and the reasoning that made it look safe - an
- * identifier absent from the text is genuinely not needed - is true of the QUESTION and false of the
- * way it was being asked.
+ * A substring test is wrong in the other direction: `Foo` is found inside `FooExtra`, emitting an
+ * import the file never uses. That one fails loudly at lint, which makes it the better mistake, but
+ * it is still a mistake.
+ *
+ * Tokenising has neither, needs no escaping to stay correct, and is one pass rather than one pattern
+ * per name. `typespec-hono` arrived at it after the same defect went live there: a spec whose every
+ * identifier carried a `$` emitted a file that imported nothing and did not compile.
  */
+function identifiersIn(source: string): ReadonlySet<string> {
+	return new Set(source.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? []);
+}
+
+/** Whether emitted source references `name` as an identifier rather than as part of a longer one. */
 export function referencedIn(source: string, name: string): boolean {
-	const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	/**
-	 * Bounded by IDENTIFIER characters rather than `\b`, because `$` is one in JavaScript and not a
-	 * word character in a regular expression - so `\b$select\b` never matches `$select`, there being
-	 * no word boundary before a `$`. The two failure modes have to be closed together or the fix for
-	 * one leaves the other.
-	 */
-	return new RegExp(`(?<![A-Za-z0-9_$])${escaped}(?![A-Za-z0-9_$])`).test(source);
+	return identifiersIn(source).has(name);
 }
 
 function renderExternalImports(externals: ExternalImports, ...bodies: string[]): string {

@@ -10,7 +10,17 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.6.0`.
+Emitted output is unchanged.
+
+### Changed
+
+- **Import detection tokenises the rendered source once and tests identifiers by equality**, rather
+  than building a pattern per name. A pattern is wrong for any name carrying a regular-expression
+  metacharacter, and a substring test is wrong for any name that prefixes a longer one; tokenising
+  has neither failure and needs no escaping to stay correct. `typespec-hono` reached the same
+  conclusion after the defect went live there.
+- `test/reference/identifiers.tsp` is compiled by `tsc` alongside the other emitted output, proving
+  that identifiers carrying a `$` emit and compile at all.
 
 ## [0.6.0] - 2026-08-14
 
