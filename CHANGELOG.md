@@ -10,8 +10,16 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-A minor when released: two shapes that emitted TypeScript which does not parse now emit valid
-declarations, so their names and forms change.
+Nothing since `0.7.0`.
+
+## [0.7.0] - 2026-08-14
+
+A minor: several shapes that emitted TypeScript which does not parse now emit valid declarations, so
+their names and forms change, and three refusals are new.
+
+Every fix below was found the same way, by compiling generated output and by reading every generated
+file for a name declared twice. None was visible to a comparison against the document: the document
+was right in all of them, and the emitted file did not compile.
 
 ### Added
 
@@ -21,6 +29,25 @@ declarations, so their names and forms change.
   file. The report names the codepoint because the character that matters is the one nobody can see.
 
 ### Fixed
+
+- **Operation ids are deduplicated the way the document deduplicates them.** `resolveOperationId`
+  names an operation from its immediate parent container, so two interfaces of the same name in
+  different namespaces both resolved to one id, and every declaration keyed on it was emitted twice:
+  `TS2451`, 72 of them on one conformance scenario, from a compile that reported success. openapi3
+  publishes `Standard_primitive` and `Standard_primitive_2`; so does this now, including the rule that
+  an explicit `@operationId` is never renamed or reserved.
+- **A type is declared once per name.** Visibility projection hands the registry a different type
+  object for one declared model, so a model reached under two visibilities was emitted twice.
+  `parameters/body-optionality` declares one `model BodyModel` and produced two byte-identical
+  `export interface BodyModel`.
+
+### Added
+
+- **`duplicate-operation-id`**, for an explicit `@operationId` another operation already answers to.
+  Derived ids are deduplicated silently; an explicit one is the author's and cannot be renamed to make
+  room, so it is refused with both remedies named.
+- **`duplicate-declaration`**, for two different types claiming one TypeScript name. A repeat of the
+  same declaration is not this and is collapsed silently.
 
 - **A discriminated union with the default envelope emitted `export interface X { ... } | { ... }`,
   which is not valid TypeScript.** Whether a body could be an `interface` was decided by testing the
