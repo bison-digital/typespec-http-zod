@@ -168,13 +168,13 @@ const diagnostics = {
 	"unsupported-type": {
 		severity: "error",
 		messages: {
-			default: paramMessage`Cannot emit ${"artefact"} for ${"kind"}: ${"why"}.`,
+			default: paramMessage`Cannot emit ${"artefact"} for ${"kind"}: ${"why"}. Replace it with a type a value can inhabit. ${"remedy"}`,
 		},
 	},
 	"unsupported-default": {
 		severity: "error",
 		messages: {
-			default: paramMessage`Cannot emit a default value of ${"why"}. Scalars, arrays and objects are emitted as literals; a default built by a scalar constructor has no literal form. The property keeps its declared shape and loses only the fallback.`,
+			default: paramMessage`Cannot emit a default value of ${"why"}. Scalars, arrays and objects are emitted as literals; a default built by a scalar constructor has no literal form. Replace it with a literal value, or drop the default and let the property be optional. The property keeps its declared shape and loses only the fallback.`,
 		},
 	},
 	/**
@@ -210,7 +210,7 @@ const diagnostics = {
 	"empty-union": {
 		severity: "error",
 		messages: {
-			default: paramMessage`A union with no representable variants (${"why"}) has nothing to validate against.`,
+			default: paramMessage`A union with no representable variants (${"why"}) has nothing to validate against. Declare at least one variant this emitter can walk, or replace the union with the single type it reduces to.`,
 		},
 	},
 	/*

@@ -17,6 +17,8 @@ import {
 	effectiveIndexer,
 	inheritedAndOwnProperties,
 	objectKey,
+	refusalTarget,
+	withDeclarationSite,
 } from "./zod.js";
 
 /**
@@ -74,12 +76,17 @@ const SCALARS: Readonly<Record<string, string>> = {
  */
 const UNREPRESENTABLE = "never";
 
-/** Refuse `type`, pointing at its declaration, and carry on so the rest is reported too. */
-function refuse(program: Program, type: Type, why: string): string {
+/**
+ * Refuse `type`, pointing at somewhere the reader can go, and carry on so the rest is reported too.
+ *
+ * An intrinsic has no source node, so it is located by the declaration being walked instead - see
+ * `withDeclarationSite` in `zod.ts`, whose scope this walk shares.
+ */
+function refuse(program: Program, type: Type, why: string, remedy = ""): string {
 	reportDiagnostic(program, {
 		code: "unsupported-type",
-		target: type,
-		format: { artefact: "a TypeScript type", kind: type.kind, why },
+		target: refusalTarget(type),
+		format: { artefact: "a TypeScript type", kind: type.kind, why, remedy },
 	});
 	return UNREPRESENTABLE;
 }
@@ -189,7 +196,14 @@ function modelToTs(program: Program, model: Model): string {
 	 * as a bare `Record<string, unknown>` - a type that satisfies any assertion about what the response
 	 * contains, which is precisely the check this file exists to feed.
 	 */
-	if (indexerKey === "string" && indexer !== undefined && declared.length === 0) {
+	// `Record<never>` states closedness rather than a value type - see `modelToZod`. A model that is
+	// only that is an object with no declared properties, not a dictionary of an unwalkable type.
+	if (
+		indexerKey === "string" &&
+		indexer !== undefined &&
+		!isNeverType(indexer.value) &&
+		declared.length === 0
+	) {
 		return `Record<string, ${typeToTs(program, indexer.value)}>`;
 	}
 	/**
@@ -208,7 +222,7 @@ function modelToTs(program: Program, model: Model): string {
 	 */
 	const entries = declared
 		.filter((property) => !isNeverType(property.type))
-		.map((property) => `\t${propertyToTs(program, property)}`);
+		.map((property) => `\t${withDeclarationSite(property, () => propertyToTs(program, property))}`);
 	/**
 	 * **The indexer is deliberately NOT intersected in.**
 	 *
@@ -305,10 +319,25 @@ export function typeToTsBody(program: Program, type: Type): string {
 			if (type.name === "null") return "null";
 			if (type.name === "unknown") return "unknown";
 			if (type.name === "void" || type.name === "never") {
-				return refuse(program, type, `\`${type.name}\` has no runtime representation`);
+				return refuse(
+					program,
+					type,
+					`\`${type.name}\` has no runtime representation`,
+					"Give the position a type a value can inhabit. A `never` PROPERTY is dropped to match the document, and `Record<never>` seals the model, so neither of those reaches here.",
+				);
 			}
-			return refuse(program, type, `intrinsic "${type.name}"`);
+			return refuse(
+				program,
+				type,
+				`intrinsic "${type.name}"`,
+				"This emitter has no rule for that intrinsic. Replace it with a declared scalar or model.",
+			);
 		default:
-			return refuse(program, type, "no rule for this kind");
+			return refuse(
+				program,
+				type,
+				"no rule for this kind",
+				"Replace it with a model, scalar, enum or union, which are the kinds this emitter walks.",
+			);
 	}
 }

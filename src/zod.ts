@@ -324,12 +324,44 @@ export function collectExternalImports<T>(walk: () => T): {
 	}
 }
 
+/**
+ * The declaration currently being walked, used to locate a refusal that has nowhere of its own.
+ *
+ * An intrinsic like `never` has no source node, so pointing a diagnostic at it prints
+ * `<unknown location>:1:1`. A consumer compiling a large spec got 32 byte-identical messages with
+ * nothing to grep for and no way to tell which declaration caused which. The property or model being
+ * walked when the intrinsic was reached is the thing they can actually go and edit.
+ *
+ * Scoped rather than threaded, matching the other ambient facts in this walk.
+ */
+let declarationSite: Type | undefined;
+
+export function withDeclarationSite<T>(site: Type | undefined, run: () => T): T {
+	const previous = declarationSite;
+	if (site !== undefined) declarationSite = site;
+	try {
+		return run();
+	} finally {
+		declarationSite = previous;
+	}
+}
+
+/**
+ * Where a refusal should point.
+ *
+ * The offending type, when it has a source location of its own. Otherwise the declaration being
+ * walked, which does.
+ */
+export function refusalTarget(type: Type): Type {
+	return (type as { node?: unknown }).node === undefined ? (declarationSite ?? type) : type;
+}
+
 /** Refuse `type`, pointing at its declaration, and carry on so the rest is reported too. */
-function refuse(program: Program, type: Type, why: string): string {
+function refuse(program: Program, type: Type, why: string, remedy = ""): string {
 	reportDiagnostic(program, {
 		code: "unsupported-type",
-		target: type,
-		format: { artefact: "Zod", kind: type.kind, why },
+		target: refusalTarget(type),
+		format: { artefact: "Zod", kind: type.kind, why, remedy },
 	});
 	return UNREPRESENTABLE;
 }
@@ -539,7 +571,12 @@ function unionToZod(program: Program, union: Union): string {
 		if (discriminated.defaultVariant !== undefined) {
 			// "Anything else" has no discriminator value to switch on. Refused by name rather than
 			// silently dropped - no corpus scenario exercises it, so guessing would be untested code.
-			return refuse(program, union, "a discriminated union with a default variant");
+			return refuse(
+				program,
+				union,
+				"a discriminated union with a default variant",
+				"Remove the default variant, or declare it as an ordinary variant with its own discriminator value.",
+			);
 		}
 		/**
 		 * **Refused, not compensated for.** With no envelope the discriminator lives inside the
@@ -708,7 +745,7 @@ function modelToZod(program: Program, model: Model): string {
 	if (indexerKey === "string" && indexer !== undefined && declared.length === 0) {
 		return applyConstraints(
 			program,
-			`z.record(z.string(), ${typeToZod(program, indexer.value)})`,
+			`z.record(z.string(), ${withDeclarationSite(model, () => typeToZod(program, indexer.value))})`,
 			model,
 		);
 	}
@@ -723,13 +760,25 @@ function modelToZod(program: Program, model: Model): string {
 	 * An indexer over something other than `unknown` is a typed catchall, where `.loose()` would drop
 	 * that value type on the floor.
 	 */
-	const indexerValue = indexerKey === "string" ? indexer?.value : undefined;
+	/**
+	 * **`Record<never>` is how a spec says "and nothing else", not a value type to walk.**
+	 *
+	 * `model A { ...Record<never>; name: string }` gives an indexer whose value is the `never`
+	 * intrinsic. Read as an ordinary typed catchall it became `.catchall(z.never())`, which reached
+	 * `typeToZod` and refused the whole compile - while `@typespec/openapi3` publishes the same model
+	 * cleanly as `additionalProperties: {not: {}}`, with no diagnostic at all. `isSealed` already reads
+	 * a `never` indexer as sealed; this stops the catchall branch consuming it first.
+	 */
+	const indexerValue =
+		indexerKey === "string" && indexer !== undefined && !isNeverType(indexer.value)
+			? indexer.value
+			: undefined;
 	const suffix =
 		indexerValue !== undefined && isUnknownType(indexerValue)
 			? ".loose()"
 			: indexerValue === undefined
 				? ""
-				: `.catchall(${typeToZod(program, indexerValue)})`;
+				: `.catchall(${withDeclarationSite(model, () => typeToZod(program, indexerValue))})`;
 	/**
 	 * A request model REJECTS an unrecognised field rather than stripping it.
 	 *
@@ -781,7 +830,9 @@ function modelToZod(program: Program, model: Model): string {
 		.filter((property) => !isNeverType(property.type))
 		.map((property) => {
 			const key = propertyKey(program, property);
-			const { value, deferred } = captureBackEdges(() => propertyToZod(program, property));
+			const { value, deferred } = captureBackEdges(() =>
+				withDeclarationSite(property, () => propertyToZod(program, property)),
+			);
 			return {
 				deferred,
 				text: deferred ? `\tget ${key}() {\n\t\treturn ${value};\n\t},` : `\t${key}: ${value},`,
@@ -1146,10 +1197,25 @@ export function typeToZodBody(program: Program, type: Type): string {
 			if (type.name === "null") return "z.null()";
 			if (type.name === "unknown") return "z.unknown()";
 			if (type.name === "void" || type.name === "never") {
-				return refuse(program, type, `\`${type.name}\` has no runtime representation`);
+				return refuse(
+					program,
+					type,
+					`\`${type.name}\` has no runtime representation`,
+					"Give the position a type a value can inhabit. A `never` PROPERTY is dropped to match the document, and `Record<never>` seals the model, so neither of those reaches here.",
+				);
 			}
-			return refuse(program, type, `intrinsic "${type.name}"`);
+			return refuse(
+				program,
+				type,
+				`intrinsic "${type.name}"`,
+				"This emitter has no rule for that intrinsic. Replace it with a declared scalar or model.",
+			);
 		default:
-			return refuse(program, type, "no rule for this kind");
+			return refuse(
+				program,
+				type,
+				"no rule for this kind",
+				"Replace it with a model, scalar, enum or union, which are the kinds this emitter walks.",
+			);
 	}
 }

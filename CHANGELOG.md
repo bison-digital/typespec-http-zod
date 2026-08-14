@@ -10,7 +10,12 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-A minor when released: `schemas.gen.ts` changes shape for exploded array parameters.
+Nothing since `0.5.0`.
+
+## [0.5.0] - 2026-08-14
+
+A minor: `schemas.gen.ts` changes shape for exploded array parameters, and a model closed with
+`Record<never>` now emits where it previously refused.
 
 ### Fixed
 
@@ -22,6 +27,23 @@ A minor when released: `schemas.gen.ts` changes shape for exploded array paramet
   into the one-element array before the schema runs, the mirror of the delimiter split - and like
   it, a wire decode of a documented `style`/`explode` fact, so the vocabulary guard permits the
   shape and carries its own non-vacuity floor.
+
+- **`Record<never>` seals a model instead of refusing it.** `model A { ...Record<never>; name: string }`
+  gives an indexer whose value is the `never` intrinsic. Read as an ordinary typed catchall it became
+  `.catchall(z.never())`, reached the intrinsic and refused the compile, while `@typespec/openapi3`
+  publishes the same model cleanly as `additionalProperties: {not: {}}`. `isSealed` already read a
+  `never` indexer as sealed; the catchall branch was consuming it first. A `never` variant in a union
+  is dropped for the same reason, leaving the type it reduces to.
+
+### Changed
+
+- **A refusal points at a declaration rather than at `<unknown location>:1:1`.** An intrinsic has no
+  source node, so pointing a diagnostic at it gave a consumer 32 identical unlocated messages against
+  a 3,755-line spec, with nothing to grep for. The property or model being walked is carried through
+  the walk and used instead, so each refusal names a line the reader can go and edit.
+- **Every diagnostic names a remedy.** `unsupported-type`, `unsupported-default` and `empty-union`
+  said what was wrong and not what to do. Asserted as a class over the declared set, so a diagnostic
+  added later fails the suite until it says what to do about it.
 
 ## [0.4.0] - 2026-08-13
 
