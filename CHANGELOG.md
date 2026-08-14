@@ -10,7 +10,35 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.15.1`.
+Nothing since `0.16.0`.
+
+## [0.16.0] - 2026-08-14
+
+A minor: two constructs made the emitter's OWN assertion fail on its own output, so
+`wire-contract.gen.ts` did not compile. Both are the same defect - two walks over one TypeSpec
+describing different shapes.
+
+### Fixed
+
+- **A `@multipartBody` reached the request type not at all.** `requestBodyOf` returns a type only for
+  `bodyKind === "single"`, so the input was the headers and nothing else while the validator beside it
+  had every part and the document published them. Measured:
+  `UploadInput = { "Content-Type": "multipart/form-data" }` against
+  `z.object({ file: z.unknown(), alt: z.string().optional() })`.
+
+  Built from `body.parts`, mirroring `multipartSchemaOf` part for part, rather than from the parts
+  model: walking the model types each part as its `HttpPart<T>` wrapper (`file: {}`) where the
+  validator unwraps to `T`. `multi` becomes an array and `optional` an optional property, as there.
+
+- **An open model's type lacked the catchall its schema infers.** `modelToZod` emits `.loose()` for
+  `...Record<unknown>` so `z.infer` gains an index signature; this walk emitted the declared
+  properties alone. Any spec with `...Record<unknown>` on a request model shipped output that does not
+  compile.
+
+  Emitted rather than compared away: the document says `additionalProperties`, the validator says
+  `.loose()`, so the type saying it too is what makes all three agree. Relaxing the comparison would
+  hide the disagreement rather than remove it. A model with an indexer and no declared properties is
+  still a `Record<...>` outright, as before.
 
 ## [0.15.1] - 2026-08-14
 

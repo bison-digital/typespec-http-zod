@@ -673,6 +673,34 @@ function alternateSchemaFor(
  * document does not state AND reject what a server actually receives, since `c.req.parseBody()`
  * hands back a `File`. The type of a value is positional, exactly as its visibility is.
  */
+/**
+ * The TS type for a **multipart** request body, built from the same parts as its validator.
+ *
+ * **`requestBodyOf` returns a type only for `bodyKind === "single"`, so a multipart body reached the
+ * request type not at all.** Measured: `UploadInput` was `{ "Content-Type": "multipart/form-data" }`
+ * while the validator beside it was `z.object({ file: ..., alt: ... })` and the document published
+ * every part. Two artefacts from one program, contradicting each other.
+ *
+ * **Built from `body.parts`, not from the parts model.** Walking the model types each part as its
+ * `HttpPart<T>` wrapper - `file: {}` - where the validator unwraps to `T`. Mirroring
+ * {@link multipartSchemaOf} part for part, including `multi` as an array, `optional`, and a binary
+ * part as `unknown`, is what makes the two agree by construction rather than by coincidence.
+ */
+function multipartTsOf(
+	body: { readonly parts: readonly HttpOperationPart[] },
+	registry: TypeRegistry,
+): string {
+	const entries = body.parts.map((part) => {
+		const type = part.body?.type;
+		const inner =
+			type === undefined || isBinaryPart(type) ? "unknown" : registry.expressionFor(type);
+		const value = part.multi === true ? `(${inner})[]` : inner;
+		const optional = part.optional === true ? "?" : "";
+		return `\t${objectKey(part.name ?? "")}${optional}: ${value};`;
+	});
+	return entries.length === 0 ? "{}" : `{\n${entries.join("\n")}\n}`;
+}
+
 function multipartSchemaOf(
 	body: { readonly parts: readonly HttpOperationPart[]; readonly type?: Type },
 	registry: SchemaRegistry,
@@ -736,7 +764,8 @@ export function isRawBinaryMediaType(contentTypes: readonly string[]): boolean {
 /** The declared request body type, if the operation takes one. */
 function requestBodyOf(operation: HttpOperation): Type | undefined {
 	const body = operation.parameters.body;
-	return body?.bodyKind === "single" ? body.type : undefined;
+	if (body?.bodyKind === "single") return body.type;
+	return undefined;
 }
 
 export interface EmittedRoute {
@@ -1798,6 +1827,10 @@ function collectRequestTypes(
 		for (const operation of service.operations) {
 			if (successStatusOf(operation) === undefined) continue;
 			const body = requestBodyOf(operation);
+			/** The parts of a multipart body, which `requestBodyOf` deliberately does not return. */
+			const multipartBody = operation.parameters.body;
+			const multipart =
+				multipartBody?.bodyKind === "multipart" ? { parts: multipartBody.parts } : undefined;
 			/**
 			 * Headers are part of the input too.
 			 *
@@ -1847,9 +1880,11 @@ function collectRequestTypes(
 				bodyRef:
 					rawBody !== undefined
 						? `{\n\t${rawBody}: ${rawBodyType};\n}`
-						: body === undefined
-							? undefined
-							: registry.expressionFor(body),
+						: multipart !== undefined
+							? multipartTsOf(multipart, registry)
+							: body === undefined
+								? undefined
+								: registry.expressionFor(body),
 				extraProperties,
 			});
 		}

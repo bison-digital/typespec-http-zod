@@ -234,7 +234,29 @@ function modelToTs(program: Program, model: Model): string {
 	 * Permissiveness is a statement about the VALIDATOR - what it lets through - not about what a
 	 * producer must contain. The contract type is the floor: these fields, at least.
 	 */
-	return entries.length === 0 ? "{}" : `{\n${entries.join("\n")}\n}`;
+	/**
+	 * **An open model carries its catchall here too, or the two walks disagree.**
+	 *
+	 * `modelToZod` emits `.loose()` for a `...Record<unknown>` indexer and `.catchall(T)` for a typed
+	 * one, so `z.infer` gains an index signature. This walk emitted the declared properties alone, and
+	 * the emitter's OWN assertion caught it:
+	 * `TS2344: the emitted validator and the shared wire type describe different shapes`. Any spec with
+	 * `...Record<unknown>` on a request model shipped a `wire-contract.gen.ts` that does not compile.
+	 *
+	 * **Emitted rather than compared away.** The document says `additionalProperties`, the validator
+	 * says `.loose()`, so the type saying it too is what makes all three agree. Relaxing the comparison
+	 * instead would hide the disagreement rather than remove it, and a looser comparison stops catching
+	 * the drift it exists for.
+	 *
+	 * The dictionary case above returns before this: a model with an indexer and NO declared properties
+	 * is a `Record<...>` outright rather than an object with a catchall.
+	 */
+	const catchall =
+		indexerKey === "string" && indexer !== undefined && !isNeverType(indexer.value)
+			? [`\t[key: string]: ${typeToTs(program, indexer.value)};`]
+			: [];
+	const all = [...entries, ...catchall];
+	return all.length === 0 ? "{}" : `{\n${all.join("\n")}\n}`;
 }
 
 /**
