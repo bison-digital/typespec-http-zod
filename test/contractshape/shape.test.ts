@@ -219,6 +219,37 @@ export const echoed: Page = received;
 	 * so - "Mutability is not a fact about a wire shape" - and was applied to `WireOutputs` alone and
 	 * exported from nowhere, so no consumer could reach it for a named type.
 	 */
+	/**
+	 * **An index signature arrives two ways, and only one of them is openness.**
+	 *
+	 * A model spreading `...Record<unknown>` gains one because its validator is loose - a fact about
+	 * the model, which the contract type does not state. A property DECLARED `Record<unknown>` gains
+	 * one because that is its type, stated identically in both artefacts.
+	 *
+	 * `Declared<>` recursed into every object and stripped both, so `Record<string, unknown>` became
+	 * `{}` and the emitted assertion stopped compiling for any spec with a dictionary property. Found
+	 * by a consumer, on four real properties, after `0.17.0`.
+	 */
+	it("keeps a property whose declared type is a dictionary", () => {
+		const declared = /interface Credentials \{([\s\S]*?)\n\}/.exec(requests)?.[1] ?? "";
+		expect(declared, "no Credentials found").not.toBe("");
+		expect(declared).toContain("claims: Record<string, unknown>");
+		expect(declared).toContain("labels: Record<string, string>");
+	});
+
+	it("lets a consumer supply a real dictionary for one", () => {
+		const { output, failed } = withConsumer(`
+import type { Credentials } from "./requests.gen.js";
+
+const claims: Record<string, unknown> = { sub: "abc" };
+const labels: Record<string, string> = { env: "prod" };
+
+export const value: Credentials = { token: "t", claims, labels, settings: null };
+`);
+		expect(output.trim(), output).toBe("");
+		expect(failed).toBe(false);
+	});
+
 	it("exports the producer view, so a consumer can reach it", () => {
 		expect(requests).toMatch(/export type Produced</);
 	});

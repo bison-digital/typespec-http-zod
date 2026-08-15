@@ -2190,7 +2190,29 @@ type Identical<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends
  *
  * Deep, because openness recurs: a nested open model puts one at every level, which is why a single
  * spread never repaired the shape it was supposed to repair.
+ *
+ * **An index signature arrives two ways and only one of them is openness.** A model spreading
+ * \`...Record<unknown>\` gains one because its validator is loose - a fact about the MODEL, which the
+ * contract type does not state, so it is stripped. A property declared \`Record<unknown>\` gains one
+ * because that IS its type, stated identically in both artefacts, and stripping it destroys the
+ * property: \`Declared<Record<string, unknown>>\` became \`{}\`, and any spec with a dictionary
+ * property emitted an assertion that does not compile.
+ *
+ * The two are told apart the same way \`types.ts\` already tells them apart: **a string indexer means
+ * "dictionary" only when there are no declared properties beside it.** So the index signature is
+ * dropped from a shape that has other keys, and kept - with its value type still mapped - from one
+ * that does not.
  */
+type DeclaredKeyOf<T> = keyof {
+	[K in keyof T as string extends K
+		? never
+		: number extends K
+			? never
+			: symbol extends K
+				? never
+				: K]: 0;
+};
+
 type Declared<T> = T extends (...args: never[]) => unknown
 	? T
 	: T extends readonly (infer Element)[]
@@ -2198,15 +2220,17 @@ type Declared<T> = T extends (...args: never[]) => unknown
 			? Declared<Element>[]
 			: readonly Declared<Element>[]
 		: T extends object
-			? {
-					[K in keyof T as string extends K
-						? never
-						: number extends K
+			? [DeclaredKeyOf<T>] extends [never]
+				? { [K in keyof T]: Declared<T[K]> }
+				: {
+						[K in keyof T as string extends K
 							? never
-							: symbol extends K
+							: number extends K
 								? never
-								: K]: Declared<T[K]>;
-				}
+								: symbol extends K
+									? never
+									: K]: Declared<T[K]>;
+					}
 			: T;
 
 /**

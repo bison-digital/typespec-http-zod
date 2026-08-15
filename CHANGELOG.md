@@ -10,7 +10,23 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.19.0`.
+Nothing since `0.19.1`.
+
+## [0.19.1] - 2026-08-15
+
+### Fixed
+
+- **A property whose declared type is a dictionary was destroyed by the wire assertion.**
+  `Declared<>`, introduced in `0.17.0`, strips index signatures so that the two artefacts can be
+  compared modulo an open model's `.loose()` catchall. It recursed into every object type, so a
+  property declared `Record<unknown>` - where the index signature IS the type, stated identically in
+  both artefacts - was flattened to `{}` and `wire-contract.gen.ts` stopped compiling. Reported with
+  four real properties behind it.
+
+  **An index signature arrives two ways and only one of them is openness.** It is now dropped only
+  from a shape that has declared keys beside it, and kept - with its value type still mapped - from
+  one that does not. That is the same rule `types.ts` already used to tell a dictionary from a model:
+  a string indexer means "dictionary" only when nothing is declared next to it.
 
 ## [0.19.0] - 2026-08-15
 

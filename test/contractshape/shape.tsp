@@ -89,6 +89,28 @@ model Page {
   note?: string;
 }
 
+/**
+ * A property whose DECLARED TYPE is a dictionary, which is not the same thing as an open model.
+ *
+ * **An index signature can arrive two ways and only one of them is openness.** A model spreading
+ * `...Record<unknown>` gains one because its validator is loose - that is a fact about the model,
+ * and the contract type does not state it. A property declared `Record<string, unknown>` gains one
+ * because that IS its type, in both artefacts, and stripping it destroys the property.
+ *
+ * `Declared<>` recursed into every object and could not tell them apart, so a spec with a dictionary
+ * property emitted a `wire-contract.gen.ts` that does not compile.
+ */
+model Credentials {
+  token: string;
+  claims: Record<unknown>;
+  labels: Record<string>;
+  settings: Record<unknown> | null;
+}
+
+@route("/c2")
+@post
+op credentials(@body body: Credentials): void;
+
 @route("/p")
 @get
 op page(): Page;
