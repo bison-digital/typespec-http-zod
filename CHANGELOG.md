@@ -10,7 +10,36 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.21.0`.
+Nothing since `0.22.0`.
+
+## [0.22.0] - 2026-08-15
+
+### Fixed
+
+- **Only the first success status got an arm, so `armFor` could never select the second.**
+  `model Created { @statusCode statusCode: 200 | 201; @body body: Item }` publishes both statuses in
+  the document; one arm was emitted, so a route answering 201 on create and 200 on update had no way
+  to say so.
+
+  **The only mechanism for a second arm was `statusDiscriminatorOf`**, which infers the choice from a
+  required literal property on one of the bodies. Measured across the whole conformance corpus, it
+  fires **zero times** - the dual-arm path had never been emitted by any spec, so this was not a gap
+  in a working feature, it was a feature nothing exercised.
+
+  A `@statusCode` typed as a union is now the selector, because it is the one the spec already wrote:
+  one arm per declared status, each keyed `when: { property: "statusCode", value: <status> }`. The
+  discriminator remains for what it was written for, two DIFFERENT response models.
+
+### Added
+
+- **`EmittedRoute.statusSelector`**, and **a `type` on every published response header.** Both exist
+  so a wrapping emitter can put the envelope into the type a handler returns. `@statusCode` and
+  `@header` properties are stripped from the body schema - correctly, they are not body - so the arms
+  named properties the handler could not set. Measured on `payload__head`: an arm naming
+  `contentType` and `metadata` against a handler declared `Awaitable<Result<void>>`, an envelope
+  contract published and unsatisfiable.
+
+- `ResponseArm.when.value` accepts a **number**, which a status selector needs.
 
 ## [0.21.0] - 2026-08-15
 

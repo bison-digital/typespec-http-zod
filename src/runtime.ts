@@ -77,7 +77,15 @@ export interface ResponseArm {
 	 */
 	readonly status: number | "default" | `${1 | 2 | 3 | 4 | 5}XX`;
 	readonly schema: ZodType | undefined;
-	readonly when?: { readonly property: string; readonly value: boolean | string };
+	/**
+	 * How a handler said WHICH arm it meant, where an operation declares more than one success.
+	 *
+	 * **`number` too, because a `@statusCode` union selects by the status itself.**
+	 * `model Created { @statusCode statusCode: 200 | 201 }` names the property that chooses and its
+	 * values are the statuses; the discriminator case carries a boolean or string literal off the body
+	 * instead. Both answer the same question, so both use this one field.
+	 */
+	readonly when?: { readonly property: string; readonly value: boolean | number | string };
 }
 
 /**

@@ -18,6 +18,7 @@ import {
 } from "@typespec/compiler";
 import {
 	getAuthenticationForOperation,
+	isStatusCode,
 	resolveRequestVisibility,
 	Visibility,
 	type HttpOperation,
@@ -28,6 +29,7 @@ import {
 import { getOperationId, resolveOperationId } from "@typespec/openapi";
 import { type EmitterOptions, reportDiagnostic } from "./lib.js";
 import { SchemaRegistry, TypeRegistry } from "./registry.js";
+import { typeToTs } from "./types.js";
 import { resolveStreamModule, streamedTypeOf, withStreamModule } from "./streams.js";
 import { resolveVersioningModule, serviceSnapshots } from "./versioning.js";
 import {
@@ -364,17 +366,25 @@ function isSuccessKey(status: StatusKey): boolean {
  * name any other way would be a second spelling of a fact the compiler already resolved.
  */
 function responseHeadersOf(
+	program: Program,
 	operation: HttpOperation,
-): { status: StatusKey; headers: { name: string; property: string }[] }[] {
-	const byStatus = new Map<StatusKey, { name: string; property: string }[]>();
+): { status: StatusKey; headers: { name: string; property: string; type: string }[] }[] {
+	const byStatus = new Map<StatusKey, { name: string; property: string; type: string }[]>();
 	for (const response of operation.responses) {
 		const status = response.statusCodes;
 		if (typeof status !== "number") continue;
-		const headers: { name: string; property: string }[] = [];
+		const headers: { name: string; property: string; type: string }[] = [];
 		for (const content of response.responses) {
 			for (const [name, property] of Object.entries(content.headers ?? {})) {
 				if (!headers.some((existing) => existing.name === name)) {
-					headers.push({ name, property: property.name });
+					/**
+					 * **The TYPE too, because a handler has to be able to SET this.** A `@header`
+					 * property is stripped from the body schema - correctly, it is not body - so a server
+					 * emitter has to put it back into the type a handler returns, and it cannot do that
+					 * from a name alone. Measured before this existed: an arm naming `contentType` and
+					 * `metadata` against a handler declared `Awaitable<Result<void>>`.
+					 */
+					headers.push({ name, property: property.name, type: typeToTs(program, property.type) });
 				}
 			}
 		}
@@ -642,6 +652,38 @@ function statusDiscriminatorOf(
 			if (property.type.kind === "Boolean" || property.type.kind === "String") {
 				return { property: name, value: property.type.value, status };
 			}
+		}
+	}
+	return undefined;
+}
+
+/**
+ * How a handler says WHICH success status it means, when the spec declares more than one.
+ *
+ * **The `@statusCode` property is the selector, and it is the one the spec already wrote.**
+ * `model Created { @statusCode statusCode: 200 | 201; @body body: Item }` declares both statuses and
+ * names the property that chooses between them, so nothing has to be inferred from the body's shape.
+ *
+ * That inference is what {@link statusDiscriminatorOf} does, and it needs a required literal property
+ * on one of the bodies. Measured across the whole conformance corpus: it fires ZERO times, so before
+ * this the second arm had never been emitted by any spec at all - `armFor` could not select a status
+ * that was never written. Both remain: a discriminator still serves two DIFFERENT response models,
+ * this serves one model declaring a union of statuses.
+ *
+ * All statuses of such a model share one body by construction - it is one model - so every arm
+ * carries the same schema and only the status and the selector value differ.
+ */
+function statusSelectorOf(
+	program: Program,
+	operation: HttpOperation,
+	statuses: readonly number[],
+): { property: string; statuses: readonly number[] } | undefined {
+	if (statuses.length < 2) return undefined;
+	for (const response of operation.responses) {
+		const type = response.type;
+		if (type === undefined || type.kind !== "Model") continue;
+		for (const [name, property] of type.properties) {
+			if (isStatusCode(program, property)) return { property: name, statuses };
 		}
 	}
 	return undefined;
@@ -986,7 +1028,12 @@ export interface EmittedRoute {
 	 */
 	readonly responseHeaders: readonly {
 		readonly status: StatusKey;
-		readonly headers: readonly { readonly name: string; readonly property: string }[];
+		readonly headers: readonly {
+			readonly name: string;
+			readonly property: string;
+			/** The TypeScript type of the value, so a server emitter can put it in a signature. */
+			readonly type: string;
+		}[];
 	}[];
 	/**
 	 * The media types each response status offers.
@@ -1021,6 +1068,15 @@ export interface EmittedRoute {
 	readonly scopes: readonly string[];
 	/** Which of two success statuses to answer, and the literal property that decides it. */
 	readonly statusBy: { property: string; value: boolean | string; status: number } | undefined;
+	/**
+	 * The property a handler sets to choose between several declared success statuses, and the
+	 * statuses it may carry - read from a `@statusCode` typed as a union of literals.
+	 *
+	 * **Published because the handler has to be able to SAY it.** The property is HTTP metadata, so it
+	 * is stripped from the body schema (correctly - it is not body), which means a server emitter has
+	 * to add it back to the type a handler returns or the arms name something unsatisfiable.
+	 */
+	readonly statusSelector: { property: string; statuses: readonly number[] } | undefined;
 	/** The schema for the SECOND success status, when the operation declares two distinct arms. */
 	readonly alternateResponseSchema: string | undefined;
 }
@@ -1348,6 +1404,7 @@ export function collectRoutes(
 			);
 			const statusCodes = successStatusesOf(operation);
 			const discriminator = statusDiscriminatorOf(operation, statusCodes);
+			const statusSelector = statusSelectorOf(program, operation, statusCodes);
 			/**
 			 * A `bytes` body means the BYTES are the contract.
 			 *
@@ -1462,7 +1519,7 @@ export function collectRoutes(
 				errorArms: withVisibility(program, Visibility.Read, () =>
 					errorArmsOf(program, operation, registry),
 				),
-				responseHeaders: responseHeadersOf(operation),
+				responseHeaders: responseHeadersOf(program, operation),
 				responseMediaTypes: responseMediaTypesOf(operation),
 				scopes: [
 					...new Set(
@@ -1478,6 +1535,7 @@ export function collectRoutes(
 				],
 				noAuth: noAuthFor(program, operation),
 				statusBy: discriminator,
+				statusSelector,
 				/**
 				 * **Each arm is validated against its OWN shape.**
 				 *
@@ -1840,7 +1898,25 @@ function responseArmsOf(
 			.join(", ");
 		return `, headers: [${rendered}]`;
 	};
-	if (route.statusBy === undefined) {
+	if (route.statusSelector !== undefined) {
+		/**
+		 * **One arm per declared status, keyed on the property the spec already named.**
+		 *
+		 * The selector arms come first and the default last, the same order the discriminator below
+		 * uses: anything scanning for a match wants the specific ones before the fallback. Every arm
+		 * carries the same schema because a `@statusCode` union is ONE model - the statuses differ,
+		 * the body does not.
+		 */
+		const { property, statuses } = route.statusSelector;
+		for (const status of statuses.filter((candidate) => candidate !== route.statusCode)) {
+			arms.push(
+				`{ status: ${status}, schema: ${primary}${mediaTypesFor(status)}${headersFor(status)}, when: { property: ${JSON.stringify(property)}, value: ${status} } }`,
+			);
+		}
+		arms.push(
+			`{ status: ${route.statusCode}, schema: ${primary}${mediaTypesFor(route.statusCode)}${headersFor(route.statusCode)} }`,
+		);
+	} else if (route.statusBy === undefined) {
 		arms.push(
 			`{ status: ${route.statusCode}, schema: ${primary}${mediaTypesFor(route.statusCode)}${headersFor(route.statusCode)} }`,
 		);
