@@ -70,6 +70,29 @@ model OpenParent {
 @get
 op nested(): OpenParent;
 
+model Entry {
+  id: string;
+}
+
+/**
+ * An optional property and two arrays.
+ *
+ * **Both carry a TypeScript-only property into a wire type if the walk is careless.** `?` on the
+ * contract side used to be written `?: T | undefined` to match what `z.infer` of `.optional()`
+ * produces - shaping the contract to satisfy an assertion rather than to describe the wire, and JSON
+ * has no `undefined`. Arrays are emitted mutable, and a codebase that hands back `readonly T[]`
+ * cannot satisfy that; `Produced<>` exists for exactly this and was reachable from nowhere.
+ */
+model Page {
+  entries: Entry[];
+  tags: string[];
+  note?: string;
+}
+
+@route("/p")
+@get
+op page(): Page;
+
 /** The same model in both directions at once - one type, two roles, which is the hard case. */
 @route("/b")
 @post

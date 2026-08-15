@@ -283,7 +283,23 @@ export function propertyToTs(program: Program, property: ModelProperty, wireName
 	 * Marking it optional would make a correct schema fail its own assertion.
 	 */
 	if (property.defaultValue !== undefined) return `${key}: ${value};`;
-	// `exactOptionalPropertyTypes` is on, and Zod's `.optional()` infers `T | undefined`.
+	/**
+	 * **`?: T | undefined`, and dropping the `| undefined` was tried in `0.19.0` and reverted.**
+	 *
+	 * It looks wrong - JSON has no `undefined`, so a wire type saying `?: T` reads more honest, and
+	 * it would make this walk agree with `Exact<z.infer<...>>` on the schemas side. **Measured, it
+	 * breaks the most ordinary handler there is.** `createWidget: (ctx, input) => ok(input)` - return
+	 * what you were given - stopped compiling, because what a handler RECEIVES carries
+	 * `?: T | undefined` and what it would then have to SUPPLY did not.
+	 *
+	 * That is the difference from the index signature and from `readonly`, which look like the same
+	 * class and are not: removing those two makes MORE values assignable, and removing this one makes
+	 * fewer. `{ retiredOn: undefined }` serialises to `{}`, identical to omitting the key, so
+	 * permitting it costs the wire nothing and refusing it costs every producer a conditional spread.
+	 *
+	 * The two emitted surfaces differ here on purpose, exactly as they do on openness:
+	 * `schemas.gen.ts` exports the narrow received view, this walk emits the permissive floor.
+	 */
 	return property.optional ? `${key}?: ${value} | undefined;` : `${key}: ${value};`;
 }
 

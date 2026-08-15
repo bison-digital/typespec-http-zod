@@ -10,7 +10,41 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.18.0`.
+Nothing since `0.19.0`.
+
+## [0.19.0] - 2026-08-15
+
+Three consumer reports. Two were valid, and one of the two was already fixed in the codebase and
+simply unreachable.
+
+### Added
+
+- **`Produced<T>` is exported from `requests.gen.ts`.** It existed, it was applied to `WireOutputs`,
+  and it was declared locally - so a codebase whose layers hand back `readonly T[]` had the producer
+  view sitting in the file it was already importing and no way to name it. Its own docblock had said
+  the right thing since it was written: *"Mutability is not a fact about a wire shape."* Measured on
+  one service: 2 contract methods returning `readonly T[]` and 35 readonly array properties, none of
+  them expressible against the published shape.
+
+- **`unmirrorable-seal`**, a new refusal. `seal-object-schemas` is settable per service, and
+  `@typespec/openapi3` has no per-service options - it applies one value to the whole program. So
+  services that seal differently cannot both be mirrored, and one of them would publish a document
+  that disagrees with the validator emitted beside it. That is the exact disagreement the option's
+  own docblock warns about, and it was previously accepted without a word.
+
+### Documented
+
+- **`Exact<>`'s docblock claimed it narrows the inferred type to match "the contract". It does
+  not**, and that false claim sent a consumer looking for a bug that is not there. The contract types
+  keep `?: T | undefined` deliberately: they are the floor a PRODUCER supplies, and
+  `{ p: undefined }` serialises identically to omitting `p`.
+
+  **Removing it was implemented, measured and reverted.** It looks like the same class as the open
+  model's index signature and it is the opposite: dropping an index signature makes MORE values
+  assignable to a published shape, removing `| undefined` makes fewer. It broke
+  `(ctx, input) => ok(input)` - return what you were given - because what a handler RECEIVES carries
+  `| undefined`. The two emitted surfaces differ on this axis on purpose, as they do on openness:
+  `schemas.gen.ts` is the narrow received view, `requests.gen.ts` is the permissive floor.
 
 ## [0.18.0] - 2026-08-15
 

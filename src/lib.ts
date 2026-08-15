@@ -240,6 +240,19 @@ const diagnostics = {
 	 * consumer can iterate a closed key set at run time; a typo would emit no tuple at all, and "the
 	 * vocabulary is missing" looks exactly like "the vocabulary is empty" at the point it is used.
 	 */
+	/**
+	 * Two services sealing differently, which `@typespec/openapi3` cannot mirror.
+	 *
+	 * An error rather than a warning, on the same footing as every other divergence here: the output
+	 * is a document and a validator that contradict each other about whether a property may exist,
+	 * and shipping that is worse than failing the build.
+	 */
+	"unmirrorable-seal": {
+		severity: "error",
+		messages: {
+			default: paramMessage`'seal-object-schemas' resolves to true for ${"sealed"} and false for ${"open"}, and '@typespec/openapi3' has no per-service options - it applies one value to the whole program. So one of these services would publish a document that disagrees with the validator emitted beside it. Give every service the same value, or split the surfaces into separate compiles.`,
+		},
+	},
 	"unknown-key-vocabulary": {
 		severity: "error",
 		messages: {

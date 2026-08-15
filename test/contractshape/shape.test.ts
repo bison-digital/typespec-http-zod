@@ -182,6 +182,81 @@ export const asParent: OpenParent = parent;
 	 * where the same input reached a handler as an unusable value and became a 500 or a silent
 	 * misreading instead of a 400 naming the part.
 	 */
+	/**
+	 * **An optional property may be omitted, supplied, or passed as an explicit `undefined`.**
+	 *
+	 * The third one looks wrong - JSON has no `undefined` - and removing it was tried and reverted.
+	 * `{ note: undefined }` serialises identically to omitting `note`, so permitting it costs the
+	 * wire nothing, while refusing it costs every producer a conditional spread and breaks the most
+	 * ordinary handler there is: `(ctx, input) => ok(input)`, return what you were given, because
+	 * what ARRIVES carries `?: T | undefined`.
+	 *
+	 * **This is why it is not the same class as the index signature or `readonly`**, which it
+	 * resembles. Removing those makes MORE values assignable to a published shape; removing this one
+	 * makes fewer. `schemas.gen.ts` still exports the narrow received view via `Exact<>`, and the two
+	 * surfaces differ on this axis deliberately.
+	 */
+	it("lets an optional property be omitted, supplied, or explicitly undefined", () => {
+		const { output, failed } = withConsumer(`
+import type { Page } from "./requests.gen.js";
+
+export const absent: Page = { entries: [], tags: [] };
+export const present: Page = { entries: [], tags: [], note: "n" };
+
+// The echo case: what a handler received, handed straight back.
+const received: Page = { entries: [], tags: [], note: undefined };
+export const echoed: Page = received;
+`);
+		expect(output.trim(), output).toBe("");
+		expect(failed).toBe(false);
+	});
+
+	/**
+	 * **`readonly` is a TypeScript variance property, not a wire property.**
+	 *
+	 * `readonly T[]` and `T[]` serialise to identical bytes, so a codebase whose layers hand back
+	 * immutable views should be able to publish one. `Produced<>` already existed for this and said
+	 * so - "Mutability is not a fact about a wire shape" - and was applied to `WireOutputs` alone and
+	 * exported from nowhere, so no consumer could reach it for a named type.
+	 */
+	it("exports the producer view, so a consumer can reach it", () => {
+		expect(requests).toMatch(/export type Produced</);
+	});
+
+	it("accepts a readonly view where the wire type is an array", () => {
+		const { output, failed } = withConsumer(`
+import type { Produced, Page, Entry } from "./requests.gen.js";
+
+interface ImmutablePage {
+	readonly entries: readonly Entry[];
+	readonly tags: readonly string[];
+}
+
+const view: ImmutablePage = { entries: [{ id: "a" }], tags: ["t"] };
+
+export const produced: Produced<Page> = view;
+`);
+		expect(output.trim(), output).toBe("");
+		expect(failed).toBe(false);
+	});
+
+	it("lets a handler return a readonly view as a response", () => {
+		const { output, failed } = withConsumer(`
+import type { WireOutputs, Entry } from "./requests.gen.js";
+
+interface ImmutablePage {
+	readonly entries: readonly Entry[];
+	readonly tags: readonly string[];
+}
+
+const view: ImmutablePage = { entries: [{ id: "a" }], tags: ["t"] };
+
+export const response: WireOutputs["page"] = view;
+`);
+		expect(output.trim(), output).toBe("");
+		expect(failed).toBe(false);
+	});
+
 	it("lets a handler read a multipart file's name and bytes without a cast", () => {
 		const { output, failed } = withConsumer(`
 import type { WireInputs } from "./requests.gen.js";

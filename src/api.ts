@@ -8,6 +8,7 @@ import {
 	isNeverType,
 	isVoidType,
 	type Model,
+	NoTarget,
 	type Operation,
 	type ModelProperty,
 	type Program,
@@ -1579,8 +1580,20 @@ function renderSchemas(
 	 *
 	 * `z.infer` of `.optional()` gives `p?: T | undefined`, which under `exactOptionalPropertyTypes`
 	 * admits an explicitly-undefined property. **JSON has no `undefined`**, and the document says the
-	 * same thing by leaving the property out of `required`, so the inferred type was wider than both
-	 * the contract and the wire and a consumer had to strip it at the boundary.
+	 * same thing by leaving the property out of `required`, so the inferred type is wider than the
+	 * wire and a consumer reading a payload had to strip it at the boundary.
+	 *
+	 * **It does NOT match the contract type, and this docblock used to claim it did.** The
+	 * contract types in `requests.gen.ts` keep `?: T | undefined` on purpose: they are the floor a
+	 * PRODUCER supplies, and `{ p: undefined }` serialises identically to omitting `p`, so refusing
+	 * it would cost every producer a conditional spread and buy the wire nothing. Measured when this
+	 * was "fixed" to agree: `(ctx, input) => ok(input)` - return what you were given - stopped
+	 * compiling.
+	 *
+	 * So the two surfaces differ on this axis deliberately, exactly as they differ on openness: this
+	 * one is the narrow view of what ARRIVES, the contract type is the permissive floor for what you
+	 * may SEND. A reader comparing them will find them unequal and should - the emitted assertion
+	 * pairs the contract against raw `z.infer`, not against this.
 	 *
 	 * Derived from the same schema rather than hand-written beside it, so there is still one source of
 	 * truth: a mapped type cannot drift from the thing it maps.
@@ -2062,8 +2075,14 @@ type Simplify<T> = { [K in keyof T]: T[K] } & {};
  * No branch for functions, deliberately: the wire vocabulary is primitives, objects and arrays, so
  * a call signature cannot appear here. Mapping one would yield \`{}\`, so the day something does
  * carry a method - a narrowed multipart file part is the near miss - this needs one.
+ *
+ * **Exported, because a consumer needs it for a NAMED type and could not reach it.** It was applied
+ * to \`WireOutputs\` and declared locally, so a codebase whose layers hand back \`readonly T[]\` had
+ * the producer view sitting in the file it was already importing and no way to name it. Measured on
+ * one service: 2 contract methods returning \`readonly T[]\` and 35 readonly array properties, none
+ * of them expressible against the published shape.
  */
-type Produced<T> = T extends readonly (infer Element)[]
+export type Produced<T> = T extends readonly (infer Element)[]
 	? readonly Produced<Element>[]
 	: T extends object
 		? { readonly [K in keyof T]: Produced<T[K]> }
@@ -2345,6 +2364,39 @@ export async function emitHttpZod(
 	 * there means a server emitter follows without knowing this rule exists.
 	 */
 	const distinctServices = new Set(snapshots.map((snapshot) => snapshot.service.namespace.name));
+	/**
+	 * **Every service must seal the same way, because `@typespec/openapi3` has no per-service
+	 * options.**
+	 *
+	 * This option exists only so that two emitters answering the same question about the same models
+	 * give the same answer - it is stated twice on purpose, and its own docblock says to set it to
+	 * whatever openapi3 is set to. openapi3 applies ONE value to the whole program. So services that
+	 * seal differently cannot both be mirrored: whichever way openapi3 is configured, at least one
+	 * service publishes a document that disagrees with the validator generated beside it. Sealed here
+	 * and silent there refuses a payload the document permits; the reverse publishes a strictness the
+	 * runtime does not enforce.
+	 *
+	 * Reported once for the program rather than once per service, because the fault is the
+	 * DISAGREEMENT and no single service is the wrong one.
+	 */
+	const sealings = new Map<string, boolean>();
+	for (const snapshot of snapshots) {
+		const name = snapshot.service.namespace.name;
+		const perService = options.services?.[name];
+		sealings.set(
+			name,
+			perService?.["seal-object-schemas"] ?? options["seal-object-schemas"] ?? false,
+		);
+	}
+	if (new Set(sealings.values()).size > 1) {
+		const sealed = [...sealings.entries()].filter(([, seals]) => seals).map(([name]) => name);
+		const open = [...sealings.entries()].filter(([, seals]) => !seals).map(([name]) => name);
+		reportDiagnostic(context.program, {
+			code: "unmirrorable-seal",
+			target: NoTarget,
+			format: { sealed: sealed.join(", "), open: open.join(", ") },
+		});
+	}
 	for (const snapshot of snapshots) {
 		beginOperationIds();
 		const service = snapshot.service;
