@@ -2075,8 +2075,22 @@ function renderRequestTypes(
 		.map((entry) => `\t${entry.operationId}: ${upperFirst(entry.operationId)}Input;`)
 		.join("\n");
 
-	return `${generatedBanner()}
-/**
+	/**
+	 * **Emitted only where an operation has something to flatten.**
+	 *
+	 * A generated file has to pass the lint of whatever project it lands in, and `noUnusedLocals`
+	 * makes an unused type declaration an error. A service whose operations take no input at all -
+	 * two parameterless `GET`s, which is where a health check starts and therefore where every new
+	 * consumer starts - got this declaration and no use of it, so `requests.gen.ts` did not compile.
+	 * `TS6196: 'Simplify' is declared but never used.` Third of its kind, after the unconditional
+	 * `zValidator` and `z` imports.
+	 *
+	 * Decided from the aliases actually rendered rather than by searching the output for the name.
+	 */
+	const simplifyHelper =
+		inputs.length === 0
+			? ""
+			: `/**
  * Flattens an intersection into a single object type.
  *
  * Without it, \`Body & { filingId: string }\` and the equivalent flat object are structurally the
@@ -2084,7 +2098,9 @@ function renderRequestTypes(
  * this file with the emitted Zod would fail on correct code.
  */
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
+`;
 
+	return `${generatedBanner()}${simplifyHelper}
 /**
  * The same shape, tolerant of \`readonly\`.
  *

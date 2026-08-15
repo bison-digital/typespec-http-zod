@@ -10,7 +10,26 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.20.0`.
+Nothing since `0.21.0`.
+
+## [0.21.0] - 2026-08-15
+
+### Fixed
+
+- **`Simplify<T>` was written into every `requests.gen.ts`, used or not.** A service whose operations
+  take no input has nothing to flatten, so the declaration sat there unreferenced and
+  `noUnusedLocals` - which a generated file has to pass like any other - made it a compile error:
+  `TS6196: 'Simplify' is declared but never used.` It is now emitted only where an input alias
+  actually names it, decided from the aliases rendered rather than by searching the output.
+
+  **Third of its kind**, after the unconditional `zValidator` (0.7.0) and `z` (0.9.0) imports, and it
+  bites on the same shape both did: two parameterless `GET`s, which is where a health check starts
+  and therefore where every new consumer starts.
+
+- **The arm that compiles emitted output now sets `noUnusedLocals` and `noUnusedParameters`**, which
+  it never had. That is why all three shipped: the harness was green while a consumer's first build
+  was not. The sibling package's own harness has set both since it was written. Measured across the
+  whole corpus with the flags on - `Simplify` was the only offender left.
 
 ## [0.20.0] - 2026-08-15
 

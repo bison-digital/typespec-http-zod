@@ -33,6 +33,18 @@ export function typecheckEmitted(outDir: string): { output: string; failed: bool
 					strict: true,
 					exactOptionalPropertyTypes: true,
 					noUncheckedIndexedAccess: true,
+					/**
+					 * **Unused code is an ERROR here, and that is the point rather than tidiness.**
+					 *
+					 * A generated file has to pass the lint of whatever project it lands in, and a declaration
+					 * written for a construct the service does not use fails it on day one. Three have shipped:
+					 * `zValidator` and `z` imported unconditionally, and `Simplify<T>` written into the contract
+					 * types of a service with nothing to flatten. **This flag was missing here for all three**,
+					 * so the arm that compiles emitted output was green while a consumer's first build was not -
+					 * the sibling package's own harness has set it since it was written.
+					 */
+					noUnusedLocals: true,
+					noUnusedParameters: true,
 					noEmit: true,
 					skipLibCheck: true,
 					types: [],
