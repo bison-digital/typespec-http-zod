@@ -22,7 +22,7 @@ simply unreachable.
 - **`Produced<T>` is exported from `requests.gen.ts`.** It existed, it was applied to `WireOutputs`,
   and it was declared locally - so a codebase whose layers hand back `readonly T[]` had the producer
   view sitting in the file it was already importing and no way to name it. Its own docblock had said
-  the right thing since it was written: *"Mutability is not a fact about a wire shape."* Measured on
+  the right thing since it was written: _"Mutability is not a fact about a wire shape."_ Measured on
   one service: 2 contract methods returning `readonly T[]` and 35 readonly array properties, none of
   them expressible against the published shape.
 
