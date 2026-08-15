@@ -10,7 +10,45 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.17.0`.
+Nothing since `0.18.0`.
+
+## [0.18.0] - 2026-08-15
+
+A minor: **a multipart part declared `HttpPart<File>` is now typed as a file**, so
+`input.file.name` reads without a cast. `0.17.0` documented this as blocked; it was not.
+
+### Changed
+
+- **`HttpPart<File>` emits `z.unknown().refine(...)` narrowing to
+  `{ name: string; type: string; arrayBuffer: () => Promise<ArrayBuffer> }`**, structurally rather
+  than as `File` so emitted output still depends on no ambient library - `File` is reachable only
+  through `lib.dom` or `@types/node`, and this package's own emitted-output typecheck runs with
+  `types: []` so that such a dependency cannot creep in. Every member the type claims is verified, so
+  the narrowing is established rather than asserted.
+
+  **Why this is derivable, which is the rule `test/vocabulary.test.ts` enforces.**
+  `@typespec/openapi3` publishes a bare `{}` for such a part, in 3.1 and even where the part declares
+  a content type. That is OpenAPI's idiom for binary content in a multipart body, not a statement
+  that any value is acceptable, and the transport agrees - Hono types a multipart part as
+  `string | File` and nothing else. So the check refuses exactly one thing: a text field where the
+  spec declared a file, which is malformed against the spec the document was projected from. **A spec
+  that means "either" writes `HttpPart<File | string>`**, so nothing becomes inexpressible; the
+  declaration simply means what it says. Previously that same request reached a handler as an
+  unusable value and became a 500 or a silent misreading rather than a 400 naming the part.
+
+  `bytes` parts are deliberately NOT covered. `bytes` says only that the payload is binary, and a
+  client may legitimately send it as an ordinary form field.
+
+  `z.unknown().refine()` rather than `z.custom<T>()`: measured on zod 4.4.3, `z.toJSONSchema` throws
+  `Custom types cannot be represented in JSON Schema` on the latter, which silently took four corpus
+  schemas out of the differential comparing these validators against the document. The refined form
+  serialises to `{}` - exactly what openapi3 publishes - so that comparison keeps working.
+
+- **`test/vocabulary.test.ts` admits this one `.refine` as a SHAPE**, written out literally, beside
+  the `z.preprocess` carve-outs and on the same footing: it cannot turn a valid payload into an
+  invalid one. It has its own non-vacuity floor, so an exemption that outlives what it exempted
+  fails rather than passing quietly. Measured: changing the emitted refinement by a single check
+  turns both arms red.
 
 ## [0.17.0] - 2026-08-15
 

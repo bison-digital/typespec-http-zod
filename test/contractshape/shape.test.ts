@@ -169,32 +169,29 @@ export const asParent: OpenParent = parent;
 	});
 
 	/**
-	 * **A file part is `unknown`, and a consumer narrows it at the boundary. That is not an
-	 * oversight, and this arm exists so it is not "fixed" by accident.**
+	 * **A part declared `HttpPart<File>` is typed as a file, and the validator establishes it.**
 	 *
-	 * `@typespec/openapi3` publishes a bare `{}` for a File part - verified against this package's
-	 * own conformance output, in 3.1, and even for a part declaring a specific content type. `{}`
-	 * permits a text field, so a validator that insisted on a file would refuse a payload the
-	 * published contract allows, and a TYPE that claimed one would assert what nothing checked.
+	 * `@typespec/openapi3` publishes a bare `{}` for such a part - verified against this package's
+	 * own conformance output, in 3.1, and even where the part declares a content type. That is
+	 * OpenAPI's IDIOM for binary content in a multipart body, not a statement that any value is
+	 * acceptable, and the transport agrees: Hono types a part as `string | File` and nothing else.
 	 *
-	 * Both were built and reverted in `0.17.0`; see `isBinaryPart` for what each one broke. The day
-	 * the document says what the part is, this arm should fail and be replaced.
+	 * So the check can refuse exactly one thing - a text field where the spec declared a file - and
+	 * that request is malformed against the spec. A spec that means "either" says
+	 * `HttpPart<File | string>`, so nothing becomes inexpressible. `0.17.0` left this as `unknown`,
+	 * where the same input reached a handler as an unusable value and became a 500 or a silent
+	 * misreading instead of a 400 naming the part.
 	 */
-	it("leaves a multipart file part unknown, because the document says nothing about it", () => {
+	it("lets a handler read a multipart file's name and bytes without a cast", () => {
 		const { output, failed } = withConsumer(`
 import type { WireInputs } from "./requests.gen.js";
 
-interface FileLike {
-	readonly name: string;
-	arrayBuffer: () => Promise<ArrayBuffer>;
-}
-
-const isFile = (value: unknown): value is FileLike =>
-	typeof value === "object" && value !== null && "arrayBuffer" in value;
-
-// The narrowing a consumer writes, once, at the edge - and it type-checks, which is the claim.
-export function nameOf(input: WireInputs["upload"]): string {
-	return isFile(input.file) ? input.file.name : "";
+export async function summarise(input: WireInputs["upload"]): Promise<string> {
+	const required: string = input.file.name;
+	const optional: string = input.thumbnail?.name ?? "none";
+	const repeated: string = input.pages.map((page) => page.name).join(",");
+	const bytes: ArrayBuffer = await input.file.arrayBuffer();
+	return [required, optional, repeated, input.file.type, String(bytes.byteLength)].join(" ");
 }
 `);
 		expect(output.trim(), output).toBe("");

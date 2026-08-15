@@ -693,7 +693,13 @@ function multipartTsOf(
 	const entries = body.parts.map((part) => {
 		const type = part.body?.type;
 		const inner =
-			type === undefined || isBinaryPart(type) ? "unknown" : registry.expressionFor(type);
+			type === undefined
+				? "unknown"
+				: isFilePart(type)
+					? MULTIPART_FILE
+					: isBinaryPart(type)
+						? "unknown"
+						: registry.expressionFor(type);
 		const value = part.multi === true ? `(${inner})[]` : inner;
 		const optional = part.optional === true ? "?" : "";
 		return `\t${objectKey(part.name ?? "")}${optional}: ${value};`;
@@ -708,7 +714,13 @@ function multipartSchemaOf(
 	const entries = body.parts.map((part) => {
 		const type = part.body?.type;
 		const inner =
-			type === undefined || isBinaryPart(type) ? "z.unknown()" : registry.expressionFor(type);
+			type === undefined
+				? "z.unknown()"
+				: isFilePart(type)
+					? `z.unknown().refine(${MULTIPART_FILE_REFINEMENT})`
+					: isBinaryPart(type)
+						? "z.unknown()"
+						: registry.expressionFor(type);
 		// `multi` is `HttpPart<T>[]` - the same part repeated, which arrives as an array.
 		const value = part.multi === true ? `z.array(${inner})` : inner;
 		return `\t${objectKey(part.name ?? "")}: ${part.optional === true ? `${value}.optional()` : value},`;
@@ -726,26 +738,61 @@ function multipartSchemaOf(
 }
 
 /**
- * `bytes`, or a model built on `File` - the parts openapi3 publishes as an empty schema.
+ * The shape a multipart file part actually arrives as, spelled structurally.
  *
- * **A narrowed type for a `File` part was tried in `0.17.0` and reverted; do not try it again
- * without reading this.** The ask was reasonable - `input.file.name` needs a cast today - and every
- * way of granting it breaks something load-bearing:
+ * **Structural rather than `File`, because emitted output must depend on no ambient library.**
+ * `File` is reachable only through `lib.dom` or `@types/node`, and this package's own
+ * emitted-output typecheck runs with `types: []` precisely so a dependency like that cannot creep
+ * in. The three members are the ones a handler needs and the ones {@link MULTIPART_FILE_REFINEMENT}
+ * actually verifies - claiming more would be asserting what nothing established.
  *
- * - `z.custom<FileLike>()` throws in `z.toJSONSchema` ("Custom types cannot be represented"),
- *   which silently removes those schemas from the differential that compares this emitter's
- *   validators against the document. Measured: four corpus schemas dropped out.
- * - `z.unknown().refine(guard)` serialises fine and narrows correctly, but REJECTS a value the
- *   published contract permits, and `test/vocabulary.test.ts` refuses it by class for that reason.
- * - Narrowing the type without a check makes the two artefacts disagree and asserts a shape nothing
- *   established.
- *
- * The root cause is upstream and visible in this package's own fixtures: `@typespec/openapi3`
- * publishes a bare `{}` for a File part even in 3.1, where `contentMediaType` could express it, and
- * even when the part declares a specific content type. **The day the document says what the part is,
- * the validator may say it too and the type follows for free.** Until then `unknown` is the only
- * honest answer, and a consumer narrows at the boundary.
+ * `arrayBuffer` is a property rather than a method on purpose: `Declared<>` maps the inferred side
+ * of the wire assertion, and a mapped type turns a method into a function-typed property, so
+ * spelling it this way on both sides is what keeps the two identical.
  */
+const MULTIPART_FILE = "{ name: string; type: string; arrayBuffer: () => Promise<ArrayBuffer> }";
+
+/**
+ * The check that makes {@link MULTIPART_FILE} established rather than asserted.
+ *
+ * **Why this is derivable from the contract, which is the rule `test/vocabulary.test.ts` enforces.**
+ * `@typespec/openapi3` publishes a bare `{}` for a `HttpPart<File>`, in 3.1 and even where the part
+ * declares a content type. That is OpenAPI's IDIOM for binary content in a multipart body rather
+ * than a statement that any value is acceptable, and the transport says the same: Hono types a
+ * multipart part as `string | File` and nothing else. So this refuses exactly one thing - a text
+ * field where the spec declared a file - which is malformed against the spec that produced the
+ * document. A spec meaning "either" writes `HttpPart<File | string>`, so nothing becomes
+ * inexpressible; the declaration simply means what it says.
+ *
+ * **`z.unknown().refine()` rather than `z.custom<T>()`, and the difference is not stylistic.**
+ * Measured on zod 4.4.3: `z.toJSONSchema(z.custom(...))` throws `Custom types cannot be represented
+ * in JSON Schema`, which silently took four corpus schemas out of the differential comparing these
+ * validators against the document. Refined `z.unknown()` serialises to `{}` - exactly what openapi3
+ * publishes - so that comparison keeps working. Zod 4 narrows on a type predicate, so the inferred
+ * type is the same either way.
+ *
+ * Every member the type claims is verified, so the narrowing is sound.
+ */
+const MULTIPART_FILE_REFINEMENT = `(value): value is ${MULTIPART_FILE} => typeof value === "object" && value !== null && "name" in value && typeof value.name === "string" && "type" in value && typeof value.type === "string" && "arrayBuffer" in value && typeof value.arrayBuffer === "function"`;
+
+/**
+ * A part declared as a `File`, as opposed to raw `bytes`.
+ *
+ * **Narrower than {@link isBinaryPart} deliberately.** A `File` part is declared to be a file and
+ * `c.req.parseBody()` produces one, so the contract supports saying so. `bytes` says only that the
+ * payload is binary; a client may legitimately send it as an ordinary form field, which arrives as a
+ * string. Widening this to cover `bytes` would refuse payloads that pass today, on an inference the
+ * spec never made.
+ */
+function isFilePart(type: Type): boolean {
+	if (type.kind !== "Model") return false;
+	for (let model: Model | undefined = type; model !== undefined; model = model.baseModel) {
+		if (model.name === "File") return true;
+	}
+	return false;
+}
+
+/** `bytes`, or a model built on `File` - the parts openapi3 publishes as an empty schema. */
 function isBinaryPart(type: Type): boolean {
 	if (type.kind === "Scalar") {
 		for (let scalar: Scalar | undefined = type; scalar !== undefined; scalar = scalar.baseScalar) {
