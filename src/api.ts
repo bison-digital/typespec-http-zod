@@ -948,6 +948,22 @@ export interface EmittedRoute {
 	 * {@link rawBodyProperty}, whose case is the same statement about a different body.
 	 */
 	readonly bodyProperty: string | undefined;
+	/**
+	 * Whether the document publishes `requestBody.required: false`, so a request carrying NO body at
+	 * all is one the contract permits.
+	 *
+	 * **A body that may be absent cannot be flattened into the input, which is why this is published
+	 * rather than kept internal.** Merged, there is no way to say "these properties are here only
+	 * sometimes" without making every one of them optional, which would be a different and weaker
+	 * claim about the body that IS sent. So an optional body is named, exactly as an indexed one is,
+	 * and a wrapping emitter spells the property optional from this.
+	 *
+	 * Measured before it existed: a bodyless `POST` naming `content-type: application/json` answered
+	 * **400 `Malformed JSON in request body`** as `text/plain`, produced before the app's `invalid`
+	 * hook and so outside its error envelope entirely - a service refusing a request its own contract
+	 * permits, in a shape that contract forbids.
+	 */
+	readonly optionalBody: boolean;
 	/** Declared failures, each with the schema for its OWN body, in OpenAPI's precedence order. */
 	readonly errorArms: readonly {
 		readonly status: StatusKey;
@@ -1348,8 +1364,13 @@ export function collectRoutes(
 			 * resolved model's own indexer rather than from the emitted schema text, which would be a
 			 * decision made by pattern-matching generated output.
 			 */
+			/**
+			 * **An OPTIONAL body is named for the same reason an indexed one is**: the merge cannot
+			 * express "absent". See {@link EmittedRoute.optionalBody}.
+			 */
+			const optionalBody = bodyParameter?.property?.optional === true;
 			const bodyProperty =
-				requestType?.kind === "Model" && requestType.indexer !== undefined
+				requestType?.kind === "Model" && (requestType.indexer !== undefined || optionalBody)
 					? (bodyParameter?.property?.name ?? "body")
 					: undefined;
 			routes.push({
@@ -1434,6 +1455,7 @@ export function collectRoutes(
 							),
 				rawBodyProperty,
 				bodyProperty,
+				optionalBody,
 				// Responses are read at Visibility.Read, exactly as the success body above is. Resolving
 				// them under the ambient request visibility declared six components under the wrong
 				// suffix - measured: type/model/visibility gained six divergences.

@@ -10,7 +10,20 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
-Nothing since `0.19.1`.
+Nothing since `0.20.0`.
+
+## [0.20.0] - 2026-08-15
+
+From `agent-books`, the largest port yet (~260 operations). All three findings reproduced; none was
+covered by either suite, and all were found by compiling a real spec.
+
+### Added
+
+- **`EmittedRoute.optionalBody`**, so a wrapping emitter can tell that the document publishes
+  `requestBody.required: false`. **A body that may be absent cannot be flattened into an
+  operation's input**: a merge has no way to say "these properties are here only sometimes" without
+  making every one of them optional, which is a weaker and different claim about the body that IS
+  sent. So an optional body is now NAMED, exactly as an indexed one already was.
 
 ## [0.19.1] - 2026-08-15
 
