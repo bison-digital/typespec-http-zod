@@ -1,14 +1,60 @@
 # typespec-http-zod
 
-Generate Zod validators and framework-free TypeScript types from a TypeSpec HTTP service.
+Zod validators generated from the same API definition as your OpenAPI document.
 
-The emitted validators agree, keyword for keyword, with the OpenAPI document
-[`@typespec/openapi3`](https://typespec.io) publishes from the same source. Use them with Express,
-Fastify, Elysia, a Workers fetch handler, a typed client, or a test suite. No server framework is
-required.
+## What is it?
 
-It is also a library. [`typespec-hono`](https://github.com/bison-digital/typespec-hono) is an emitter
-built on its API.
+An emitter for [TypeSpec](https://typespec.io), Microsoft's language for describing APIs. Describe
+your API once, and this package generates the Zod schemas that validate every request and response,
+plus the TypeScript types to go with them.
+
+TypeSpec compiles to OpenAPI as well, so the same definition also gives you documentation that cannot
+drift from the validation.
+
+One model:
+
+```tsp
+model Widget {
+  id: string;
+
+  @minLength(1)
+  name: string;
+}
+```
+
+The validators and types this package generates:
+
+```ts
+export const widgetSchema = z.object({
+	id: z.string(),
+	name: z.string().min(1),
+});
+
+export type Widget = z.infer<typeof widgetSchema>;
+```
+
+And the OpenAPI that [`@typespec/openapi3`](https://typespec.io) generates from that same model:
+
+```jsonc
+"Widget": {
+  "type": "object",
+  "required": ["id", "name"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string", "minLength": 1 }
+  }
+}
+```
+
+## Features
+
+- **Documentation and validation cannot drift** - both come from one definition, so there is no
+  second source to keep in step
+- **One runtime dependency** - `zod`, and nothing else
+- **No framework** - use the validators in a server, a client, or a test
+- **Types with zero imports** - a contracts module anything can depend on
+- **Built on a public API** - [`typespec-hono`](https://github.com/bison-digital/typespec-hono)
+  generates a whole Hono server from it
 
 ## Install
 
@@ -137,6 +183,12 @@ then a range such as `4XX`, then `default`.
 | `requests.gen.ts`      | framework-free TypeScript types, with no imports                                                          | `contracts-output-dir` is set |
 | `vocabularies.gen.ts`  | each enum's members as a runtime tuple                                                                    | `contracts-output-dir` is set |
 | `wire-contract.gen.ts` | assertions pairing the emitted Zod against those types                                                    | that and `contracts-package`  |
+
+`wire-contract.gen.ts` is not imported by any other file. The file contains type-level assertions
+pairing each generated validator with its contract type, so a mismatch between the two is a compile
+error. TypeScript reaches the file through `tsconfig`'s `include`, which has two consequences worth
+knowing before removing it: dependency scanners report the file as unused, and deleting it does not
+break the build until the validator and the contract type diverge.
 
 Identifiers are named from the operation id the document publishes. An operation inside a namespace
 carries the whole id, so `op readWidget` in `namespace Widgets` becomes `Widgets_readWidgetPath`.
