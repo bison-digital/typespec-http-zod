@@ -51,7 +51,8 @@ const ascii = (codePoints: number): string => "a".repeat(Math.max(0, codePoints)
  * Without a conformant value here, every probe on such a property would disagree for a reason that
  * is not a defect, and the oracle would need an exception set - a place for real divergences to hide.
  * Generating a value the document's own `format` describes removes the asymmetry instead of excusing
- * it, and `precision.test.ts` grades the checks themselves.
+ * it. The checks themselves are graded by `test/formats/formats.test.ts`, which pins what each
+ * declared scalar emits, and by `acceptance.test.ts`, which runs values through them.
  */
 const FORMAT_INSTANCES: Readonly<Record<string, string>> = {
 	"date-time": "2026-01-01T00:00:00Z",
@@ -424,28 +425,37 @@ export function probesFor(schema: Schema | undefined, resolve: Resolve): readonl
 
 		if (kind === "array") {
 			const element = baseInstance(declared["items"] as Schema, resolve);
+			const list = (length: number): unknown =>
+				withProperty(
+					base,
+					key,
+					Array.from({ length }, () => element),
+				);
+			/**
+			 * **Both sides of an array bound, because probing one side is blind in one direction.**
+			 *
+			 * Only the failing length was sent at first, which catches a validator that is too LOOSE
+			 * and says nothing about one that is too tight: `@maxItems(6)` emitted as `.max(5)` refuses
+			 * a conformant six-element array, and no probe ever sent six. The at-bound value is the one
+			 * that catches it - the same asymmetry `constraints.tsp` records for open elements a level
+			 * down, where a one-directional read let an over-constrained validator stay invisible.
+			 */
 			const max = declared["maxItems"];
 			if (typeof max === "number" && element !== undefined) {
+				probes.push({ keyword: "maxItems", why: `'${key}' at maxItems`, value: list(max) });
 				probes.push({
 					keyword: "maxItems",
 					why: `'${key}' one over maxItems`,
-					value: withProperty(
-						base,
-						key,
-						Array.from({ length: max + 1 }, () => element),
-					),
+					value: list(max + 1),
 				});
 			}
 			const min = declared["minItems"];
 			if (typeof min === "number" && min > 0 && element !== undefined) {
+				probes.push({ keyword: "minItems", why: `'${key}' at minItems`, value: list(min) });
 				probes.push({
 					keyword: "minItems",
 					why: `'${key}' one under minItems`,
-					value: withProperty(
-						base,
-						key,
-						Array.from({ length: min - 1 }, () => element),
-					),
+					value: list(min - 1),
 				});
 			}
 		}
