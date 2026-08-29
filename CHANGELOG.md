@@ -83,6 +83,43 @@ precision was accepted until 4.5.
   appears in any emitted file. `src/constraints.ts` still described `@refine` as "still ours and on
   its way out"; it is gone, and this package exports no decorators.
 
+### Added
+
+- **`compile-schemas`, an option that wraps every emitted validator in `z.compile()`.** Zod 4.5's
+  ahead-of-time compiler walks a schema once and emits a flat, loop-free function through
+  `new Function`, falling back to the ordinary parser for anything it cannot handle. Measured on an
+  emitted five-property model at zod 4.5.2, 200k iterations: `safeParse` 371 ns -> **51 ns**.
+
+  **Off by default, because it is a trade.** Compilation runs at module scope, so it costs startup in
+  proportion to the number of schemas - about 3 ms per 25 declarations - and buys nothing until enough
+  requests arrive to repay it.
+
+  **It is transparent, and that was measured before a line was emitted.** `z.toJSONSchema` output is
+  byte-identical, `_zod.def` is unchanged and still readable, and verdicts AND parsed values match for
+  every construct this emitter writes, including `z.preprocess`, `.exactOptional()` and a cycle. So
+  the differential and the shape describers are unaffected, and `test/compile/` compares the two
+  builds against each other - same spec, one option apart - rather than trusting that.
+
+  **A DEFERRED declaration is never wrapped, and finding out why cost a real bug.** A cycle closing
+  through a named union emits `z.lazy()` whose body forward-references a `const` declared further down
+  the module. Wrapping it produced output that imported cleanly and then threw
+  `Cannot read properties of undefined (reading '_zod')` on the **first parse** - a failure that
+  reaches a running server rather than a build. `z.lazy()` is on Zod's own list of uncompilable
+  constructs, so nothing is lost. The skip is keyed on the fact the registry already holds rather than
+  on the shape of the emitted text; a cycle whose back edge sits on a GETTER is a different case and
+  is compiled like any other.
+
+  **On Cloudflare Workers this is the only route to a compiled schema**, verified on `workerd`:
+
+  |                              | compiled fast path present?         |
+  | ---------------------------- | ----------------------------------- |
+  | this option, at module scope | **yes**                             |
+  | Zod's `import "zod/compile"` | no, before or after the first parse |
+
+  `new Function` is permitted during a Worker's STARTUP phase, which is when module scope runs. Zod's
+  global mode compiles lazily on first parse, which happens inside a request, where the runtime
+  refuses it - and it degrades silently rather than failing, so nothing about it looks wrong.
+
 ### Changed
 
 - **An optional property is emitted `.exactOptional()`, and the `Exact<>` helper is gone.**

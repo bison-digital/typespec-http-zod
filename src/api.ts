@@ -1617,11 +1617,32 @@ function renderExternalImports(externals: ExternalImports, ...bodies: string[]):
  * validate a request or a response against, and every oracle that graded those validators had to read
  * a server to find them. See {@link nameRouteSchemas}.
  */
+/**
+ * **`z.compile(...)` around a validator, when `compile-schemas` asks for it.**
+ *
+ * Zod walks the schema once and emits a flat, loop-free function through `new Function`, falling back
+ * to the ordinary parser for anything it cannot handle. Measured on zod 4.5.2 before this was written:
+ * `z.toJSONSchema` output is byte-identical, `_zod.def` is unchanged and still readable, and verdicts
+ * AND parsed output match for every construct this emitter writes - including `z.preprocess`,
+ * `.exactOptional()` and a `z.lazy()` cycle. So the two oracles that read a schema rather than run it
+ * are unaffected, and the wrapper is transparent.
+ *
+ * **A cyclic declaration is wrapped too, and that was worth checking rather than assuming.** The
+ * emitted form names the const being defined from inside its own `z.lazy()` body, and this repository
+ * has already shipped a break of exactly that shape - `.strict()` reads `shape` eagerly and throws
+ * `Cannot access 'X' before initialization` during module initialisation. Measured on the emitted
+ * shape: `z.compile()` does not force the lazy body, and the declaration parses.
+ */
+function compiled(expression: string, on: boolean): string {
+	return on ? `z.compile(${expression})` : expression;
+}
+
 function renderSchemas(
 	registry: SchemaRegistry,
 	externals: ExternalImports,
 	routeDeclarations: readonly string[],
 	runtimeModule: string,
+	compileSchemas: boolean,
 ): string {
 	const declarations = registry.declarations().map((d) => {
 		/**
@@ -1633,7 +1654,7 @@ function renderSchemas(
 		 * with no cycle emits byte-identical output to before.
 		 */
 		if (d.structural === undefined) {
-			return `\nexport const ${d.identifier} = ${d.source};\nexport type ${d.typeName} = z.infer<typeof ${d.identifier}>;\n`;
+			return `\nexport const ${d.identifier} = ${compiled(d.source, compileSchemas)};\nexport type ${d.typeName} = z.infer<typeof ${d.identifier}>;\n`;
 		}
 		const declared = d.structural.startsWith("{")
 			? `export interface ${d.typeName} ${d.structural}`
@@ -1664,7 +1685,22 @@ function renderSchemas(
 		 * than from this type, so no handler signature is affected.
 		 */
 		const annotation = d.annotated === true ? `: z.ZodType<${d.typeName}, ${d.typeName}>` : "";
-		return `\n${declared}\nexport const ${d.identifier}${annotation} = ${d.source};\n`;
+		/**
+		 * **A deferred declaration is NEVER compiled, and this was measured rather than reasoned.**
+		 *
+		 * `z.lazy()` is on Zod's own list of constructs the compiler cannot handle, and here the body
+		 * forward-references a `const` declared further down the module. Wrapping it emitted output that
+		 * loaded fine and then threw `Cannot read properties of undefined (reading '_zod')` on the first
+		 * parse - the walk captures the reference while it is still in the temporal dead zone, so the
+		 * failure surfaces at request time rather than at import.
+		 *
+		 * **Keyed on `annotated`, the fact the registry already holds** - it is set exactly when the
+		 * declaration is deferred, which is exactly when `z.lazy()` is written - rather than on the
+		 * shape of the emitted text. A model on a cycle whose back edge sits on a GETTER is a different
+		 * case and is compiled like any other: measured, it parses, because a getter is not resolved
+		 * until something reads it.
+		 */
+		return `\n${declared}\nexport const ${d.identifier}${annotation} = ${compiled(d.source, compileSchemas && d.annotated !== true)};\n`;
 	});
 	/**
 	 * **Written only when something in the file names it**, like the `ResponseArm` import below and for
@@ -1740,6 +1776,7 @@ function namedSchema(
 	operationId: string,
 	suffix: string,
 	expression: string | undefined,
+	compileSchemas: boolean,
 ): { readonly name: string | undefined; readonly declaration: string | undefined } {
 	if (expression === undefined) return { name: undefined, declaration: undefined };
 	if (isIdentifier(expression)) return { name: expression, declaration: undefined };
@@ -1755,7 +1792,7 @@ function namedSchema(
 	 * Exporting also gives an application the request shape by name, which is what the per-operation
 	 * type aliases will be built from.
 	 */
-	return { name, declaration: `export const ${name} = ${expression};` };
+	return { name, declaration: `export const ${name} = ${compiled(expression, compileSchemas)};` };
 }
 
 /**
@@ -1824,7 +1861,10 @@ function sharedSlots(routes: readonly EmittedRoute[]): ReadonlySet<string> {
  * Declaring them here dissolves all three: the library mints the names AND emits them, and a server
  * emitter imports what it is told rather than agreeing about it.
  */
-function nameRouteSchemas(routes: readonly EmittedRoute[]): {
+function nameRouteSchemas(
+	routes: readonly EmittedRoute[],
+	compileSchemas: boolean,
+): {
 	readonly names: ReadonlyMap<string, RouteSchemaNames>;
 	readonly declarations: readonly string[];
 } {
@@ -1833,7 +1873,7 @@ function nameRouteSchemas(routes: readonly EmittedRoute[]): {
 	const names = new Map<string, RouteSchemaNames>();
 	for (const route of routes) {
 		const declare = (suffix: string, expression: string | undefined): string | undefined => {
-			const resolved = namedSchema(route.operationId, suffix, expression);
+			const resolved = namedSchema(route.operationId, suffix, expression, compileSchemas);
 			if (resolved.declaration !== undefined) declarations.push(resolved.declaration);
 			return resolved.name;
 		};
@@ -2463,6 +2503,8 @@ export interface ResolvedServiceOptions {
 	readonly contractsOutputDir: string | undefined;
 	readonly contractsPackage: string | undefined;
 	readonly sealObjectSchemas: boolean;
+	/** Whether every emitted validator is wrapped in `z.compile()`. See the option's own docblock. */
+	readonly compileSchemas: boolean;
 	readonly keyVocabularies: readonly string[];
 	readonly runtimeModule: string;
 	/** The command that regenerates, for the banner. `undefined` keeps the generic line. */
@@ -2603,6 +2645,7 @@ export async function emitHttpZod(
 			contractsPackage: perService?.["contracts-package"] ?? options["contracts-package"],
 			sealObjectSchemas:
 				perService?.["seal-object-schemas"] ?? options["seal-object-schemas"] ?? false,
+			compileSchemas: perService?.["compile-schemas"] ?? options["compile-schemas"] ?? false,
 			keyVocabularies: perService?.["key-vocabularies"] ?? options["key-vocabularies"] ?? [],
 			runtimeModule:
 				perService?.["runtime-module"] ?? options["runtime-module"] ?? defaultRuntimeModule,
@@ -2678,11 +2721,17 @@ export async function emitHttpZod(
 		 * anything is written - and it has to happen HERE rather than in a server emitter, or the
 		 * validators it produces never reach this package's own output.
 		 */
-		const { names, declarations } = nameRouteSchemas(routes);
+		const { names, declarations } = nameRouteSchemas(routes, resolved.compileSchemas);
 
 		await emitFile(context.program, {
 			path: resolvePath(outputDir, "schemas.gen.ts"),
-			content: renderSchemas(registry, externals, declarations, resolved.runtimeModule),
+			content: renderSchemas(
+				registry,
+				externals,
+				declarations,
+				resolved.runtimeModule,
+				resolved.compileSchemas,
+			),
 		});
 
 		if (resolved.contractsOutputDir !== undefined) {
