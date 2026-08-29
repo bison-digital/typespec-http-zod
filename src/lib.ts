@@ -54,8 +54,12 @@ export interface EmitterOptions {
 	 * `safeParse` goes from 371 ns to 51 ns.
 	 *
 	 * **Off by default, because it is a trade rather than a free win.** Compilation happens at module
-	 * scope, so it costs startup time in proportion to the number of schemas - roughly 3 ms per 25
-	 * declarations - and buys nothing until enough requests arrive to pay that back. It also needs
+	 * scope, so it costs startup time in proportion to the number of schemas, and buys nothing until
+	 * enough requests arrive to pay that back. Measured on two emitted modules at zod 4.5.2: 25
+	 * declarations in 3.3 ms and 73 in 5.7 ms, so 0.08-0.13 ms each depending on how much the schema
+	 * does. A service with several hundred operations should expect tens of milliseconds, which is a
+	 * real share of a Cloudflare Worker's startup budget - measure it there rather than assuming the
+	 * rate holds. It also needs
 	 * `new Function`, which a CSP or no-eval environment refuses; Zod degrades to the uncompiled
 	 * schema there rather than throwing, so setting this is never unsafe, merely sometimes pointless.
 	 *
