@@ -160,17 +160,67 @@ beforeAll(async () => {
 }, 900_000);
 
 describe("the emitted validator answers as the document does", () => {
+	/**
+	 * **Floors set just under the measured values, not at a round number well below them.**
+	 *
+	 * A floor of 4 against an actual of 8 is not a guard, it is a formality: the generator could stop
+	 * producing half its probes and this file would stay green while comparing less than it reports.
+	 * Measured at the time of writing: 52 scenarios, 211 components probed, 8 length probes per bound.
+	 */
 	it("read enough of the corpus to be a comparison at all", () => {
-		expect(tally.scenariosRead).toBeGreaterThanOrEqual(40);
-		expect(tally.componentsProbed).toBeGreaterThanOrEqual(150);
+		expect(tally.scenariosRead).toBeGreaterThanOrEqual(50);
+		expect(tally.componentsProbed).toBeGreaterThanOrEqual(200);
 	});
 
 	it("exercised the length keywords, which is where the classes differ", () => {
-		// Floored per keyword: a probe generator that silently stops producing these would otherwise
-		// leave this file green and blind, which is the failure it was written to end.
-		expect(tally.comparedByKeyword["maxLength"] ?? 0).toBeGreaterThanOrEqual(4);
-		expect(tally.comparedByKeyword["minLength"] ?? 0).toBeGreaterThanOrEqual(4);
-		expect(tally.comparedByKeyword["required"] ?? 0).toBeGreaterThanOrEqual(100);
+		expect(tally.comparedByKeyword["maxLength"] ?? 0).toBeGreaterThanOrEqual(8);
+		expect(tally.comparedByKeyword["minLength"] ?? 0).toBeGreaterThanOrEqual(8);
+		expect(tally.comparedByKeyword["required"] ?? 0).toBeGreaterThanOrEqual(250);
+		expect(tally.comparedByKeyword["type"] ?? 0).toBeGreaterThanOrEqual(200);
+		expect(tally.comparedByKeyword["additionalProperties"] ?? 0).toBeGreaterThanOrEqual(200);
+	});
+
+	/**
+	 * **Asserted as a SET, because a count cannot notice a whole class going missing.**
+	 *
+	 * The numeric and array bounds are thin - `@typespec/http-specs` declares no constraints at all,
+	 * so every one of them comes from `test/reference/constraints.tsp`. Thin is not the same as
+	 * absent, and the failure worth catching is a keyword class dropping to zero: a change to the
+	 * generator, or to the fixture, that quietly stops exercising a rule the emitter can emit.
+	 */
+	it("exercises every keyword class the emitter can produce", () => {
+		const exercised = Object.keys(tally.comparedByKeyword).toSorted();
+		expect(
+			[
+				"additionalProperties",
+				"exclusiveMaximum",
+				"exclusiveMinimum",
+				"maxItems",
+				"maxLength",
+				"maximum",
+				"minItems",
+				"minLength",
+				"minimum",
+				"required",
+				"type",
+			].filter((keyword) => !exercised.includes(keyword)),
+		).toEqual([]);
+	});
+
+	/**
+	 * **The components this oracle could NOT probe, counted rather than passed over.**
+	 *
+	 * A probe is a mutation of a value the document accepts, so a component whose minimal instance
+	 * cannot be built is simply not graded here - an `allOf` whose members would have to be merged, a
+	 * pattern the sampler cannot draw from. That is a real limit and the honest place for it is a
+	 * number that may only SHRINK: a change making the generator worse raises it and fails, and one
+	 * making it better fails too, which is the prompt to lower the pin and bank the coverage.
+	 *
+	 * Measured at 75 of 286 components. The keywords those 75 carry are still compared structurally by
+	 * `differential.test.ts`; what they lack is a verdict on a value.
+	 */
+	it("leaves no more components unprobed than it did when this was measured", () => {
+		expect(tally.componentsUnbuildable).toBeLessThanOrEqual(75);
 	});
 
 	const named = (d: Disagreement) => `${d.scenario} ${d.component}: ${d.why}`;
