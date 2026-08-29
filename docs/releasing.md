@@ -42,6 +42,11 @@ validators. Emitted output that compiles is a weaker claim than emitted output t
    still work, on a version you were shipping anyway - which is why a `-rc` release usually buys
    nothing here beyond a version number that can never be reused.
 7. Only then bump `typespec-hono` and release it.
+8. **Prove it against the reference consumer**, which installs from npm rather than from a checkout:
+
+   ```bash
+   gh workflow run CI --repo bison-digital/typespec-hono-example
+   ```
 
 ## Zod
 
