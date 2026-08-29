@@ -8,6 +8,38 @@ published types; a patch will not. The **emitted output is part of the API** - a
 validator's shape, to a declared identifier, or to the `EmittedRoute` a wrapping emitter reads is a
 change a consumer feels, and is treated as such here rather than as an implementation detail.
 
+## [0.25.0] - 2026-08-29
+
+A minor: **`EmittedRoute` now publishes `security`, the requirements the document actually states.**
+Additive; nothing emitted changes and no existing field changes meaning.
+
+### What was wrong with publishing only `scopes` and `noAuth`
+
+Both were lossy projections of one fact, each with its own read of
+`getAuthenticationForOperation`. A flat scope union cannot say WHICH scheme demanded what, so
+`@useAuth(BearerAuth)` -- which reaches OpenAPI as `security: [{ "BearerAuth": [] }]` -- arrived as
+an empty scope list, indistinguishable from an operation declaring no authentication at all.
+
+The consequence was not hypothetical. A server emitter that wanted to apply the gate the document
+publishes had to call `getAuthenticationForOperation` a third time and rebuild the requirements
+itself, and **two of them did, in two hand-written copies of one rule** -- neither of which anything
+compared against the other. One of the two had already shipped a defect of exactly this shape: a
+gate emitted only where a scheme carried scopes, so bearer, api-key and basic -- the common case --
+carried no scheme at all.
+
+### What changed
+
+`authenticationFor` reads the program **once** per operation and returns all three facts.
+`EmittedRoute.security` is the complete one; `scopes` and `noAuth` are unchanged in meaning and are
+now derived from that single read rather than from two more.
+
+`scopes` is a published field, so the change to how it is derived is guarded rather than asserted:
+`test/security/security.test.ts` recomputes it **the old way, written out literally rather than
+imported**, and requires the two to agree across every authentication scenario the corpus declares --
+api-key, oauth2, union, noauth/union and http/custom. The arm carries its own non-vacuity floor,
+because a corpus where every operation resolved to no requirements would satisfy any implementation.
+Its control drops OAuth2 scopes from a requirement and names the operations that then disagree.
+
 ## [0.24.0] - 2026-08-29
 
 A minor: **the `zod` peer range is now `^4.5.0`, because inside `^4.0.0` the emitted validator and

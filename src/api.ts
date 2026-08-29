@@ -466,12 +466,61 @@ function bodySchemaOf(
  * - account-scoped, resource-scoped - is not: no OpenAPI keyword expresses it, and a server emitter
  * that guesses is enforcing something no document states.
  */
-function noAuthFor(program: Program, operation: HttpOperation): boolean {
-	return (
-		getAuthenticationForOperation(program, operation.operation)?.options.some((option) =>
-			option.schemes.some((scheme) => scheme.type === "noAuth"),
-		) === true
-	);
+/**
+ * One requirement the document publishes: scheme name to the scopes it demands.
+ *
+ * Satisfying **any one** requirement authorises a caller, and every scheme WITHIN a requirement must
+ * be satisfied together -- which is what an array of OpenAPI `security` objects means, and why this
+ * is published as a list of lists rather than a flat set of scopes.
+ */
+export type SecurityRequirement = Readonly<Record<string, readonly string[]>>;
+
+/**
+ * Everything the document says about authenticating an operation, read ONCE.
+ *
+ * **`scopes` and `noAuth` were two lossy projections of this, each with its own read of the same
+ * fact.** A flat scope union cannot say which scheme demanded what, so an emitter that wanted the
+ * gate the document actually publishes had to call `getAuthenticationForOperation` a third time and
+ * rebuild the requirements itself -- which is what both server emitters were doing, in two
+ * hand-written copies of one rule.
+ *
+ * `scopes` is unchanged in meaning and is now derived from `security` rather than separately read:
+ * the union of every scope any requirement demands, which is what it always was.
+ */
+function authenticationFor(
+	program: Program,
+	operation: HttpOperation,
+): { security: SecurityRequirement[]; scopes: string[]; noAuth: boolean } {
+	const options = getAuthenticationForOperation(program, operation.operation)?.options ?? [];
+	const security: SecurityRequirement[] = [];
+	let noAuth = false;
+
+	for (const option of options) {
+		const requirement: Record<string, readonly string[]> = {};
+		let anonymous = false;
+		for (const scheme of option.schemes) {
+			/**
+			 * **`NoAuth` inside an option means that option needs nothing**, which is how a spec says
+			 * authentication is optional here. It is not a scheme to demand, and publishing it as one
+			 * would make an emitter refuse the anonymous callers the document permits.
+			 */
+			if (scheme.type === "noAuth") {
+				anonymous = true;
+				noAuth = true;
+				continue;
+			}
+			/** Scopes belong to the flows of an OAuth2 scheme; every other kind has none. */
+			requirement[scheme.id] =
+				scheme.type === "oauth2"
+					? [...new Set(scheme.flows.flatMap((flow) => flow.scopes.map((scope) => scope.value)))]
+					: [];
+		}
+		if (anonymous && Object.keys(requirement).length === 0) continue;
+		if (Object.keys(requirement).length > 0) security.push(requirement);
+	}
+
+	const scopes = [...new Set(security.flatMap((requirement) => Object.values(requirement).flat()))];
+	return { security, scopes, noAuth };
 }
 
 /**
@@ -1068,6 +1117,21 @@ export interface EmittedRoute {
 	 * `requireScopes(...)` repeated per route that nothing checks against it.
 	 */
 	readonly scopes: readonly string[];
+	/**
+	 * What the DOCUMENT says a caller must satisfy, in the shape the document says it.
+	 *
+	 * **`scopes` and `noAuth` are lossy projections of this, and publishing only those was a defect
+	 * both server emitters had to work around.** A flat scope union cannot say WHICH scheme demanded
+	 * what, so `@useAuth(BearerAuth)` -- which reaches OpenAPI as `security: [{ "BearerAuth": [] }]`
+	 * -- arrived here as an empty scope list indistinguishable from no authentication at all. An
+	 * emitter wanting the gate the document publishes had to call `getAuthenticationForOperation`
+	 * again and rebuild this itself, and two of them did.
+	 *
+	 * Satisfying **any one** requirement authorises; every scheme within a requirement must be
+	 * satisfied together. Empty where the operation declares `@useAuth(NoAuth)` or nothing, which is
+	 * a fact rather than an absence.
+	 */
+	readonly security: readonly SecurityRequirement[];
 	/** Which of two success statuses to answer, and the literal property that decides it. */
 	readonly statusBy: { property: string; value: boolean | string; status: number } | undefined;
 	/**
@@ -1432,6 +1496,7 @@ export function collectRoutes(
 				requestType?.kind === "Model" && (requestType.indexer !== undefined || optionalBody)
 					? (bodyParameter?.property?.name ?? "body")
 					: undefined;
+			const authentication = authenticationFor(program, operation);
 			routes.push({
 				operationId: operationIdOf(program, operation.operation),
 				verb: operation.verb.toUpperCase(),
@@ -1523,19 +1588,9 @@ export function collectRoutes(
 				),
 				responseHeaders: responseHeadersOf(program, operation),
 				responseMediaTypes: responseMediaTypesOf(operation),
-				scopes: [
-					...new Set(
-						(getAuthenticationForOperation(program, operation.operation)?.options ?? []).flatMap(
-							(option) =>
-								option.schemes.flatMap((scheme) =>
-									scheme.type === "oauth2"
-										? scheme.flows.flatMap((flow) => flow.scopes.map((scope) => scope.value))
-										: [],
-								),
-						),
-					),
-				],
-				noAuth: noAuthFor(program, operation),
+				scopes: authentication.scopes,
+				security: authentication.security,
+				noAuth: authentication.noAuth,
 				statusBy: discriminator,
 				statusSelector,
 				/**
