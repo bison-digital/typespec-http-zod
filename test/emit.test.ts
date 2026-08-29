@@ -1,3 +1,4 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -22,10 +23,63 @@ import { typecheckEmitted } from "./support/typecheck-emitted.js";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const referenceDir = join(here, "reference");
 
+/**
+ * The corpus scenario that exists to carry reserved words, addressed by PATH.
+ *
+ * Deliberately not `discoverScenarios().find((s) => s.name === ...)`: `provenance.test.ts` refuses
+ * behaviour keyed on a name a spec author chose, and that rule is right. A path to a vendored file
+ * is this package saying where it reads from; `.name === "..."` would be it deciding that one word
+ * means something.
+ */
+const CORPUS_WORDS_SPEC = join(
+	here,
+	"..",
+	"node_modules",
+	"@typespec",
+	"http-specs",
+	"specs",
+	"special-words",
+	"main.tsp",
+);
+const CORPUS_WORD_SPEC = "corpus-words";
+
+/**
+ * Every model name the corpus's reserved-word scenario declares, as a spec of our own.
+ *
+ * **The words are read, never listed.** A corpus bump that adds a word adds it here, and the arm
+ * that compiles the result is what says whether the reserved set already knew about it.
+ */
+function generateCorpusWordSpec(): string {
+	const source = readFileSync(CORPUS_WORDS_SPEC, "utf8");
+	const words = [
+		...new Set(
+			[...source.matchAll(/^\s*model\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s/gm)].map((m) => m[1] ?? ""),
+		),
+	].toSorted();
+	// Non-vacuity: a regex that stopped matching would generate an empty spec that compiles happily.
+	if (words.length < 30) {
+		throw new Error(`read only ${words.length} model names from the corpus word scenario`);
+	}
+	const dir = join(referenceDir, ".out-generated");
+	mkdirSync(dir, { recursive: true });
+	const body = words
+		.map(
+			(word) =>
+				`model \`${word}\` {\n  value: string;\n}\n\n@route("/${word}")\n@post\nop takes${word}(@body body: \`${word}\`): Holder;\n`,
+		)
+		.join("\n");
+	writeFileSync(
+		join(dir, `${CORPUS_WORD_SPEC}.tsp`),
+		`import "@typespec/http";\n\nusing Http;\n\n// GENERATED from @typespec/http-specs. Do not edit; edit nothing and re-run.\n@service(#{ title: "corpus words" })\nnamespace CorpusWords;\n\nmodel Holder {\n  ok: boolean;\n}\n\n${body}`,
+	);
+	return dir;
+}
+
 let compiled: CompiledFixture;
 let cyclic: CompiledFixture;
 let dollars: CompiledFixture;
 let specialWords: CompiledFixture;
+let corpusSpecialWords: CompiledFixture;
 
 beforeAll(async () => {
 	// Its own output directory. This and `reference.test.ts` both compiled `service` into
@@ -55,6 +109,16 @@ beforeAll(async () => {
 	 * without compiling it.
 	 */
 	specialWords = await compileFixture(referenceDir, "specialwords", { outName: "special-emit" });
+	/**
+	 * **A model per word, from a word list this package does not own and cannot edit.**
+	 *
+	 * The spec is GENERATED from `@typespec/http-specs`, read off disk, rather than written here:
+	 * a fixture somebody here types out declares the words they thought of, which is how a reserved
+	 * set comes to be graded against itself.
+	 */
+	corpusSpecialWords = await compileFixture(generateCorpusWordSpec(), CORPUS_WORD_SPEC, {
+		outDir: join(referenceDir, ".out", "corpus-special-emit"),
+	});
 });
 
 describe("the emitted output compiles", () => {
@@ -67,6 +131,25 @@ describe("the emitted output compiles", () => {
 
 	it("compiles a reserved-word model name and an envelope union", () => {
 		const { output, failed } = typecheckEmitted(specialWords.outDir);
+		expect(output.trim(), output).toBe("");
+		expect(failed).toBe(false);
+	});
+
+	/**
+	 * **The arm that can catch a word the reserved set has MISSED, which the fixture above cannot.**
+	 *
+	 * `specialwords.tsp` declares `await`, `break` and `for`. All three are in
+	 * `RESERVED_DECLARATION_NAMES`, so it grades the list against itself: a fixture built from the
+	 * same set the code consults passes for every word the set already knows and is silent about
+	 * every word it does not. `as` lived in exactly that gap and reached a published version --
+	 * contextual, so the reasoning that correctly keeps `yield` and `string` out kept `as` out too,
+	 * and `export type as = ...` does not parse.
+	 *
+	 * This compiles a word list this package did not write and cannot edit. Proven red by deleting
+	 * one word from the reserved set: `TS1005`, naming the line.
+	 */
+	it("compiles every special word the CORPUS declares, not the ones this package chose", () => {
+		const { output, failed } = typecheckEmitted(corpusSpecialWords.outDir);
 		expect(output.trim(), output).toBe("");
 		expect(failed).toBe(false);
 	});

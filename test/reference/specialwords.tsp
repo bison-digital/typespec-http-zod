@@ -17,6 +17,26 @@ using Http;
 @service(#{ title: "special words" })
 namespace SpecialWords;
 
+/**
+ * **`as` is legal as an interface name and illegal as a type alias name**, and this emitter writes
+ * both for every model. It is contextual, so the reasoning that kept `yield` and `string` out of the
+ * reserved set kept `as` out too, and a model named `as` emitted `export type as = ...` --
+ * `TS1005`, after which the parser gives up and the whole file is lost. The corpus declares it; this
+ * package compiled nothing that did.
+ */
+model `as` {
+  value: string;
+}
+
+/**
+ * **`yield` was recorded in the reserved set's own docblock as measured-legal, and it is not.**
+ * `TS1214: 'yield' is a reserved word in strict mode`, in both positions. A claim that a word was
+ * measured is not the same as the measurement still holding.
+ */
+model `yield` {
+  value: string;
+}
+
 model `await` {
   value: string;
 }
@@ -47,6 +67,14 @@ union Pet {
 model Holder {
   pet: Pet;
 }
+
+@route("/as")
+@post
+op takesAs(@body body: `as`): Holder;
+
+@route("/yield")
+@post
+op takesYield(@body body: `yield`): Holder;
 
 @route("/await")
 @post

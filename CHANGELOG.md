@@ -10,7 +10,30 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [0.25.0] - 2026-08-29
 
-A minor: **`EmittedRoute` now publishes `security`, the requirements the document actually states.**
+A minor carrying two things: **`EmittedRoute` now publishes `security`**, and **two reserved words
+that made emitted output unparseable are now mangled**.
+
+### `as` and `yield` produced a file that did not parse
+
+A model named `as` emitted `export type as = ...` (`TS1005: '{' expected`) and one named `yield`
+emitted `export type yield = ...` (`TS1214: 'yield' is a reserved word in strict mode`). Both are
+also emitted as `export interface`, and `yield` is refused there too. The parser gives up after the
+first, so a single such model cost the whole file, not one declaration.
+
+Both are contextual keywords, which is why they were outside `RESERVED_DECLARATION_NAMES`: the set's
+own docblock recorded that contextual keywords had been measured as legal and named `yield` among
+them. Re-measured against tsc 7.0.2, one invocation per word over 56 candidates: **39 are refused
+and 39 are now listed**, with none over-broad.
+
+**The guard that was supposed to catch this could not.** `test/reference/specialwords.tsp` declared
+`await`, `break` and `for` -- three words the set already knew -- so it graded the list against
+itself and was silent about every word the list did not contain. It is now joined by a spec
+GENERATED from `@typespec/http-specs`, one model per word the corpus declares, read off disk rather
+than typed here. Proven by deleting `class` from the set: the generated arm goes red and the
+hand-written fixture stays green, which is the difference stated as a test result.
+
+### `EmittedRoute` now publishes `security`, the requirements the document actually states
+
 Additive; nothing emitted changes and no existing field changes meaning.
 
 ### What was wrong with publishing only `scopes` and `noAuth`

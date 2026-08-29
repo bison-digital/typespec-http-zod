@@ -147,11 +147,22 @@ const spreadSourceName = (type: Model): string | undefined => spreadSourceOf(typ
  * so a word missing from the list fails a test rather than reaching a consumer - the list is the
  * implementation and the compiler is the oracle.
  *
- * Contextual keywords are deliberately absent, because they are legal: `interface`, `string`,
- * `number`, `any`, `never`, `public` and `yield` all name a type without complaint. Measured, rather
- * than assumed from a language reference.
+ * Most contextual keywords are absent, because they are legal: `interface`, `string`, `number`,
+ * `any`, `never` and `public` all name a type without complaint.
+ *
+ * **Two contextual words are NOT legal, and both were missing from this set.** `as` and `yield` are
+ * refused in the declaration positions this emitter writes -- `export type as = ...` is
+ * `TS1005: '{' expected`, and `yield` is `TS1214: 'yield' is a reserved word in strict mode` as both
+ * a type alias and an interface. Either one made the whole emitted file unparseable, because the
+ * parser gives up after the first.
+ *
+ * **A word belongs here when `tsc` refuses it in EITHER position**, since both are emitted for the
+ * same model. Measured that way against tsc 7.0.2, one invocation per word: of the 56 candidates,
+ * 39 are refused and 39 are listed. `yield` had been recorded here as measured-legal and is not,
+ * which is why the arm that grades this set now takes its words from somewhere else entirely.
  */
 const RESERVED_DECLARATION_NAMES = new Set([
+	"as",
 	"await",
 	"break",
 	"case",
@@ -189,6 +200,7 @@ const RESERVED_DECLARATION_NAMES = new Set([
 	"void",
 	"while",
 	"with",
+	"yield",
 ]);
 
 /**
