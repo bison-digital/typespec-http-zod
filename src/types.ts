@@ -33,9 +33,12 @@ import {
  *
  * **It must agree with `zod.ts` exactly**, because the emitted assertion compares them. Every rule
  * here has a counterpart there: `utcDateTime` is a string on both sides, `?` becomes
- * `?: T | undefined` because `exactOptionalPropertyTypes` is on, and a defaulted property is
- * **required** here because `z.infer` reports the *output* type and a default has always fired by
- * then.
+ * `?: T | undefined` because `exactOptionalPropertyTypes` is on, and a property the document leaves
+ * out of `required` is optional here whether its absence is spelled `?` or covered by a default.
+ *
+ * **The assertion pairs this walk against `z.input`, the type the validator ACCEPTS**, and not
+ * against `z.infer`, which is what it produces. These types are the floor a producer supplies, and
+ * for a request the producer is a caller who has not run the validator.
  */
 
 /** Scalars we accept, and the TypeScript they become. Mirrors `SCALARS` in `zod.ts`. */
@@ -275,14 +278,30 @@ export function propertyToTs(program: Program, property: ModelProperty, wireName
 	const encoded = getEncode(program, property)?.type;
 	const value = typeToTs(program, encoded ?? property.type);
 	/**
-	 * **A defaulted property is REQUIRED here.**
+	 * **A defaulted property used to be REQUIRED here, and that was the OUTPUT type's answer to a
+	 * question this file does not ask.**
 	 *
-	 * `zod.ts` emits `.default(v)`, which makes the field optional on the way *in* and guaranteed on
-	 * the way *out*. The assertion this type feeds compares against `z.infer`, which is the output
-	 * type - so by the time a value reaches the wire the default has fired and the field is present.
-	 * Marking it optional would make a correct schema fail its own assertion.
+	 * The reasoning was: `zod.ts` emits `.default(v)`, the assertion compares against `z.infer` which
+	 * is the output type, and by then the default has fired. Every step of that is true and the
+	 * conclusion served the wrong reader. **These types are the floor a PRODUCER supplies**, and for
+	 * a request the producer is the CALLER - who has not run the validator, and for whom the document
+	 * is the only contract. The document leaves an optional defaulted property out of `required`, so
+	 * a caller may omit it, and this file said they could not.
+	 *
+	 * Reported by a consumer building requests from a zero-dependency contracts package, carrying a
+	 * named helper to relax six such properties by hand. The helper could only reach the top level; a
+	 * default one level down stayed required and no caller could build the value at all. Emitting the
+	 * optionality per property fixes every depth at once, because there is no depth to reach.
+	 *
+	 * **The two directions of the emitted set differ here on purpose**, exactly as they do on
+	 * openness: `schemas.gen.ts` exports `Exact<z.infer<...>>`, the narrow view of what ARRIVES, in
+	 * which a default has fired and the property is present. `wire-contract.gen.ts` pairs this walk
+	 * against `z.input` for the same reason.
+	 *
+	 * A defaulted property that reaches here is one the document publishes as optional, because
+	 * `propertyToZod` reports `default-on-required-property` for the other spelling and emits no
+	 * `.default(...)` for it - so the two walks agree without either one restating the rule.
 	 */
-	if (property.defaultValue !== undefined) return `${key}: ${value};`;
 	/**
 	 * **`?: T | undefined`, and dropping the `| undefined` was tried in `0.19.0` and reverted.**
 	 *

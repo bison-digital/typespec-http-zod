@@ -194,10 +194,62 @@ describe("a cycle with nowhere to put a getter is SERVED, not refused", () => {
 		 * arm above would still pass while `wire-contract.gen.ts` silently stopped checking anything.
 		 */
 		const source = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
-		expect(source).toMatch(/export const \w+: z\.ZodType<\w+> = z\.lazy\(/);
+		/**
+		 * **BOTH parameters, and naming only the first is a silent hole.** `z.ZodType<T>` means
+		 * `ZodType<Output = T, Input = unknown>`, so the annotated schema reports `z.input` as
+		 * `unknown` and so does every schema that references it. The wire assertion pairs `z.input`,
+		 * because that is what a caller supplies - so one missing parameter took the whole cyclic
+		 * corner out of the only check that catches this emitter disagreeing with itself.
+		 */
+		expect(source).toMatch(/export const \w+: z\.ZodType<(\w+), \1> = z\.lazy\(/);
 		// Every member of the cycle carries a written-out type rather than a `z.infer` alias, or the
 		// annotation closes the loop again - `TS2456`, measured.
 		expect(source).not.toMatch(/export type Branch = z\.infer</);
 		expect(source).not.toMatch(/export type Node = z\.infer</);
+	});
+});
+
+/**
+ * **A default INSIDE a cycle - the one place the two directions cannot both be named.**
+ *
+ * A cyclic declaration cannot take its type from `z.infer<typeof ...>`, because that is the loop, so
+ * it carries a structural type written out and the deferred declaration is annotated with it. That
+ * annotation fixes both of Zod's type parameters at once, and a default is the only construct this
+ * emitter emits where a schema's input and output types differ. So one emitted type has to serve
+ * both positions, and this fixture is what decides which way it leans.
+ *
+ * It leans to the INPUT shape, which is the permissive direction: every value that arrives still
+ * satisfies it. Leaning the other way is the defect this release removes - a caller told to supply
+ * a property the document says they may omit.
+ */
+describe("a default on a cycle", () => {
+	let compiled: CompiledFixture;
+	let schemas: Record<string, ZodType>;
+
+	beforeAll(async () => {
+		compiled = await compileFixture(here, "defaulted", { outName: "defaulted-cycle" });
+		schemas = (await import(join(compiled.outDir, "schemas.gen.ts"))) as Record<string, ZodType>;
+	}, 120_000);
+
+	it("compiles with no error diagnostic", () => {
+		expect(compiled.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+	});
+
+	it("still applies the default, at the top level and through the cycle", () => {
+		const node = schemas["nodeSchema"];
+		expect(node?.parse({ label: "a" })).toEqual({ label: "a", depth: 0 });
+		expect(node?.parse({ label: "a", branch: { label: "b" } })).toEqual({
+			label: "a",
+			depth: 0,
+			branch: { label: "b", depth: 0 },
+		});
+	});
+
+	it("names the defaulted property optional in both artefacts, at every depth", () => {
+		const schemaSource = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
+		const requestSource = readFileSync(join(compiled.outDir, "requests.gen.ts"), "utf8");
+		for (const source of [schemaSource, requestSource]) {
+			expect(source).toMatch(/\n\tdepth\?: number \| undefined;/);
+		}
 	});
 });

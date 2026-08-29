@@ -1636,7 +1636,32 @@ function renderSchemas(
 		const declared = d.structural.startsWith("{")
 			? `export interface ${d.typeName} ${d.structural}`
 			: `export type ${d.typeName} = ${d.structural};`;
-		const annotation = d.annotated === true ? `: z.ZodType<${d.typeName}>` : "";
+		/**
+		 * **BOTH of Zod's type parameters, and naming only the first left the second as `unknown`.**
+		 *
+		 * `z.ZodType<T>` is `ZodType<Output = T, Input = unknown>`, so a schema annotated with one
+		 * parameter reports `z.input<typeof x>` as `unknown` - and every schema that REFERENCES it
+		 * inherits that. Measured: `Identical<Declared<z.input<typeof nodeSchema>>, Contracts.Node>`
+		 * failed on `branch?: unknown | undefined` against `branch?: Branch | undefined`, in a fixture
+		 * whose two artefacts agree about every property. The wire assertion pairs `z.input` because
+		 * that is what a caller supplies, so an unannotated input parameter takes the whole cyclic
+		 * corner of the emitter out of that comparison.
+		 *
+		 * **One structural type serves both positions, and for a defaulted property on a cycle it is
+		 * the INPUT shape that both get.** A default is the only construct where a schema's input and
+		 * output types differ, and a cyclic declaration has exactly one type written out to name - the
+		 * loop is what stops `z.infer` being usable at all. Claiming the input shape in the output
+		 * position is the PERMISSIVE direction: every value that arrives still satisfies it, a reader
+		 * simply learns less than it could about a defaulted property. Claiming the output shape in
+		 * the input position is the restrictive one, and it is the defect this release exists to
+		 * remove - a caller told to supply what the document says they may omit.
+		 *
+		 * So the limitation is confined to this: a model on a cycle carrying a defaulted optional
+		 * property exports a type from `schemas.gen.ts` that is weaker than what arrives, by exactly
+		 * that property. `typespec-hono` derives its handler input from `z.infer` of the schema rather
+		 * than from this type, so no handler signature is affected.
+		 */
+		const annotation = d.annotated === true ? `: z.ZodType<${d.typeName}, ${d.typeName}>` : "";
 		return `\n${declared}\nexport const ${d.identifier}${annotation} = ${d.source};\n`;
 	});
 	/**
@@ -1673,7 +1698,9 @@ function renderSchemas(
 	 * So the two surfaces differ on this axis deliberately, exactly as they differ on openness: this
 	 * one is the narrow view of what ARRIVES, the contract type is the permissive floor for what you
 	 * may SEND. A reader comparing them will find them unequal and should - the emitted assertion
-	 * pairs the contract against raw `z.infer`, not against this.
+	 * pairs the contract against raw `z.input`, not against this. They differ on a second axis for
+	 * the same reason: a defaulted property is present here, because a default has fired by the time
+	 * a value arrives, and optional in the contract type, because a caller may omit it.
 	 *
 	 * Derived from the same schema rather than hand-written beside it, so there is still one source of
 	 * truth: a mapped type cannot drift from the thing it maps.
@@ -2235,8 +2262,26 @@ ${responseLookup}
  * both look right in isolation. That happened during this emitter's first run: a vocabulary in a
  * query-parameter position was inlined by one walk and referenced by the other.
  *
- * `Equals` here, not assignability - `z.infer` is the output type, and the wire type is emitted with
- * defaulted properties required for exactly that reason, so the two really are equal.
+ * **`z.input`, not `z.infer`, and the difference is the whole caller-side question.** `z.infer` is
+ * the OUTPUT type - what a handler receives, after `.default(...)` has fired. These contract types
+ * are the floor a PRODUCER supplies, and for a request the producer is the caller, who has not run
+ * the validator. `z.input` is what the validator ACCEPTS, which is what a request contract states
+ * and what the document's `required` list says. Measured on zod 4.4.3: `.default()` is the only
+ * construct this emitter emits where the two differ - `.optional()`, `.nullable()` and every
+ * constraint infer identically on both sides.
+ *
+ * Once `default-on-required-property` has removed the incoherent spelling, `z.input` and the
+ * document's `required` list agree property for property, so this assertion cross-checks that rule
+ * rather than merely restating one side of it.
+ *
+ * **One measured exception, which does not reach here.** `.refine()` with a type predicate narrows
+ * the OUTPUT only - zod types it `this & ZodType<R, core.input<this>>` - so `z.input` of a
+ * `HttpPart<File>` part is `unknown` where `z.infer` is the narrowed file shape. A multipart body's
+ * contract type is an inline object literal rather than a named declaration, so it is never in the
+ * paired set below; if that ever changes, this is the pairing that breaks first.
+ *
+ * `Equals` here, not assignability: the two describe one shape, and a property present on one side
+ * and absent from the other is exactly the drift this exists to catch.
  */
 function renderWireAssertions(
 	schemas: SchemaRegistry,
@@ -2265,7 +2310,7 @@ function renderWireAssertions(
 
 	const assertions = paired.map(
 		(pair) =>
-			`export type Assert${pair.name} = MustHold<Identical<Declared<z.infer<typeof ${pair.identifier}>>, Contracts.${pair.name}>>;`,
+			`export type Assert${pair.name} = MustHold<Identical<Declared<z.input<typeof ${pair.identifier}>>, Contracts.${pair.name}>>;`,
 	);
 
 	return `${generatedBanner()}

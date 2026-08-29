@@ -108,6 +108,12 @@ export function discoverScenarios(): readonly Scenario[] {
  * it carries - a discriminated base, a recursive model, an overlapping status set, content
  * negotiation - are ones this corpus does not reach either.
  *
+ * `defaults.tsp` was added for the same reason and the gap it covers was the widest of the three:
+ * measured across every compiled document in this repository, **zero** component schemas carried a
+ * property-level `default`, so the keyword had never once been compared between the two artefacts.
+ * That is how a default came to be implemented as an optionality - the one thing it is defined not
+ * to be - without any arm noticing.
+ *
  * These ARE ours, unlike the corpus, and that is a real weakness worth naming: a fixture we wrote
  * tests what we already thought of. They are depth on top of independent breadth, never a substitute
  * for it, which is why the corpus floors are asserted separately.
@@ -116,6 +122,7 @@ export function depthSources(): readonly Scenario[] {
 	const referenceDir = join(packageRoot, "test", "reference");
 	return [
 		{ name: "reference/constraints", mainFile: join(referenceDir, "constraints.tsp") },
+		{ name: "reference/defaults", mainFile: join(referenceDir, "defaults.tsp") },
 		{ name: "reference/service", mainFile: join(referenceDir, "service.tsp") },
 	];
 }

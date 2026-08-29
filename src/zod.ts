@@ -1072,13 +1072,6 @@ export function propertyToZod(program: Program, property: ModelProperty): string
 			? applyConstraints(program, typeToZod(program, declared), property)
 			: `${applyConstraints(program, typeToZod(program, declared), property)}.nullable()`;
 	/**
-	 * A TypeSpec default (`basis: string = "s1159"`) becomes `.default(...)`, which in Zod also makes
-	 * the field optional on the way in. Dropping it turned an optional field with a fallback into a
-	 * required one - callers omitting it would start getting a 400 for a request that used to work.
-	 */
-	const defaulted = defaultOf(program, property);
-	if (defaulted !== undefined) return `${base}.default(${defaulted})`;
-	/**
 	 * **Optionality is a function of the position too, not only of the `?` in the spec.**
 	 *
 	 * TypeSpec's PATCH semantics make a property optional in an update request even where the model
@@ -1087,7 +1080,40 @@ export function propertyToZod(program: Program, property: ModelProperty): string
 	 * would reject every partial update the contract invites. `metadataInfo.isOptional` is the same
 	 * predicate `@typespec/openapi3` uses to decide the `required` list.
 	 */
-	return property.optional || isOptionalAt(program, property) ? `${base}.optional()` : base;
+	const optional = property.optional || isOptionalAt(program, property);
+	/**
+	 * **A default only applies where the document says the property may be absent.**
+	 *
+	 * `.default(v)` makes a Zod field optional on the way IN, so emitting one for a property the
+	 * document publishes as `required` made this validator accept a request the document beside it
+	 * refuses. `default` is an ANNOTATION under JSON Schema 2020-12 and `required` is the assertion;
+	 * `@typespec/openapi3` reads the two exactly that way, building `required` from
+	 * `metadataInfo.isOptional` and never consulting a default. See `default-on-required-property`
+	 * in `lib.ts` for the specification chain and for why this warns rather than refuses.
+	 *
+	 * Reported and then rendered as an ordinary required property - the declared shape is untouched
+	 * and only the dead fallback is dropped, which is the same shape `unsupported-default` already
+	 * takes. `defaultOf` is deliberately NOT called on this path: it would report a second diagnostic
+	 * about a value that cannot be reached either way, naming the less useful of the two problems.
+	 */
+	if (!optional && property.defaultValue !== undefined) {
+		reportDiagnostic(program, {
+			code: "default-on-required-property",
+			target: property,
+			format: { name: property.name },
+		});
+		return base;
+	}
+	/**
+	 * A TypeSpec default (`basis?: string = "s1159"`) becomes `.default(...)`, which in Zod also makes
+	 * the field optional on the way in - matching a document that leaves the property out of
+	 * `required` and annotates it with the value. `.optional()` is not added beside it: `.default()`
+	 * already accepts an absent value, and the two together would make the OUTPUT optional as well,
+	 * so the fallback could be skipped.
+	 */
+	const defaulted = defaultOf(program, property);
+	if (defaulted !== undefined) return `${base}.default(${defaulted})`;
+	return optional ? `${base}.optional()` : base;
 }
 
 /**

@@ -8,9 +8,90 @@ published types; a patch will not. The **emitted output is part of the API** - a
 validator's shape, to a declared identifier, or to the `EmittedRoute` a wrapping emitter reads is a
 change a consumer feels, and is treated as such here rather than as an implementation detail.
 
-## [Unreleased]
+## [0.23.0] - 2026-08-29
 
-Nothing since `0.22.0`.
+A minor: **`default` is an annotation, and this emitter treated it as an optionality.** Both halves of
+that were wrong in opposite directions - the validator accepted a request the document forbids, and
+the contract type refused one the document permits. Reported by a consumer building requests against
+`requests.gen.ts` who had to supply values their own spec says are not needed.
+
+### The rule, and where it comes from
+
+`default` is an ANNOTATION under JSON Schema 2020-12 section 9.2 and `required` is the assertion.
+`@typespec/openapi3` implements exactly that: `#requiredModelProperties` builds the `required` list
+from `metadataInfo.isOptional` alone and never consults a default, then attaches the default beside
+it as a plain `schema.default`. The parameter side is the same rule spelled differently,
+`required: !param.optional`.
+
+OAI/OpenAPI-Specification#1543 is closed COMPLETED on this exact question. The JSON Schema editor:
+_"`default` documents behavior when a field is absent. It does not cause the default value to be
+written in to an instance... it has no impact on validation... Some validators will, for convenience,
+provide the option to write the default in just before validation... But it is **NOT** part of
+validation."_ The OpenAPI maintainer, on the combination itself: _"I am recommending that we remove
+the `default` because it risks making the `required` notion invalid and encourages clients to
+unnecessarily send `default` values over the wire."_
+
+### Fixed
+
+- **A property the document publishes as OPTIONAL is now optional in `requests.gen.ts`.** It was
+  emitted required, because the type was shaped to match `z.infer` - the OUTPUT type, where a default
+  has already fired. That is the right answer for a handler and the wrong one for the file: these
+  types are the floor a PRODUCER supplies, and for a request the producer is a caller who has not run
+  the validator. So a gateway, an MCP worker or a React app had to supply a value the spec says it
+  does not need.
+
+  The consumer who reported it carried a helper relaxing six named properties, and its own docblock
+  named the limit: it reaches the TOP level only. A default one level down stays required through
+  such a helper and no caller can build the value at all. Emitting the optionality on the property
+  itself has no depth to reach.
+
+  This is the permissive direction on the axis that matters - a required property becoming optional
+  makes MORE values assignable - so a handler returning what it was given still compiles. That is the
+  distinction from removing `| undefined`, which looks like the same class and is the opposite.
+
+- **A property the document publishes as REQUIRED is now required by the validator.** `.default(v)`
+  makes a Zod field optional on the way IN, so a request omitting it was accepted by this emitter's
+  validator and refused by the document generated beside it. The default is now emitted only where
+  the document says the property may be absent.
+
+### Added
+
+- **`default-on-required-property`, a warning** - and this package's first. It names a property
+  carrying a default that the document publishes as `required`, where the annotation can never apply
+  because a required property is never absent, and states the one-character fix.
+
+  **A warning rather than a refusal, for a reason this package has already learned once.**
+  `unsupported-default` used to be an error on composite literals and was retired because refusing a
+  construct `@typespec/openapi3` emits makes the same spec representable by one emitter and not the
+  other - the one thing a differential between the two cannot tolerate. This spec IS representable.
+  What is wrong with it is that the author has written something that does not mean what they
+  intended, and silently tightening the validator instead would turn working requests into 400s at
+  deploy time with no signal at all.
+
+### Changed
+
+- **`wire-contract.gen.ts` pairs `z.input`, not `z.infer`.** The assertion compares the emitted
+  validator against the framework-free type, and the type states what a caller may SEND, so the side
+  to compare is what the validator ACCEPTS. Measured on zod 4.4.3, `.default()` is the only construct
+  this emitter emits where the two differ. With the fixes above in place, `z.input` and the document's
+  `required` list agree property for property, so the assertion cross-checks the new rule rather than
+  restating one side of it.
+
+- **A cyclic declaration is annotated `z.ZodType<T, T>` rather than `z.ZodType<T>`.** `z.ZodType<T>`
+  means `ZodType<Output = T, Input = unknown>`, so the annotated schema reported `z.input` as
+  `unknown` - and so did every schema referencing it, which took the whole cyclic corner of the
+  emitter out of the only check that catches it disagreeing with itself. One structural type serves
+  both positions; where a cycle carries a defaulted property that type is the INPUT shape, which is
+  the permissive direction: every value that arrives still satisfies it.
+
+### Tested
+
+- **`test/reference/defaults.tsp`**, a new differential depth source. Measured across every compiled
+  document in this repository, **zero** component schemas carried a property-level `default`, so the
+  arm comparing emitted validators against `@typespec/openapi3`'s output had never once seen the
+  keyword. That is how a default came to be implemented as the one thing it is defined not to be
+  without any arm noticing. `default` is still COMPARED rather than excused as an annotation:
+  measured by control, rendering a wrong default value turns the differential red.
 
 ## [0.22.0] - 2026-08-15
 

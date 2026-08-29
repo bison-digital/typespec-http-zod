@@ -190,6 +190,42 @@ const diagnostics = {
 		},
 	},
 	/**
+	 * **A default on a REQUIRED property, where the default can never apply.**
+	 *
+	 * **`default` is an annotation and `required` is the assertion**, and this emitter used to
+	 * implement the opposite. JSON Schema 2020-12 section 9.2 makes `default` an annotation keyword
+	 * with no effect on validation, and `@typespec/openapi3` implements exactly that:
+	 * `#requiredModelProperties` builds the `required` list from `metadataInfo.isOptional` alone and
+	 * never consults a default, then attaches the default beside it as a plain `schema.default`. The
+	 * parameter side is the same rule spelled differently, `required: !param.optional`.
+	 *
+	 * So `basis: string = "s1159"` publishes as REQUIRED with an annotation nothing can reach. This
+	 * emitter emitted `.default("s1159")`, which makes the field optional on the way IN - a validator
+	 * accepting a request the document generated beside it forbids. OAI/OpenAPI-Specification#1543 is
+	 * closed COMPLETED on this exact question, with the JSON Schema editor's answer that writing a
+	 * default in before validating "is **NOT** part of validation", and the OpenAPI maintainer's that
+	 * a default beside `required` "risks making the `required` notion invalid and encourages clients
+	 * to unnecessarily send `default` values over the wire". Swagger's own documentation lists the
+	 * combination as one of the two common mistakes with the keyword.
+	 *
+	 * **A WARNING, and this package's first, because the spec is representable.** `unsupported-default`
+	 * used to be an error on composite literals and was retired for precisely this reason: refusing a
+	 * construct `@typespec/openapi3` emits makes the same spec representable by one emitter and not the
+	 * other, which is the one thing a differential between the two cannot tolerate. openapi3 emits this
+	 * one, so this emitter serves it - saying what the document says, and saying out loud that the
+	 * annotation is dead. The fix is one character and the message names it.
+	 *
+	 * The predicate is the DOCUMENT's, `metadataInfo.isOptional`, so this fires exactly where openapi3
+	 * writes the name into `required` - including the PATCH position, where an update body's properties
+	 * are optional and a default on one of them is live rather than dead.
+	 */
+	"default-on-required-property": {
+		severity: "warning",
+		messages: {
+			default: paramMessage`'${"name"}' is required, so its default can never apply: a required property is never absent. The OpenAPI document publishes it in 'required' and carries the default only as an annotation, and this validator does the same - a request omitting '${"name"}' is refused. Declare it optional, '${"name"}?: ... = ...', if callers may omit it.`,
+		},
+	},
+	/**
 	 * **A discriminated union whose discriminator the document never publishes.**
 	 *
 	 * `@discriminated(#{envelope: "none"})` puts the discriminator inside the variant on the wire -
