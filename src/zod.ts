@@ -1113,7 +1113,25 @@ export function propertyToZod(program: Program, property: ModelProperty): string
 	 */
 	const defaulted = defaultOf(program, property);
 	if (defaulted !== undefined) return `${base}.default(${defaulted})`;
-	return optional ? `${base}.optional()` : base;
+	/**
+	 * **`.exactOptional()`, because the document says the KEY may be absent and nothing more.**
+	 *
+	 * `.optional()` additionally accepts an explicit `undefined`, and **JSON cannot carry one** - so
+	 * for a body the validator was admitting a value no conformant request can contain, and for a
+	 * parameter one no transport produces. The document says exactly "absent or a value" by leaving
+	 * the property out of `required`, and this is the construct that says the same.
+	 *
+	 * **The emitted TYPE has said this since `0.17.0`; only the validator disagreed.** `Exact<>` was
+	 * written to strip `| undefined` back off `z.infer`, with a docblock arguing precisely this - so
+	 * one program published a type refusing `{ note: undefined }` beside a validator accepting it, and
+	 * nothing compared them. `z.infer` of `.exactOptional()` is `note?: T` natively and at every depth,
+	 * which a shallow mapped type never managed, so `Exact<>` is deleted rather than kept beside it.
+	 *
+	 * Measured on zod 4.5.2 before the change: `z.toJSONSchema` is byte-identical for the two, so the
+	 * differential's serialisation axis is untouched, and `def.type` is still `"optional"`, so the
+	 * shape describers read it unchanged.
+	 */
+	return optional ? `${base}.exactOptional()` : base;
 }
 
 /**

@@ -85,6 +85,33 @@ precision was accepted until 4.5.
 
 ### Changed
 
+- **An optional property is emitted `.exactOptional()`, and the `Exact<>` helper is gone.**
+
+  The document says the KEY may be absent and nothing more. `.optional()` additionally accepts an
+  explicit `undefined`, and **JSON cannot carry one** - so for a body the validator admitted a value
+  no conformant request can contain, and for a parameter one no transport produces.
+
+  **The emitted TYPE has said this since `0.17.0` and only the validator disagreed.** `Exact<>` was a
+  mapped type written to strip `| undefined` back off `z.infer`, with a docblock arguing exactly this
+  point - so one program published a type refusing `{ note: undefined }` beside a validator accepting
+  it, and nothing compared them. It survived three releases because no arm ran a value through the
+  schema. `test/optionals/` now grades both halves, and they fail together.
+
+  `z.infer` of `.exactOptional()` is `p?: T` natively **and at every depth**, which the shallow mapped
+  type never managed, so the helper is deleted rather than kept beside it. Measured on 4.5.2 first:
+  `z.toJSONSchema` is byte-identical for the two spellings and `def.type` is still `"optional"`, so
+  neither the serialisation axis nor the shape describers move.
+
+  Breaking in one direction: code passing an explicit `undefined` to an emitted validator now gets a
+  rejection. Under `exactOptionalPropertyTypes: true` the emitted type already forbade it; under the
+  default `false` it compiled.
+
+  **`requests.gen.ts` still publishes `?: T | undefined`, unchanged and deliberately.** Those types
+  are the floor a PRODUCER supplies, and `{ p: undefined }` serialises identically to omitting `p`, so
+  refusing it there would cost every producer a conditional spread and buy the wire nothing -
+  narrowing that surface was tried in `0.19.0` and reverted. `Declared<>` now widens the inferred side
+  on that one axis before comparing, in the same pass rather than a second deep one.
+
 - **`zod` peer range `^4.0.0` -> `^4.5.0`.** Breaking for a consumer pinned below 4.5.
 
 ## [0.23.0] - 2026-08-29

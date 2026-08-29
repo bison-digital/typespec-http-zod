@@ -766,7 +766,9 @@ function multipartSchemaOf(
 						: registry.expressionFor(type);
 		// `multi` is `HttpPart<T>[]` - the same part repeated, which arrives as an array.
 		const value = part.multi === true ? `z.array(${inner})` : inner;
-		return `\t${objectKey(part.name ?? "")}: ${part.optional === true ? `${value}.optional()` : value},`;
+		// `.exactOptional()` for the same reason as a model property: `parseBody` yields present keys
+		// only, so an absent part is an absent key rather than an explicit `undefined`.
+		return `\t${objectKey(part.name ?? "")}: ${part.optional === true ? `${value}.exactOptional()` : value},`;
 	});
 	const shape = entries.length === 0 ? "z.object({})" : `z.object({\n${entries.join("\n")}\n})`;
 	/**
@@ -1631,7 +1633,7 @@ function renderSchemas(
 		 * with no cycle emits byte-identical output to before.
 		 */
 		if (d.structural === undefined) {
-			return `\nexport const ${d.identifier} = ${d.source};\nexport type ${d.typeName} = Exact<z.infer<typeof ${d.identifier}>>;\n`;
+			return `\nexport const ${d.identifier} = ${d.source};\nexport type ${d.typeName} = z.infer<typeof ${d.identifier}>;\n`;
 		}
 		const declared = d.structural.startsWith("{")
 			? `export interface ${d.typeName} ${d.structural}`
@@ -1681,39 +1683,24 @@ function renderSchemas(
 	 * rendered content for the same reason.
 	 */
 	/**
-	 * **`Exact` narrows an inferred optional to what the wire can carry.**
+	 * **`Exact<>` lived here until `0.24.0`, and `z.exactOptional()` replaced it.**
 	 *
-	 * `z.infer` of `.optional()` gives `p?: T | undefined`, which under `exactOptionalPropertyTypes`
-	 * admits an explicitly-undefined property. **JSON has no `undefined`**, and the document says the
-	 * same thing by leaving the property out of `required`, so the inferred type is wider than the
-	 * wire and a consumer reading a payload had to strip it at the boundary.
+	 * It was a mapped type over `z.infer` that stripped `| undefined` off every optional property,
+	 * because `.optional()` infers `p?: T | undefined` and **JSON has no `undefined`** - the document
+	 * says "absent or a value" by leaving the property out of `required`, so the inferred type was
+	 * wider than both the document and the wire.
 	 *
-	 * **It does NOT match the contract type, and this docblock used to claim it did.** The
-	 * contract types in `requests.gen.ts` keep `?: T | undefined` on purpose: they are the floor a
-	 * PRODUCER supplies, and `{ p: undefined }` serialises identically to omitting `p`, so refusing
-	 * it would cost every producer a conditional spread and buy the wire nothing. Measured when this
-	 * was "fixed" to agree: `(ctx, input) => ok(input)` - return what you were given - stopped
-	 * compiling.
+	 * The reasoning was right and it was applied to only one of the two artefacts. The VALIDATOR went
+	 * on accepting `{ p: undefined }`, so one program published a type refusing a value beside a
+	 * validator admitting it, compared by nothing. Emitting `.exactOptional()` makes `z.infer` produce
+	 * `p?: T` directly - at every depth, which a shallow mapped type never reached - so the narrowing
+	 * happens once, in the schema, and this helper has nothing left to do.
 	 *
-	 * So the two surfaces differ on this axis deliberately, exactly as they differ on openness: this
-	 * one is the narrow view of what ARRIVES, the contract type is the permissive floor for what you
-	 * may SEND. A reader comparing them will find them unequal and should - the emitted assertion
-	 * pairs the contract against raw `z.input`, not against this. They differ on a second axis for
-	 * the same reason: a defaulted property is present here, because a default has fired by the time
-	 * a value arrives, and optional in the contract type, because a caller may omit it.
-	 *
-	 * Derived from the same schema rather than hand-written beside it, so there is still one source of
-	 * truth: a mapped type cannot drift from the thing it maps.
-	 *
-	 * Emitted only where a declaration names it, like the imports beside it.
+	 * The contract types in `requests.gen.ts` still keep `?: T | undefined` on purpose: they are the
+	 * floor a PRODUCER supplies, and `{ p: undefined }` serialises identically to omitting `p`, so
+	 * refusing it there would cost every producer a conditional spread and buy the wire nothing.
+	 * Narrowing THAT surface was tried in `0.19.0` and reverted - it broke `(ctx, input) => ok(input)`.
 	 */
-	const EXACT_HELPER = `
-/** An inferred type narrowed to what JSON can carry: an optional property is absent or a value. */
-type Exact<T> = { [K in keyof T as undefined extends T[K] ? never : K]: T[K] } & {
-	[K in keyof T as undefined extends T[K] ? K : never]?: Exclude<T[K], undefined>;
-};
-`;
-	const usesExact = declarations.some((d) => d.includes("Exact<"));
 	const usesZod = new Set(
 		[...declarations, ...routeDeclarations].join("").match(/[A-Za-z_$][\w$]*/g) ?? [],
 	).has("z");
@@ -1731,7 +1718,6 @@ type Exact<T> = { [K in keyof T as undefined extends T[K] ? never : K]: T[K] } &
 		parts.push(`import type { ResponseArm } from ${JSON.stringify(runtimeModule)};\n`);
 	}
 	parts.push(renderExternalImports(externals, [...declarations, ...routeDeclarations].join("")));
-	if (usesExact) parts.push(EXACT_HELPER);
 	parts.push(declarations.join(""));
 	if (routeDeclarations.length > 0) parts.push(`\n${routeDeclarations.join("\n")}\n`);
 	return parts.join("");
@@ -2362,6 +2348,26 @@ type Identical<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends
  * dropped from a shape that has other keys, and kept - with its value type still mapped - from one
  * that does not.
  */
+/**
+ * \u26a0\ufe0f **An optional property is \`?: T\` here and \`?: T | undefined\` in the contract type, and that is
+ * deliberate on both sides.**
+ *
+ * The validator emits \`.exactOptional()\`, so what ARRIVES is absent or a value - JSON cannot carry an
+ * \`undefined\` and the document says exactly that by leaving the property out of \`required\`. The
+ * contract type is the floor a PRODUCER supplies, and \`{ p: undefined }\` serialises identically to
+ * omitting \`p\`, so refusing it would cost every producer a conditional spread and buy the wire
+ * nothing. Narrowing THAT surface was tried in \`0.19.0\` and reverted: it broke
+ * \`(ctx, input) => ok(input)\`.
+ *
+ * So the two disagree on exactly one axis, on purpose, and this widens the inferred side to the
+ * producer floor before comparing - the same job \`Declared\` does for openness, in the same pass
+ * rather than a second deep one. Every other kind of drift still fails: a property that changes type,
+ * appears, disappears or changes optionality is untouched by this.
+ */
+type Supplied<T, K extends keyof T> = {} extends Pick<T, K>
+	? Declared<T[K]> | undefined
+	: Declared<T[K]>;
+
 type DeclaredKeyOf<T> = keyof {
 	[K in keyof T as string extends K
 		? never
@@ -2380,7 +2386,9 @@ type Declared<T> = T extends (...args: never[]) => unknown
 			: readonly Declared<Element>[]
 		: T extends object
 			? [DeclaredKeyOf<T>] extends [never]
-				? { [K in keyof T]: Declared<T[K]> }
+				? // A shape with no declared keys is a dictionary: it has no optional property to widen,
+					// and an index signature satisfies \`{} extends Pick<T, K>\` for every value type.
+					{ [K in keyof T]: Declared<T[K]> }
 				: {
 						[K in keyof T as string extends K
 							? never
@@ -2388,7 +2396,7 @@ type Declared<T> = T extends (...args: never[]) => unknown
 								? never
 								: symbol extends K
 									? never
-									: K]: Declared<T[K]>;
+									: K]: Supplied<T, K>;
 					}
 			: T;
 

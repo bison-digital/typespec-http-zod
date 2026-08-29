@@ -65,7 +65,7 @@ does not mean what its author almost certainly intended.
 - **A `@head` operation gets validators here and cannot be served by every router.** That is a
   property of the server rather than of this package.
 - **The emitted output requires `zod`, not `zod/mini`.** The tree-shakeable variant has no chained
-  methods, and the emitted validators use `.optional()`, `.nullable()`, `.default()`, `.min()`,
+  methods, and the emitted validators use `.exactOptional()`, `.nullable()`, `.default()`, `.min()`,
   `.max()`, `.regex()` and `.catchall()`. (This list named `.strict()` and `.loose()` until `0.24.0`
   and had been wrong since `0.17.0`: openness is emitted as `z.strictObject` and `z.looseObject`,
   which is what Zod 4 asks for, and neither suffix appears in any emitted file.)
@@ -100,6 +100,16 @@ Every construct the emitter writes is verified at the floor by `test/conformance
 which runs values through the emitted validator and through the document itself and requires the same
 verdict - including `z.strictObject`, `z.looseObject`, `z.discriminatedUnion`, `z.preprocess`,
 two-argument `z.record`, `.catchall()` and `z.lazy()`.
+
+**An optional property is emitted `.exactOptional()`, not `.optional()`.** The document says the KEY
+may be absent by leaving the property out of `required`, and nothing more; `.optional()` additionally
+accepts an explicit `undefined`, which **JSON cannot carry**. So the validator was admitting a value
+no conformant request can contain. `z.infer` of `.exactOptional()` is `p?: T` natively and at every
+depth, which is why the `Exact<>` helper that used to strip `| undefined` back off the inferred type
+is no longer emitted. `.exactOptional()` requires zod 4.3.0, which the `^4.5.0` floor covers.
+
+The contract types in `requests.gen.ts` still publish `?: T | undefined`, deliberately: they are the
+floor a PRODUCER supplies, and `{ p: undefined }` serialises identically to omitting `p`.
 
 Nothing in the emitted output opts into 4.5's `z.compile()`, and none of its new constructs
 (`z.creditCard()`, `z.properties()`, `z.deepPartial()`, `z.validate()`) is emitted: a validator says
