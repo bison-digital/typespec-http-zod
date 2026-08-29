@@ -57,9 +57,12 @@ export interface EmitterOptions {
 	 * scope, so it costs startup time in proportion to the number of schemas, and buys nothing until
 	 * enough requests arrive to pay that back. Measured on two emitted modules at zod 4.5.2: 25
 	 * declarations in 3.3 ms and 73 in 5.7 ms, so 0.08-0.13 ms each depending on how much the schema
-	 * does. A service with several hundred operations should expect tens of milliseconds, which is a
-	 * real share of a Cloudflare Worker's startup budget - measure it there rather than assuming the
-	 * rate holds. It also needs
+	 * does.
+	 *
+	 * **Measured at scale rather than extrapolated:** a generated 580-operation service (58 models,
+	 * 1218 declarations, 638 of them compiled) evaluates its schema module in ~93 ms uncompiled and
+	 * ~132 ms compiled - so about **40 ms of extra startup**, roughly a tenth of a Cloudflare Worker's
+	 * 400 ms startup budget. It boots and serves on `workerd` at that size with the fast path live. It also needs
 	 * `new Function`, which a CSP or no-eval environment refuses; Zod degrades to the uncompiled
 	 * schema there rather than throwing, so setting this is never unsafe, merely sometimes pointless.
 	 *
