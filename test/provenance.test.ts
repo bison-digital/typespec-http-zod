@@ -67,7 +67,11 @@ function handWrittenFiles(): string[] {
 	const found: string[] = [];
 	const walk = (dir: string): void => {
 		for (const entry of readdirSync(dir)) {
-			if (entry === ".out" || entry === "node_modules" || entry === "dist") continue;
+			// `.out` AND `.out-<suite>`: every corpus and sweep directory, not just the one spelled
+			// bare. Matching the bare name alone read generated output while the suite that owns it was
+			// still rebuilding it, which is a race rather than a finding - `compileScenario` empties a
+			// directory before recompiling, so a walker crossing it mid-run sees a file that is gone.
+			if (entry.startsWith(".out") || entry === "node_modules" || entry === "dist") continue;
 			const full = join(dir, entry);
 			if (statSync(full).isDirectory()) walk(full);
 			else if (entry.endsWith(".ts") || entry.endsWith(".tsp")) found.push(full);

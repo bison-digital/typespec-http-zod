@@ -50,6 +50,19 @@ model StringBounds {
   @pattern("^[a-z0-9-]+$")
   slug: string;
 
+  /**
+   * **A lower bound above 1, which is the only shape that exposes the LOOSER direction.**
+   *
+   * A length bound is checked in code points by JSON Schema and was checked in UTF-16 units by Zod
+   * before 4.5, so one astral character counted as two. With `@minLength(1)` the two answers coincide
+   * for every input and the disagreement is invisible; at 3, two emoji are 2 code points and 4 units,
+   * so the document REFUSES what the validator accepted - a payload the contract forbids reaching a
+   * handler, which is the direction a server cannot afford. `behaviour.test.ts` grades it.
+   */
+  @minLength(3)
+  @maxLength(8)
+  handle: string;
+
   /** Deliberately unconstrained - an arm that only ever sees constrained values is half-blind. */
   note?: string;
 }

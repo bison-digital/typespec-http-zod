@@ -153,6 +153,7 @@ describe("constraints", () => {
 		name: "n",
 		reference: "AB-1234",
 		slug: "a-slug",
+		handle: "abcd",
 		...over,
 	});
 	const numbers = (over: Record<string, unknown>): Record<string, unknown> => ({
@@ -177,6 +178,25 @@ describe("constraints", () => {
 		expect(accepts(constraints["stringBoundsSchema"], strings({ name: "x".repeat(65) }))).toBe(
 			false,
 		);
+	});
+
+	/**
+	 * **A length bound is counted in CODE POINTS, which is what the document means and what
+	 * `String.prototype.length` does not report.**
+	 *
+	 * `handle` is bounded `[3, 8]`. Two emoji are 2 code points and 4 UTF-16 units, so a validator
+	 * counting units accepts them against `minLength: 3` - a payload the document forbids reaching a
+	 * handler. Eight are 8 code points and 16 units, so the same validator refuses a payload the
+	 * document permits. Both were live on zod 4.4.3 and neither was visible to any arm here, because
+	 * `portability.test.ts` requires ASCII source and no fixture had ever carried an astral character.
+	 * The escape is ASCII; the value is not.
+	 */
+	it("counts a length bound in code points, not UTF-16 units", () => {
+		const emoji = (count: number): string => "\u{1F600}".repeat(count);
+		expect(accepts(constraints["stringBoundsSchema"], strings({ handle: emoji(2) }))).toBe(false);
+		expect(accepts(constraints["stringBoundsSchema"], strings({ handle: emoji(3) }))).toBe(true);
+		expect(accepts(constraints["stringBoundsSchema"], strings({ handle: emoji(8) }))).toBe(true);
+		expect(accepts(constraints["stringBoundsSchema"], strings({ handle: emoji(9) }))).toBe(false);
 	});
 
 	it("enforces a pattern from the scalar a property names, and one applied directly", () => {

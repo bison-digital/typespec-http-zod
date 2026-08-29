@@ -65,8 +65,10 @@ does not mean what its author almost certainly intended.
 - **A `@head` operation gets validators here and cannot be served by every router.** That is a
   property of the server rather than of this package.
 - **The emitted output requires `zod`, not `zod/mini`.** The tree-shakeable variant has no chained
-  methods, and the emitted validators use `.optional()`, `.nullable()`, `.default()`, `.strict()`,
-  `.loose()` and `.catchall()`.
+  methods, and the emitted validators use `.optional()`, `.nullable()`, `.default()`, `.min()`,
+  `.max()`, `.regex()` and `.catchall()`. (This list named `.strict()` and `.loose()` until `0.24.0`
+  and had been wrong since `0.17.0`: openness is emitted as `z.strictObject` and `z.looseObject`,
+  which is what Zod 4 asks for, and neither suffix appears in any emitted file.)
 - **`int64` and `uint64` above `2^53-1` are refused.** Above that bound an integer is no longer
   uniquely representable as a JavaScript number, so a validator cannot certify that the value it
   holds is the value that was sent. `9007199254740993` reaches a handler as `9007199254740992`
@@ -75,9 +77,33 @@ does not mean what its author almost certainly intended.
 
 ## Zod version support
 
-The `zod` peer range is `^4.0.0`. Every construct the emitter writes was verified at 4.0.0 and at
-4.4.3, including `z.strictObject`, `z.looseObject`, `z.discriminatedUnion`, `z.preprocess`,
+**The `zod` peer range is `^4.5.0`, and the floor is a correctness bound rather than a preference.**
+
+A length bound is counted in **code points** by JSON Schema, and Zod counted UTF-16 units until 4.5.
+So `@maxLength(8) handle: string` published `maxLength: 8` and emitted `.max(8)` - the same keyword
+and the same number, agreeing on every structural axis - and the two answered differently for any
+input outside the BMP, in **both** directions:
+
+| input                          | the document            | the validator, before 4.5 |
+| ------------------------------ | ----------------------- | ------------------------- |
+| 8 emoji against `maxLength: 8` | accepts (8 code points) | refuses (16 units)        |
+| 2 emoji against `minLength: 3` | refuses (2 code points) | **accepts** (4 units)     |
+
+The second row is a payload the contract forbids reaching a handler, which is the failure this
+package exists to prevent. Inside `^4.0.0` there are resolvable versions where that is true, so the
+range was advertising a claim that is false within it.
+
+`z.iso.datetime({ offset: true })` is the same story on a smaller scale: RFC 3339 mandates seconds,
+and minute precision was accepted until 4.5.
+
+Every construct the emitter writes is verified at the floor by `test/conformance/behaviour.test.ts`,
+which runs values through the emitted validator and through the document itself and requires the same
+verdict - including `z.strictObject`, `z.looseObject`, `z.discriminatedUnion`, `z.preprocess`,
 two-argument `z.record`, `.catchall()` and `z.lazy()`.
+
+Nothing in the emitted output opts into 4.5's `z.compile()`, and none of its new constructs
+(`z.creditCard()`, `z.properties()`, `z.deepPartial()`, `z.validate()`) is emitted: a validator says
+only what the document says, and the document derives none of them.
 
 ## Compatibility
 

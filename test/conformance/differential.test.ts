@@ -50,6 +50,43 @@ import {
 const here = fileURLToPath(new URL(".", import.meta.url));
 const baselinePath = join(here, "baseline.json");
 
+/**
+ * **The body of a serialised schema, which zod 4.5 moved.**
+ *
+ * `z.toJSONSchema(schema, { metadata: registry })` used to emit the ROOT inline and extract only the
+ * schemas it referenced, so the result was the component's own shape with `$ref`s hanging off it.
+ * Zod 4.5 treats a registered root like any other registered schema: it is extracted into `$defs`
+ * too, and the top level becomes a bare `{ $ref: "#/$defs/<id>" }` pointing at it.
+ *
+ * Measured, not inferred - the same two-schema fixture on both versions:
+ *
+ * ```
+ * 4.4.3  {"type":"object","properties":{...},"$defs":{"Inner":{...}}}
+ * 4.5.2  {"$ref":"#/$defs/Outer","$defs":{"Outer":{...},"Inner":{...}}}
+ * ```
+ *
+ * `normaliseJsonSchema` drops `$defs`, so under 4.5 the root's whole body went with it and every
+ * component compared as an empty self-reference: 249 divergences of one shape, none of them a
+ * disagreement about anything. **The emitter was right and the reader was reading the wrong node**,
+ * which is the same direction as the `pipe` finding in `shape.ts` - measure a divergence against the
+ * runtime before editing `src/`.
+ *
+ * Unwrapping only a self-pointing root, and only where the target exists, so a genuine top-level
+ * `$ref` to another component is still compared as one.
+ */
+function rootOf(serialised: unknown): unknown {
+	if (typeof serialised !== "object" || serialised === null) return serialised;
+	const node = serialised as Record<string, unknown>;
+	const ref = node["$ref"];
+	const defs = node["$defs"];
+	if (typeof ref !== "string" || !ref.startsWith("#/$defs/")) return serialised;
+	if (typeof defs !== "object" || defs === null) return serialised;
+	const target = (defs as Record<string, unknown>)[ref.slice("#/$defs/".length)];
+	if (typeof target !== "object" || target === null) return serialised;
+	// `$defs` is carried through so a nested `$ref` still resolves the way it did before.
+	return { ...(target as Record<string, unknown>), $defs: defs };
+}
+
 /** `Property.JsonEncodedNameModel` -> `jsonEncodedNameModelSchema`. */
 function identifierFor(component: string): string {
 	// openapi3 qualifies a component with its namespace when the bare name is ambiguous; the emitter
@@ -695,6 +732,41 @@ function collapseLiteralUnion(node: Record<string, unknown>): Record<string, unk
  * which it does for XML-annotated properties among others. Zod writes the bare reference. With one
  * member and no other assertion beside it the two are the same schema.
  */
+/**
+ * **A union of bare types, written the one way both sides can be read in.**
+ *
+ * JSON Schema 2020-12 lets `type` take an array, and `{ "type": ["string", "null"] }` accepts exactly
+ * the instances `{ "anyOf": [{ "type": "string" }, { "type": "null" }] }` accepts. openapi3 publishes
+ * the `anyOf` spelling; zod 4.5 emits the array one where 4.4.3 emitted `anyOf`, so a nullable or
+ * primitive-union property compared as a disagreement about nothing - 4 of them, once the root-ref
+ * change above was accounted for.
+ *
+ * Collapsed toward the array, and only where every member is EXACTLY `{ type: <string> }` with no
+ * siblings, so there is nothing to distribute and nothing can be lost. Sorted, because the two sides
+ * have no reason to agree on order.
+ *
+ * **Canonicalising a spelling is only safe because a second oracle grades the semantics.**
+ * `behaviour.test.ts` runs values through both the document and the validator, so were these two
+ * forms ever to mean different things, the difference would surface as a verdict rather than
+ * disappear here. This is the same reasoning `collapseLiteralUnion` above already relies on.
+ */
+function collapseTypeUnion(node: Record<string, unknown>): Record<string, unknown> {
+	// Only one side ever arrives as `anyOf`; the other is already an array and still needs an order.
+	if (Array.isArray(node["type"])) return { ...node, type: [...(node["type"] as string[])].sort() };
+	const members = node["anyOf"];
+	if (!Array.isArray(members) || members.length < 2) return node;
+	const types: string[] = [];
+	for (const member of members) {
+		if (typeof member !== "object" || member === null) return node;
+		const keys = Object.keys(member as Record<string, unknown>);
+		const type = (member as Record<string, unknown>)["type"];
+		if (keys.length !== 1 || keys[0] !== "type" || typeof type !== "string") return node;
+		types.push(type);
+	}
+	const { anyOf: _dropped, ...rest } = node;
+	return { ...rest, type: types.toSorted() };
+}
+
 function collapseSingletonAllOf(node: Record<string, unknown>): Record<string, unknown> {
 	const composed = node["allOf"];
 	if (!Array.isArray(composed) || composed.length !== 1) return node;
@@ -798,7 +870,9 @@ function normaliseJsonSchema(value: unknown, ctx: NormaliseContext): unknown {
 		if (key === "propertyNames" && JSON.stringify(entry) === '{"type":"string"}') continue;
 		out[key] = normaliseJsonSchema(entry, ctx);
 	}
-	return out;
+	// AFTER the recursion and the annotation strip: `{type: "string", contentEncoding: "base64"}` is
+	// not a bare type until the strip has run, so collapsing earlier reached only some of the unions.
+	return collapseTypeUnion(out);
 }
 
 interface Comparison {
@@ -1494,6 +1568,7 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 					jsonSchemaUnserialisable++;
 					serialised = undefined;
 				}
+				serialised = rootOf(serialised);
 				if (serialised !== undefined) {
 					jsonSchemaCompared++;
 					const normaliseContext = {

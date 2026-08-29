@@ -17,6 +17,7 @@ Each row was checked by planting a defect and confirming the named arm goes red.
 | `schemas.gen.ts`                     | the document at **every graded OpenAPI version** | `conformance/differential.test.ts` runs the whole comparison again at 3.2.0 and asserts the divergence set is IDENTICAL to 3.1.0's, so a newer document finding a new disagreement fails. One compile emits both; `GRADED_OPENAPI_VERSIONS` states the list once                                                     |
 | documents being read at all          | the layout openapi3 actually writes              | `documentsRead`, floored. openapi3 relocates output into per-version subdirectories once more than one version is requested, and a reader left on the flat layout finds nothing - which is not an error. `compileScenario` also empties its directory, after a control passed green against the previous run's files |
 | `schemas.gen.ts`                     | values on the wire                               | `acceptance.test.ts` parses conformant and non-conformant payloads; `reference/roundtrip.test.ts` serves two APIs nobody here designed                                                                                                                                                                               |
+| `schemas.gen.ts`                     | **the document's VERDICT on a value**            | `conformance/behaviour.test.ts` puts one value through Ajv 2020-12 on the document and through the emitted validator, over the whole corpus, and requires the same answer. The two axes above compare DESCRIPTIONS and can report perfect agreement about a pair that answers differently the moment a value arrives |
 | `schemas.gen.ts`                     | the TypeScript compiler                          | `emit.test.ts` runs `tsc` over the emitted directory under `strict`, for an ordinary service and for a cyclic one                                                                                                                                                                                                    |
 | `requests.gen.ts`                    | `schemas.gen.ts`                                 | `contracts/agreement.test.ts` compares how both name every parameter of every operation                                                                                                                                                                                                                              |
 | `requests.gen.ts`                    | `schemas.gen.ts`, for models                     | `wire-contract.gen.ts`, compiled by `emit.test.ts`: it asserts `z.infer` of each validator is identical to the contract type                                                                                                                                                                                         |
@@ -64,6 +65,11 @@ Each row was checked by planting a defect and confirming the named arm goes red.
   fires when two of them claim one identifier, whereas this is two emitter declarations from types
   the document names apart. Reproduced, not yet fixed. `parameters/body-optionality` and
   `parameters/spread` carry the same shape through spread-source naming.
+- **A probe is only as good as the instance it mutates.** `behaviour.test.ts` builds the smallest
+  value the document accepts and mutates one fact at a time; where it cannot build one - an `allOf`
+  whose members would have to be merged, a pattern its sampler cannot draw from - the component is
+  counted as unbuildable rather than probed with a value that means nothing. The count is floored
+  from the other side, so a change that quietly stops producing instances fails.
 - **`emit.test.ts` compiles four fixtures rather than the whole corpus.** Every shape that reached a
   published version uncompiled was found by adding one; the general form is a corpus-wide `tsc` pass.
 

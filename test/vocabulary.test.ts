@@ -241,7 +241,7 @@ describe("the generated validator says only what the document can say", () => {
 		 */
 		const TYPE_DERIVED = /z\.iso\.(datetime|date|time|duration)\(|z\.url\(\)/g;
 		const ANNOTATION_DERIVED =
-			/\.(email|uuid|uuidv4|uuidv7|cuid|cuid2|ulid|emoji|base64|base64url|nanoid|jwt|ipv4|ipv6|cidrv4|cidrv6|e164)\(/g;
+			/\.(email|uuid|uuidv4|uuidv7|cuid|cuid2|ulid|emoji|base64|base64url|nanoid|jwt|ipv4|ipv6|cidrv4|cidrv6|e164|httpUrl|creditCard)\(/g;
 
 		let typeDerived = 0;
 		const offenders: string[] = [];

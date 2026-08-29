@@ -8,6 +8,85 @@ published types; a patch will not. The **emitted output is part of the API** - a
 validator's shape, to a declared identifier, or to the `EmittedRoute` a wrapping emitter reads is a
 change a consumer feels, and is treated as such here rather than as an implementation detail.
 
+## [0.24.0] - 2026-08-29
+
+A minor: **the `zod` peer range is now `^4.5.0`, because inside `^4.0.0` the emitted validator and
+the document emitted beside it disagree about what a length bound means.**
+
+### The defect, and why nothing here could see it
+
+A length bound is counted in **code points** by JSON Schema, and Zod counted UTF-16 units until 4.5.
+So `@maxLength(8) handle: string` published `maxLength: 8` and emitted `.max(8)` - the same keyword,
+the same number, agreeing on every axis this repository had - and the two answered differently for
+any input outside the BMP, in both directions:
+
+| input                          | the document | the validator, before 4.5 |
+| ------------------------------ | ------------ | ------------------------- |
+| 8 emoji against `maxLength: 8` | accepts      | refuses                   |
+| 2 emoji against `minLength: 3` | refuses      | **accepts**               |
+
+The second row is a payload the contract forbids reaching a handler. Both were live in `0.23.0`.
+
+**Every oracle here compared the two as DESCRIPTIONS** - the shape describers over `._zod.def`, and
+`z.toJSONSchema()` beside the document with nothing of ours in between. Both report perfect agreement
+about a pair that answers differently the moment a value arrives, because a keyword and its
+SEMANTICS are two facts and only the first is written down. `portability.test.ts` requires ASCII
+source, so no fixture had ever carried an astral character either.
+
+`z.iso.datetime({ offset: true })` is the same story smaller: RFC 3339 mandates seconds, and minute
+precision was accepted until 4.5.
+
+### Added
+
+- **`test/conformance/behaviour.test.ts`**, which puts one value through Ajv 2020-12 on the document
+  and through the emitted validator, over the whole corpus, and requires the same verdict. Ajv runs
+  **without** `ajv-formats`, because `format` is an annotation under 2020-12 - which is this
+  emitter's own stated position - and `probes.ts` generates values satisfying the document's `format`
+  so the declared-scalar checks never produce a false divergence. There is no exception set.
+
+  Both directions are graded and they are not the same failure: a validator stricter than the
+  document refuses conformant callers, and one looser than it lets a forbidden payload through. The
+  single remaining asymmetry is asserted as a CLASS - a `@discriminator` base publishes as an ordinary
+  object, `discriminator` is not a JSON Schema validation keyword, and the emitted
+  `z.discriminatedUnion` enforces what OpenAPI's prose says the document means. It is required to be
+  the STRICTER direction, never the looser one.
+
+- **`test/reference/constraints.tsp` declares a bound above 1.** With `@minLength(1)` a code-point
+  count and a UTF-16 count coincide for every input, so the looser direction was unreachable by any
+  fixture in the corpus.
+
+### Fixed
+
+- **`provenance.test.ts` walked corpus output while the suite that owns it was rebuilding it.** Its
+  docblock said generated output is excluded and its code excluded only the directory spelled `.out`,
+  not `.out-<suite>`. A race rather than a finding, and the code now matches the rule it states.
+
+- **The `z.toJSONSchema` axis was reading the wrong node under 4.5, and the emitter was right.**
+  A registered ROOT is now extracted into `$defs` like any other registered schema, so the top level
+  is a bare `{ $ref: "#/$defs/<id>" }` - and the normaliser drops `$defs`, taking the whole body with
+  it. 249 components compared as an empty self-reference. Measured on both versions rather than
+  inferred. Same direction as the `pipe` finding in `shape.ts`: measure a divergence against the
+  runtime before editing `src/`.
+
+- **A primitive union is spelled two ways and they mean the same thing.** 2020-12 lets `type` take an
+  array, openapi3 publishes `anyOf`, and zod 4.5 emits the array where 4.4.3 emitted `anyOf`. Both are
+  canonicalised, and only where every member is exactly `{ type: <string> }` so there is nothing to
+  distribute. Safe to canonicalise a spelling **because** `behaviour.test.ts` now grades the
+  semantics: were the two forms ever to differ, it would surface as a verdict rather than vanish here.
+
+- **`z.httpUrl` and `z.creditCard` are refused by `vocabulary.test.ts`** like every sibling format
+  check. `httpUrl` had been missing from the class since it was written, so switching `url` to it
+  would have passed; `creditCard` is new in Zod 4.5 and no document derives one.
+
+- **Two stale claims.** `docs/reference.md` said the emitted validators use `.strict()` and
+  `.loose()`; openness has been `z.strictObject`/`z.looseObject` since `0.17.0` and neither suffix
+  appears in any emitted file. `src/constraints.ts` still described `@refine` as "still ours and on
+  its way out"; it is gone, and this package exports no decorators.
+
+### Changed
+
+- **`zod` peer range `^4.0.0` -> `^4.5.0`.** Breaking for a consumer pinned below 4.5.
+
 ## [0.23.0] - 2026-08-29
 
 A minor: **`default` is an annotation, and this emitter treated it as an optionality.** Both halves of

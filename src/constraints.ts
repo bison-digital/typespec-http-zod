@@ -19,12 +19,13 @@ import {
  * over: the spec author writes standard TypeSpec rather than a dialect, and `@typespec/openapi3`
  * documents them without any help from us.
  *
- * **`@refine` is the ONE that is still ours, and it is on its way out.** It is not a constraint -
- * it is an arbitrary predicate, which a type language has no way to say and therefore no document
- * can publish, so a validator enforcing it enforces something no caller can read. `@trimmed` was the
- * other one and is gone: `.trim()` is a transform, and transforming a value before validating it
- * makes the runtime accept inputs the published contract rejects. The spec states `@pattern`
- * instead, which openapi3 publishes.
+ * **This package ships no decorators of its own, and the two it used to have are gone.** `@refine`
+ * was an arbitrary predicate, which a type language has no way to say and therefore no document can
+ * publish, so a validator enforcing it enforced something no caller could read. `@trimmed` was the
+ * other: `.trim()` is a transform, and transforming a value before validating it makes the runtime
+ * accept inputs the published contract rejects. The spec states `@pattern` instead, which openapi3
+ * publishes. `src/tsp-index.ts` exports `$lib` and no `$decorators`, and `vocabulary.test.ts`
+ * asserts that no emitted file carries a `.refine(` outside the one multipart-file carve-out.
  */
 export function applyConstraints(program: Program, expression: string, target: Type): string {
 	let result = expression;
