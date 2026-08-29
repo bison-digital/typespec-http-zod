@@ -51,6 +51,7 @@ describe("the README documents everything this package can do to you", () => {
 			"docs/guides.md",
 			"docs/oracles.md",
 			"docs/reference.md",
+			"docs/releasing.md",
 		]);
 	});
 

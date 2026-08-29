@@ -148,6 +148,8 @@ carries the whole id, so `op readWidget` in `namespace Widgets` becomes `Widgets
 - [Reference](docs/reference.md): every option, every diagnostic, and the known limits.
 - [Oracles](docs/oracles.md): every artefact this emitter produces, and what compares it to the
   thing it has to agree with.
+- [Releasing](docs/releasing.md): why this package publishes first, and how to rehearse a
+  two-package release against a local registry.
 
 ## Licence
 
