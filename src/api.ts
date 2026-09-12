@@ -86,7 +86,7 @@ export { EmitterOptionsSchema, type EmitterOptions } from "./lib.js";
  * emitted module stopped being loadable. This is not a style choice a second emitter may make
  * independently.
  */
-export { objectKey } from "./zod.js";
+export { jsDocComment, objectKey } from "./zod.js";
 
 /** Named once. The emitted banner and the internal-invariant messages both quote it. */
 const PACKAGE_NAME = "typespec-http-zod";

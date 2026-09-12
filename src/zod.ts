@@ -961,6 +961,45 @@ export function objectKey(name: string): string {
 }
 
 /**
+ * A doc string as a JSDoc comment, indented, or `""` when there is none.
+ *
+ * **Spec-authored text going into emitted source is the same question `objectKey` answers for a
+ * property name, and it had the same two-sites-one-answer shape.** A summary was interpolated raw
+ * into a `/** ... *\/` block by this estate's two server emitters. Measured: `@summary("a *\/ b")` is
+ * an ordinary string literal, so the text reaches here intact, closes the comment early and turns
+ * the remainder into code. `TS1131`, `TS1434`, `TS1161` - one operation costing the whole file,
+ * exactly like a model named `as`.
+ *
+ * **The bar is idiomatic output, not merely parseable output.** Two consequences:
+ *
+ * - A terminator is escaped as `*\/`, which is how TypeScript itself writes one inside a comment, so
+ *   the sentence survives and reads correctly. Dropping or replacing the characters would lose an
+ *   author's words to a mechanical problem they cannot see from their spec.
+ * - A multi-line description is rendered as a multi-line BLOCK. Interpolating the newlines into a
+ *   one-line form produces a comment whose continuation lines carry no ` * `, which no formatter
+ *   would emit and no reviewer would write.
+ *
+ * `indent` is passed rather than assumed because the two call sites sit at different depths, and a
+ * comment indented differently from the member it documents is the tell that a generator wrote it.
+ */
+export function jsDocComment(text: string | undefined, indent: string): string {
+	if (text === undefined) return "";
+	const lines = text
+		.replaceAll("*/", "*\\/")
+		.split("\n")
+		.map((line) => line.trimEnd());
+	while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+	while (lines.length > 0 && lines[0] === "") lines.shift();
+	if (lines.length === 0) return "";
+	const [only] = lines;
+	if (lines.length === 1 && only !== undefined) return `${indent}/** ${only} */\n`;
+	const body = lines
+		.map((line) => (line === "" ? `${indent} *` : `${indent} * ${line}`))
+		.join("\n");
+	return `${indent}/**\n${body}\n${indent} */\n`;
+}
+
+/**
  * The name a property carries **on the wire**, which is not always the name the spec gave it.
  *
  * **`@encodedName` is a first-party decorator, and a decorator is a declaration rather than a

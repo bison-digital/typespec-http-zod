@@ -10,9 +10,35 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [0.25.0] - 2026-08-29
 
-A minor carrying three things: **`EmittedRoute` now publishes `security`**, **two reserved words
-that made emitted output unparseable are now mangled**, and **an optional multipart body is now
-named rather than merged**, which is what made its emitted server fail to compile.
+A minor carrying four things: **`EmittedRoute` now publishes `security`**, **two reserved words
+that made emitted output unparseable are now mangled**, **`jsDocComment` is exported so a doc string
+can be put into emitted source safely**, and **an optional multipart body is now named rather than
+merged**, which is what made its emitted server fail to compile.
+
+**Two of the four are one lesson.** A model named `as` and a summary containing `*/` both cost a
+whole emitted file rather than one line, and both are spec-authored text reaching generated source
+unchecked. `objectKey` has answered that question for a property NAME since this package existed;
+`jsDocComment` now answers it for a doc STRING.
+
+### `jsDocComment`, because a doc string was interpolated into emitted source raw
+
+Both server emitters in this estate render an operation's summary as a JSDoc comment on the
+generated `Operations` method, and both built that comment by interpolation with no escaping. A
+summary containing a comment terminator therefore closed the comment early and the rest became code.
+Measured on the emitted shape: `TS1131`, `TS1434`, `TS1161`.
+
+`/** ... */` doc comments cannot carry that text, because they would terminate themselves, so the
+reachable vector is `@summary("a */ b")` or `@doc("a */ b")`, which are ordinary string literals.
+
+**The bar set for it is idiomatic output, not merely parseable output.** A terminator is escaped as
+`*\/`, the spelling TypeScript itself uses, so the author's sentence survives intact rather than
+being truncated or mangled by a problem they cannot see from their spec. A multi-line description is
+rendered as a real multi-line block with aligned continuation lines, because a one-line form with
+newlines inside it is something no formatter would produce and no reviewer would write.
+
+Exported for the same reason `objectKey` is, and its docblock says so: there were two sites and only
+one of them knew. The rule is shared; the ORACLE is duplicated on purpose, so `typespec-hono` and
+`typespec-http-mcp` each grade what they produce.
 
 ### An optional `@multipartBody` emitted a server that did not compile
 
