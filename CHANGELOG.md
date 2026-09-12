@@ -180,6 +180,11 @@ any input outside the BMP, in both directions:
 
 The second row is a payload the contract forbids reaching a handler. Both were live in `0.23.0`.
 
+**This is not an astral-plane curiosity, and a consumer measured it on a live public API.** It is any
+emoji in any bounded string field, which for a notes product is routine traffic. `@maxLength(100)` on
+user-supplied text refused 100 code points of astral characters before 4.5 and accepts them after,
+which is the "refuses a conformant caller" direction reached by ordinary use rather than by a probe.
+
 **Every oracle here compared the two as DESCRIPTIONS** - the shape describers over `._zod.def`, and
 `z.toJSONSchema()` beside the document with nothing of ours in between. Both report perfect agreement
 about a pair that answers differently the moment a value arrives, because a keyword and its
@@ -276,6 +281,12 @@ precision was accepted until 4.5.
 ### Changed
 
 - **An optional property is emitted `.exactOptional()`, and the `Exact<>` helper is gone.**
+
+  **`exactOptionalPropertyTypes: true` is what makes this a non-event, and it is worth saying which
+  consumers it is not.** Under that flag `{ p: undefined }` is already a type error at the
+  construction site, so a project that sets it finds nothing to change: a pass-through gateway
+  probed every optional-carrying arm after upgrading and saw zero occurrences. A project WITHOUT the
+  flag should expect to find construction sites, because a value that used to validate now does not.
 
   The document says the KEY may be absent and nothing more. `.optional()` additionally accepts an
   explicit `undefined`, and **JSON cannot carry one** - so for a body the validator admitted a value
