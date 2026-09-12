@@ -16,6 +16,8 @@ import {
 	discriminatedSubtypes,
 	effectiveIndexer,
 	inheritedAndOwnProperties,
+	isOptionalAt,
+	isPayloadProperty,
 	objectKey,
 	refusalTarget,
 	withDeclarationSite,
@@ -223,7 +225,20 @@ function modelToTs(program: Program, model: Model): string {
 	 * that catches this emitter disagreeing with itself, and it cannot catch a disagreement that
 	 * aborts the compile first.
 	 */
+	/**
+	 * **Metadata is filtered out here, as it is on the Zod side, and the two must agree.**
+	 *
+	 * `metadataInfo.isPayloadProperty` is what decides whether a property is in the BODY at this
+	 * position: a `@query` or `@header` property is carried separately, and an `@invisible` one is
+	 * carried nowhere. `modelToZod` has asked since it was written; this walk never did, so a
+	 * contract type listed properties the validator beside it refuses as unknown keys.
+	 *
+	 * **Applied AFTER the dictionary check above, deliberately.** That check reads the UNFILTERED
+	 * list, because a model whose only properties are metadata is still a declared object rather than
+	 * a dictionary, and filtering first would flip it to `Record<string, T>` on one side alone.
+	 */
 	const entries = declared
+		.filter((property) => isPayloadProperty(program, property))
 		.filter((property) => !isNeverType(property.type))
 		.map((property) => `\t${withDeclarationSite(property, () => propertyToTs(program, property))}`);
 	/**
@@ -319,7 +334,15 @@ export function propertyToTs(program: Program, property: ModelProperty, wireName
 	 * The two emitted surfaces differ here on purpose, exactly as they do on openness:
 	 * `schemas.gen.ts` exports the narrow received view, this walk emits the permissive floor.
 	 */
-	return property.optional ? `${key}?: ${value} | undefined;` : `${key}: ${value};`;
+	/**
+	 * **Optional AT THIS POSITION, not merely optional in the declaration.** A PATCH body's properties
+	 * are optional whether or not the spec marked them so, which is `metadataInfo.isOptional` and is
+	 * what `propertyToZod` has always consulted. This walk read `property.optional` alone, so an
+	 * update contract demanded every field while the validator beside it accepted any subset.
+	 */
+	return property.optional || isOptionalAt(program, property)
+		? `${key}?: ${value} | undefined;`
+		: `${key}: ${value};`;
 }
 
 /** Installed by the registry so a named model is declared once and referenced everywhere else. */

@@ -160,13 +160,13 @@ export function withVisibility<T>(program: Program, next: Visibility, run: () =>
 }
 
 /** Whether a property is optional AT THE CURRENT POSITION - PATCH makes update fields optional. */
-function isOptionalAt(program: Program, property: ModelProperty): boolean {
+export function isOptionalAt(program: Program, property: ModelProperty): boolean {
 	metadataInfo ??= createMetadataInfo(program);
 	return metadataInfo.isOptional(property, visibility);
 }
 
 /** Whether a property belongs in the BODY at the current position, rather than being metadata. */
-function isPayloadProperty(program: Program, property: ModelProperty): boolean {
+export function isPayloadProperty(program: Program, property: ModelProperty): boolean {
 	metadataInfo ??= createMetadataInfo(program);
 	return metadataInfo.isPayloadProperty(property, visibility);
 }

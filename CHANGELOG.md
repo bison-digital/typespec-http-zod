@@ -21,6 +21,55 @@ whole emitted file rather than one line, and both are spec-authored text reachin
 unchecked. `objectKey` has answered that question for a property NAME since this package existed;
 `jsDocComment` now answers it for a doc STRING.
 
+### `@visibility` published a contract type the validator beside it refuses
+
+**The defect, and it was not only a compile failure.** `SchemaRegistry` emits a visibility-projected
+schema per position - `ThingCreate` for a POST body, exactly as `@typespec/openapi3` names the
+component. `TypeRegistry` emitted ONE declaration per model name carrying the canonical property set
+and used it everywhere. So a create body's contract type listed read-only properties, and the
+validator beside it is a `strictObject`: a caller who satisfied the published type sent a property the
+validator rejects as an unknown key and got a 400.
+
+**The handover recorded this as failing "LOUDLY", and that was only half true.** The assertion that
+catches it lives in `wire-contract.gen.ts`, which is emitted only when `contracts-package` is also
+set. Without it nothing compares the two artefacts and the wrong contract ships in silence. Measured
+on a two-property model: validator `z.strictObject({ createProp })`, contract `{ id, createProp }`.
+
+**Three things were wrong and all three are fixed.**
+
+- **`TypeRegistry` is keyed on `(type, visibility)`**, as `SchemaRegistry` already was. Both now go
+  through one `visibilityFor` and one `nameAt` rather than two copies of the rule - they pair BY NAME
+  in the emitted assertion, so a rule paraphrased in one walk compares the wrong two things.
+
+- **The type walk filters metadata.** `metadataInfo.isPayloadProperty` decides whether a property is
+  in the body at this position; `modelToZod` has asked since it was written and `modelToTs` never did,
+  which is why a `@query` and an `@invisible` property were in that contract type at all. Applied
+  after the dictionary check, which must keep reading the unfiltered list.
+
+- **The type walk asks whether a property is optional AT THIS POSITION.** A PATCH body's properties
+  are optional whether or not the spec marked them so. This walk read `property.optional` alone, so an
+  update contract demanded every field while its validator accepted any subset.
+
+**`collectRequestTypes` now walks at the operation's request visibility** and `collectResponseTypes`
+is pinned to `Read` explicitly. Without the first, the contract walk ran at the default and the whole
+fix did nothing.
+
+**One hazard found while doing it, worth recording.** `metadataInfo` is a module singleton created
+inside `withVisibility` and restored on exit, so outside a scope it is `undefined`. The new predicate
+calls created one lazily outside any scope and left it set, leaking one program's metadata into the
+next compile - which showed up as the emitted validator disagreeing with the document on a scenario
+neither change touched. Running both contract walks inside a scope is what removes it.
+
+**Breaking, and stated as such.** A model used only as a non-`Read` request body now exports
+`ThingCreate` and no bare `Thing`. That is what `@typespec/openapi3` publishes for the same spec, and
+what `schemas.gen.ts` already emitted, so this is the TypeScript side converging on the two artefacts
+beside it rather than a new convention. `WireInputs` resolves either way; a direct
+`import type { Thing }` on a spec using `@visibility` does not.
+
+Control: neuter the keying in `TypeRegistry` alone and `type/model/visibility` reddens; restore and it
+passes. The corpus baseline that named it is now empty, and it is read in both directions, so the fix
+could not have been left half-done.
+
 ### The conformance corpus's emitted output is compiled now, and it was never compiling
 
 `wire-contract.gen.ts` is the only thing that catches this emitter disagreeing with ITSELF: it pairs

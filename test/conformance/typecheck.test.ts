@@ -26,9 +26,11 @@ import { typecheckEmitted } from "../support/typecheck-emitted.js";
  *   with an enum request body could compile its wire contract;
  * - `z.strictObject({})` infers `Record<string, never>` while this walk emits `{}`, so an empty model
  *   compared unequal to itself;
- * - `TypeRegistry` emits one declaration per model name carrying the canonical property set, while
- *   `SchemaRegistry` emits a visibility-projected one per position. The last is still open, and is
- *   baselined below with its reason.
+ * - `TypeRegistry` emitted one declaration per model name carrying the canonical property set, while
+ *   `SchemaRegistry` emitted a visibility-projected one per position. Fixed by keying both on
+ *   `(type, visibility)` through one shared rule, so the baseline below is empty. It stays, because
+ *   it is read in both directions: an entry that starts compiling fails this suite until it is
+ *   deleted, which is what made that fix impossible to forget.
  *
  * Its own out root, because `test/isolation.test.ts` requires one per suite: three oracles once
  * graded whatever the previous run had left behind.
@@ -44,14 +46,7 @@ const outRoot = join(here, ".out-typecheck");
  * compiling is a fix nobody recorded, and fails this suite until the entry is deleted - the same rule
  * `differential.test.ts` applies to its own baseline, for the same reason.
  */
-const KNOWN_UNCOMPILABLE: Readonly<Record<string, string>> = {
-	"type/model/visibility":
-		"TypeRegistry emits ONE declaration per model name, carrying the canonical property set, and uses " +
-		"it for every operation. SchemaRegistry emits a visibility-projected schema per position, so the " +
-		"Read schema declares readProp alone while the contract type declares all six properties. Fixing " +
-		"it means giving TypeRegistry the visibility keying and suffixes SchemaRegistry already has, " +
-		"which RENAMES published contract types for any spec using @visibility.",
-};
+const KNOWN_UNCOMPILABLE: Readonly<Record<string, string>> = {};
 
 interface Checked {
 	readonly name: string;

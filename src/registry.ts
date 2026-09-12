@@ -266,6 +266,42 @@ const lowerFirst = (value: string): string => value.charAt(0).toLowerCase() + va
  * earns a suffix when the model is actually TRANSFORMED at it. Same rule, so the identifiers line up
  * with the component names the document publishes.
  */
+/**
+ * The visibility a type is actually DECLARED at, which is not always the one requested.
+ *
+ * **A type not reshaped at this visibility IS the canonical declaration, not a copy of it.** Keying
+ * on the requested visibility while only suffixing transformed types produced two cache entries
+ * sharing one identifier and an emitted file that stopped parsing:
+ * `Identifier 'approvalTierSchema' has already been declared`. An enum is the same enum in a request
+ * and a response, which is what the `Model` guard is for.
+ *
+ * It is the same collapse `@typespec/openapi3` performs before naming a component, and
+ * `isTransformedBy` is its own predicate, `metadataInfo.isTransformed`.
+ *
+ * **Extracted so both registries answer it identically.** They must: the emitted assertion pairs a
+ * validator with a contract type BY NAME, so a rule applied in one walk and paraphrased in the other
+ * is a pairing that silently compares the wrong two things.
+ */
+export function visibilityFor(program: Program, type: Type, requested: Visibility): Visibility {
+	return type.kind === "Model" &&
+		requested !== Visibility.Read &&
+		isTransformedBy(program, type, requested)
+		? requested
+		: Visibility.Read;
+}
+
+/**
+ * A declaration's name at a visibility: the bare name at canonical, suffixed anywhere else.
+ *
+ * The suffix is `@typespec/http`'s `getVisibilitySuffix`, called with `Visibility.Read` as the
+ * canonical exactly as `@typespec/openapi3` calls it in `schema-emitter.ts`. Same function, same
+ * argument, so these identifiers line up with the component names the document publishes rather than
+ * merely resembling them.
+ */
+export function nameAt(bare: string, at: Visibility): string {
+	return `${bare}${at === Visibility.Read ? "" : getVisibilitySuffix(at, Visibility.Read)}`;
+}
+
 function keyFor(type: Type, visibility: Visibility): string {
 	/**
 	 * **Keyed on the SPREAD SOURCE where there is one, or one component gets two declarations.**
@@ -327,13 +363,7 @@ export class SchemaRegistry {
 		 * request and a response. Collapsing onto `Read` first is what makes the key and the name agree,
 		 * and it is the same collapse openapi3 performs before naming a component.
 		 */
-		const requested = currentVisibility();
-		const at =
-			type.kind === "Model" &&
-			requested !== Visibility.Read &&
-			isTransformedBy(this.#program, type, requested)
-				? requested
-				: Visibility.Read;
+		const at = visibilityFor(this.#program, type, currentVisibility());
 		const key = keyFor(type, at);
 		const existing = this.#declarations.get(key);
 		if (existing !== undefined) return existing.identifier;
@@ -358,7 +388,7 @@ export class SchemaRegistry {
 			return pending;
 		}
 
-		const name = `${bare}${at === Visibility.Read ? "" : getVisibilitySuffix(at, Visibility.Read)}`;
+		const name = nameAt(bare, at);
 		const identifier = `${lowerFirst(name)}Schema`;
 
 		this.#inProgress.set(key, identifier);
@@ -564,30 +594,50 @@ function isSingleObjectLiteral(source: string): boolean {
 
 export class TypeRegistry {
 	readonly #program: Program;
-	readonly #declarations = new Map<Type, TsDeclaration>();
+	/**
+	 * **Keyed on `(type, visibility)`, exactly as {@link SchemaRegistry} is, and for the same reason.**
+	 *
+	 * One model is not one shape. Keyed on the `Type` alone, whichever position was walked first won
+	 * and every other position silently got its shape - measured on `type/model/visibility`, where a
+	 * `GET` reached the model first and the create body's contract type came out carrying the read
+	 * projection. The two registries pair BY NAME in the emitted assertion, so they have to agree
+	 * about how many declarations there are before the pairing means anything.
+	 *
+	 * Both now go through the shared {@link visibilityFor} and {@link nameAt}: paraphrasing either
+	 * rule in one walk is how a validator ends up compared against a type describing something else.
+	 */
+	readonly #declarations = new Map<string, TsDeclaration>();
 	readonly #order: TsDeclaration[] = [];
-	readonly #inProgress = new Set<Type>();
+	readonly #inProgress = new Map<string, string>();
 
 	constructor(program: Program) {
 		this.#program = program;
 	}
 
 	expressionFor(type: Type): string {
-		const name = declaredNameOf(type);
-		if (name === undefined) return this.#inline(type);
-		const existing = this.#declarations.get(type);
+		const bare = declaredNameOf(type);
+		if (bare === undefined) return this.#inline(type);
+		const at = visibilityFor(this.#program, type, currentVisibility());
+		const key = keyFor(type, at);
+		const name = nameAt(bare, at);
+		const existing = this.#declarations.get(key);
 		if (existing !== undefined) return existing.name;
 		/**
 		 * **No laziness is needed on this side, and no refusal either.** A TypeScript `interface`
 		 * may refer to itself - `interface InnerModel { children?: InnerModel[] }` is the ordinary way
 		 * to write a tree - so the name alone is the whole answer. The Zod registry has to defer the
 		 * same edge behind a getter only because a `const` cannot read itself while initialising.
+		 *
+		 * The in-flight name is the SUFFIXED one, not the bare one: a recursive model reached at
+		 * `Create` must refer to `ThingCreate`, or it self-references a declaration that is not the
+		 * one being written.
 		 */
-		if (this.#inProgress.has(type)) return name;
+		const pending = this.#inProgress.get(key);
+		if (pending !== undefined) return pending;
 
-		this.#inProgress.add(type);
+		this.#inProgress.set(key, name);
 		const source = this.#inline(type);
-		this.#inProgress.delete(type);
+		this.#inProgress.delete(key);
 
 		const declaration: TsDeclaration = {
 			name,
@@ -614,7 +664,7 @@ export class TypeRegistry {
 			isVocabulary: type.kind === "Enum",
 			source,
 		};
-		this.#declarations.set(type, declaration);
+		this.#declarations.set(key, declaration);
 		/**
 		 * **Declared once per NAME, not once per `Type`, and the two are not the same thing.**
 		 *

@@ -2141,67 +2141,93 @@ function collectRequestTypes(
 	{
 		for (const operation of service.operations) {
 			if (successStatusOf(operation) === undefined) continue;
-			const body = requestBodyOf(operation);
-			/** The parts of a multipart body, which `requestBodyOf` deliberately does not return. */
-			const multipartBody = operation.parameters.body;
-			const multipart =
-				multipartBody?.bodyKind === "multipart" ? { parts: multipartBody.parts } : undefined;
 			/**
-			 * Headers are part of the input too.
+			 * **Walked at the operation's REQUEST visibility, which is the whole point of this file.**
 			 *
-			 * The webhook's three Standard-Webhooks headers are inside the MAC - they are not metadata
-			 * beside the payload, they are arguments to the verification. Leaving them out of the wire
-			 * type would describe an input the application cannot act on.
-			 */
-			const extraProperties = operation.parameters.parameters
-				.filter(
-					(parameter) =>
-						parameter.type === "path" || parameter.type === "query" || parameter.type === "header",
-				)
-				/**
-				 * Named as the WIRE names it, which is what the emitted validator keys on.
-				 * `@header("x-thing") thing: string` is `"x-thing"` in `schemas.gen.ts`, so it has to be
-				 * `"x-thing"` here too: a consumer checking its handlers against these types otherwise
-				 * fails to typecheck against a server that is correct.
-				 */
-				.map((parameter) => registry.expressionForProperty(parameter.param, parameter.name));
-			if (body === undefined && extraProperties.length === 0) continue;
-			/**
-			 * A `bytes` body reaches the use-case as a NAMED property holding the unparsed body, not as
-			 * a bare value, so the wire type is `{ rawBody: ... }`, matching what a server actually
-			 * builds. Referencing the scalar directly would type the whole input as that value and
-			 * quietly drop the headers beside it.
-			 */
-			const rawBody =
-				body?.kind === "Scalar" && body.name === "bytes"
-					? (operation.parameters.body?.property?.name ?? "body")
-					: undefined;
-			/**
-			 * **Raw binary is `ArrayBuffer`; base64 inside a JSON payload is `string`.** The same
-			 * `isRawBinaryMediaType` rule the response side and the multipart parts already follow,
-			 * applied here for the first time.
+			 * `resolveRequestVisibility` is `@typespec/http`'s own answer - POST is Create, PATCH is
+			 * Update, PUT is CreateOrUpdate - and it is what the Zod walk already uses at the route
+			 * level. Without it this walk ran at the default `Read`, so a POST body's contract type
+			 * carried the canonical property set while the validator beside it accepted the create
+			 * projection. A caller satisfying the published type sent read-only fields and a strict
+			 * validator answered 400.
 			 *
-			 * This type said `string` for every `bytes` body whatever it was served as. A server reading
-			 * an `application/octet-stream` body hands the handler bytes, so a consumer checking its
-			 * handlers against these types could not typecheck against a correct server. It is the
-			 * request half of the corruption already fixed on the reader: decoding raw bytes as text
-			 * replaces every byte outside ASCII, and typing them as text is what invites it.
+			 * It is also what keeps `metadataInfo` scoped: the predicates `propertyToTs` consults live
+			 * behind `withVisibility`, and calling them outside one leaves a module-level singleton
+			 * built for the wrong program.
 			 */
-			const rawBodyType = isRawBinaryMediaType([...(operation.parameters.body?.contentTypes ?? [])])
-				? "ArrayBuffer"
-				: "string";
-			entries.push({
-				operationId: operationIdOf(program, operation.operation),
-				bodyRef:
-					rawBody !== undefined
-						? `{\n\t${rawBody}: ${rawBodyType};\n}`
-						: multipart !== undefined
-							? multipartTsOf(multipart, registry)
-							: body === undefined
-								? undefined
-								: registry.expressionFor(body),
-				extraProperties,
-			});
+			withVisibility(
+				program,
+				resolveRequestVisibility(program, operation.operation, operation.verb),
+				() => {
+					const body = requestBodyOf(operation);
+					/** The parts of a multipart body, which `requestBodyOf` deliberately does not return. */
+					const multipartBody = operation.parameters.body;
+					const multipart =
+						multipartBody?.bodyKind === "multipart" ? { parts: multipartBody.parts } : undefined;
+					/**
+					 * Headers are part of the input too.
+					 *
+					 * The webhook's three Standard-Webhooks headers are inside the MAC - they are not metadata
+					 * beside the payload, they are arguments to the verification. Leaving them out of the wire
+					 * type would describe an input the application cannot act on.
+					 */
+					const extraProperties = operation.parameters.parameters
+						.filter(
+							(parameter) =>
+								parameter.type === "path" ||
+								parameter.type === "query" ||
+								parameter.type === "header",
+						)
+						/**
+						 * Named as the WIRE names it, which is what the emitted validator keys on.
+						 * `@header("x-thing") thing: string` is `"x-thing"` in `schemas.gen.ts`, so it has to be
+						 * `"x-thing"` here too: a consumer checking its handlers against these types otherwise
+						 * fails to typecheck against a server that is correct.
+						 */
+						.map((parameter) => registry.expressionForProperty(parameter.param, parameter.name));
+					// `return` rather than `continue`: this body is a callback now, and returning from it
+					// skips the operation exactly as the `continue` did.
+					if (body === undefined && extraProperties.length === 0) return;
+					/**
+					 * A `bytes` body reaches the use-case as a NAMED property holding the unparsed body, not as
+					 * a bare value, so the wire type is `{ rawBody: ... }`, matching what a server actually
+					 * builds. Referencing the scalar directly would type the whole input as that value and
+					 * quietly drop the headers beside it.
+					 */
+					const rawBody =
+						body?.kind === "Scalar" && body.name === "bytes"
+							? (operation.parameters.body?.property?.name ?? "body")
+							: undefined;
+					/**
+					 * **Raw binary is `ArrayBuffer`; base64 inside a JSON payload is `string`.** The same
+					 * `isRawBinaryMediaType` rule the response side and the multipart parts already follow,
+					 * applied here for the first time.
+					 *
+					 * This type said `string` for every `bytes` body whatever it was served as. A server reading
+					 * an `application/octet-stream` body hands the handler bytes, so a consumer checking its
+					 * handlers against these types could not typecheck against a correct server. It is the
+					 * request half of the corruption already fixed on the reader: decoding raw bytes as text
+					 * replaces every byte outside ASCII, and typing them as text is what invites it.
+					 */
+					const rawBodyType = isRawBinaryMediaType([
+						...(operation.parameters.body?.contentTypes ?? []),
+					])
+						? "ArrayBuffer"
+						: "string";
+					entries.push({
+						operationId: operationIdOf(program, operation.operation),
+						bodyRef:
+							rawBody !== undefined
+								? `{\n\t${rawBody}: ${rawBodyType};\n}`
+								: multipart !== undefined
+									? multipartTsOf(multipart, registry)
+									: body === undefined
+										? undefined
+										: registry.expressionFor(body),
+						extraProperties,
+					});
+				},
+			);
 		}
 	}
 	return entries;
@@ -2222,7 +2248,15 @@ function collectResponseTypes(
 	service: HttpService,
 ): ResponseTypeEntry[] {
 	const entries: ResponseTypeEntry[] = [];
-	{
+	/**
+	 * **Pinned to `Read` explicitly, rather than inheriting whatever the caller last set.**
+	 *
+	 * A response is the canonical projection whatever verb produced it, and the same rule is stated
+	 * for the route walk: resolving responses under the ambient REQUEST visibility declared six
+	 * components under the wrong suffix. Saying it here rather than relying on the default is what
+	 * makes that impossible from either direction.
+	 */
+	withVisibility(program, Visibility.Read, () => {
 		for (const operation of service.operations) {
 			const status = successStatusOf(operation);
 			if (status === undefined) continue;
@@ -2233,7 +2267,7 @@ function collectResponseTypes(
 				ref: registry.expressionFor(body),
 			});
 		}
-	}
+	});
 	return entries;
 }
 
