@@ -1492,8 +1492,34 @@ export function collectRoutes(
 			 * express "absent". See {@link EmittedRoute.optionalBody}.
 			 */
 			const optionalBody = bodyParameter?.property?.optional === true;
+			/**
+			 * **An optional MULTIPART body reaches the same rule by a second route, because
+			 * `requestType` cannot see it.** `requestBodyOf` resolves a type only for
+			 * `bodyKind === "single"`, so `requestType` is `undefined` for every multipart operation
+			 * and the `optionalBody` disjunct above was unreachable however the document declared it.
+			 *
+			 * The emitted server for such an operation did not compile. Measured, and the mechanism is
+			 * worth stating because it is not a union: spreading a value typed `Parts | undefined`
+			 * makes every part OPTIONAL, so `{ file?: ...; pages?: ... }` was passed where
+			 * `{ file: ...; pages: ... }` was required. `TS2345`, inside `app.gen.ts` itself.
+			 *
+			 * That is the failure {@link EmittedRoute.optionalBody} predicts in prose - a merge has no
+			 * way to say "these properties are here only sometimes" without making every one of them
+			 * optional, which is a weaker and different claim about the body that IS sent. So this is
+			 * the stated rule reaching the one body kind it had never been applied to, not a new rule.
+			 *
+			 * **The REQUIRED arm is deliberately excluded.** The indexed reason does not apply to a
+			 * parts model, so a required multipart body merges as safely as a required single one, and
+			 * `typespec-hono/test/filepart/` compiles a handler that reads `input.file` directly.
+			 * Widening this to "multipart is always named" would rewrite that directory for no defect.
+			 *
+			 * This is the third hole the `"single"` gate has produced, after `multipartSchemaOf` and
+			 * `multipartTsOf`, both recorded above.
+			 */
+			const optionalMultipartBody = bodyParameter?.bodyKind === "multipart" && optionalBody;
 			const bodyProperty =
-				requestType?.kind === "Model" && (requestType.indexer !== undefined || optionalBody)
+				(requestType?.kind === "Model" && (requestType.indexer !== undefined || optionalBody)) ||
+				optionalMultipartBody
 					? (bodyParameter?.property?.name ?? "body")
 					: undefined;
 			const authentication = authenticationFor(program, operation);

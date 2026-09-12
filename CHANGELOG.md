@@ -10,8 +10,40 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [0.25.0] - 2026-08-29
 
-A minor carrying two things: **`EmittedRoute` now publishes `security`**, and **two reserved words
-that made emitted output unparseable are now mangled**.
+A minor carrying three things: **`EmittedRoute` now publishes `security`**, **two reserved words
+that made emitted output unparseable are now mangled**, and **an optional multipart body is now
+named rather than merged**, which is what made its emitted server fail to compile.
+
+### An optional `@multipartBody` emitted a server that did not compile
+
+`@multipartBody body?: Parts` published `requestBody.required: false` and merged the parts into the
+handler's input anyway, so the generated call site spread a value the validator types as
+`Parts | undefined` into a position requiring every part. `TS2345`, inside `app.gen.ts` itself.
+
+**The mechanism is worth stating, because it is not a union.** Spreading `T | undefined` makes every
+property OPTIONAL rather than producing two constituents, so `{ file?: ...; pages?: ... }` was passed
+where `{ file: ...; pages: ... }` was required. That is exactly the failure `EmittedRoute.optionalBody`
+already predicted in prose: a merge has no way to say "these properties are here only sometimes"
+without making every one of them optional, which is a weaker and different claim about the body that
+IS sent.
+
+**So the rule is not new; it had never reached this body kind.** `0.20.0` published `optionalBody` and
+named an optional body for exactly this reason, but the name was decided behind
+`requestType?.kind === "Model"`, and `requestBodyOf` resolves a type only for `bodyKind === "single"`.
+`requestType` is therefore `undefined` for every multipart operation, and the disjunct was unreachable
+however the document declared it. This is the third hole that `"single"` gate has produced, after
+`multipartSchemaOf` and `multipartTsOf`; both are recorded in `api.ts`.
+
+**A REQUIRED multipart body is deliberately unchanged and still merged.** The indexed reason does not
+apply to a parts model, so it flattens as safely as a required single body, and
+`typespec-hono/test/filepart/` compiles a handler reading `input.file` directly. Widening this to
+"multipart is always named" would have rewritten that directory for no defect. Both halves are held
+by one arm, and the control is the guard deleted: the optional arm reds, the required-multipart and
+optional-single-body arms stay green.
+
+Measured zero impact elsewhere. Every `@multipartBody` in `@typespec/http-specs` is required, which
+is why the conformance corpus never saw this. `typespec-http-mcp` refuses a multipart operation as
+`binary-tool-input` before it reads `bodyProperty` at all, so no tool changes.
 
 ### `as` and `yield` produced a file that did not parse
 
