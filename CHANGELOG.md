@@ -10,15 +10,55 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [0.25.0] - 2026-08-29
 
-A minor carrying four things: **`EmittedRoute` now publishes `security`**, **two reserved words
+A minor carrying five things: **`EmittedRoute` now publishes `security`**, **two reserved words
 that made emitted output unparseable are now mangled**, **`jsDocComment` is exported so a doc string
-can be put into emitted source safely**, and **an optional multipart body is now named rather than
-merged**, which is what made its emitted server fail to compile.
+can be put into emitted source safely**, **`truncated-doc-comment` warns when the compiler has cut a
+doc comment short**, and **an optional multipart body is now named rather than merged**, which is
+what made its emitted server fail to compile.
 
 **Two of the four are one lesson.** A model named `as` and a summary containing `*/` both cost a
 whole emitted file rather than one line, and both are spec-authored text reaching generated source
 unchecked. `objectKey` has answered that question for a property NAME since this package existed;
 `jsDocComment` now answers it for a doc STRING.
+
+### `truncated-doc-comment`, a warning, because the compiler drops text and says nothing
+
+An unescaped `@` in a doc comment begins a doc tag, and everything from there to the end of the
+comment leaves the description. Measured through the compiler's own parser at `1.15.0`:
+`parseDocContent` breaks its loop on `Token.At` outside a code fence, `parseDocTag` keeps the
+remainder as an unknown tag, and `getDoc` never reads it. Nothing in that path raises a diagnostic.
+
+**It is not only `{@link}`.** `support@example.com` in prose truncates at `support`, and
+"use @maxLength to bound it" truncates at "use", with no brace anywhere to notice. The consumer who
+reported this measured 14 of 1,006 published descriptions cut, and found it by reading the emitted
+document by hand.
+
+**The check reads the node, because the string cannot answer.** By the time `getDoc` returns the `@`
+is gone, so the reported suggestion - warn when the doc string about to be emitted contains `{@` -
+matches nothing, and the reporter's own guard, which fails when a description ends at a brace, passes
+the `@maxLength` case. A tag outside `param`, `template`, `prop`, `returns`, `return` and `errors` is
+an unknown tag, which is exact rather than heuristic. Gated on `getDocData().source` being the
+comment, so an `@doc(...)` decorator beside it is not a false positive.
+
+**A warning, for the reason `default-on-required-property` is one.** `@typespec/openapi3` emits the
+same spec happily, so refusing it would make one spec representable by one emitter and not the other;
+an error would also cost the whole document over one comment.
+
+**It finds one in the conformance corpus, and the corpus is not ours.** `payload/xml` in
+`@typespec/http-specs` documents a model with "has @Xml.name. The property name takes precedence.",
+and the published 3.1 document carries `S2.2 - Contains a property whose type has`. The rule the model
+exists to state is not in the contract.
+
+That is also why the differential's zero-emitter-warnings arm partitions this code out **by proof
+rather than by name**: `@typespec/openapi3` derives descriptions from the same `getDoc`, so it
+publishes the identical cut text and there is no divergence to measure. `test/doccomment/` compiles a
+fixture through `@typespec/openapi3` and requires exactly that, including that the four spellings
+which survive do survive, so the exclusion is earned rather than asserted.
+
+**Not filed upstream, and the chronology says why.** `microsoft/typespec#3374` reported this exactly,
+naming both `{@link}` and email addresses, and was closed 2024-05-20 as a duplicate of `#1358`, which
+is open on the Backlog and untouched since 2022-12-08. `#3375` then added the `\@` escape
+deliberately. The truncation is intended and the remedy this message names is upstream's own.
 
 ### `jsDocComment`, because a doc string was interpolated into emitted source raw
 
