@@ -8,7 +8,7 @@ published types; a patch will not. The **emitted output is part of the API** - a
 validator's shape, to a declared identifier, or to the `EmittedRoute` a wrapping emitter reads is a
 change a consumer feels, and is treated as such here rather than as an implementation detail.
 
-## [0.25.0] - 2026-08-29
+## [0.25.0] - 2026-09-12
 
 A minor carrying five things: **`EmittedRoute` now publishes `security`**, **two reserved words
 that made emitted output unparseable are now mangled**, **`jsDocComment` is exported so a doc string
