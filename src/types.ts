@@ -253,8 +253,8 @@ function modelToTs(program: Program, model: Model): string {
 	 * of the failure - see `test/contractshape/`.
 	 *
 	 * What arrives is still described honestly, on the surface derived from the validator:
-	 * `schemas.gen.ts` exports `Exact<z.infer<typeof x>>`, which carries the index signature because
-	 * a `.loose()` parse really does. Two surfaces, two directions, neither lying.
+	 * `schemas.gen.ts` exports `z.infer<typeof x>`, which carries the index signature because a
+	 * `.loose()` parse really does. Two surfaces, two directions, neither lying.
 	 */
 	return entries.length === 0 ? "{}" : `{\n${entries.join("\n")}\n}`;
 }
@@ -294,9 +294,9 @@ export function propertyToTs(program: Program, property: ModelProperty, wireName
 	 * optionality per property fixes every depth at once, because there is no depth to reach.
 	 *
 	 * **The two directions of the emitted set differ here on purpose**, exactly as they do on
-	 * openness: `schemas.gen.ts` exports `Exact<z.infer<...>>`, the narrow view of what ARRIVES, in
-	 * which a default has fired and the property is present. `wire-contract.gen.ts` pairs this walk
-	 * against `z.input` for the same reason.
+	 * openness: `schemas.gen.ts` exports `z.infer<...>`, the narrow view of what ARRIVES, in which a
+	 * default has fired and the property is present. `wire-contract.gen.ts` pairs this walk against
+	 * `z.input` for the same reason.
 	 *
 	 * A defaulted property that reaches here is one the document publishes as optional, because
 	 * `propertyToZod` reports `default-on-required-property` for the other spelling and emits no
@@ -306,7 +306,7 @@ export function propertyToTs(program: Program, property: ModelProperty, wireName
 	 * **`?: T | undefined`, and dropping the `| undefined` was tried in `0.19.0` and reverted.**
 	 *
 	 * It looks wrong - JSON has no `undefined`, so a wire type saying `?: T` reads more honest, and
-	 * it would make this walk agree with `Exact<z.infer<...>>` on the schemas side. **Measured, it
+	 * it would make this walk agree with `z.infer<...>` on the schemas side. **Measured, it
 	 * breaks the most ordinary handler there is.** `createWidget: (ctx, input) => ok(input)` - return
 	 * what you were given - stopped compiling, because what a handler RECEIVES carries
 	 * `?: T | undefined` and what it would then have to SUPPLY did not.
