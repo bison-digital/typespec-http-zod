@@ -1879,7 +1879,19 @@ describe("the same corpus, against the newer document version", () => {
 		expect([...comparisonAtLater.oracleFailures].toSorted()).toEqual(
 			[...comparison.oracleFailures].toSorted(),
 		);
-		expect(comparisonAtLater.emitterWarnings).toEqual([]);
+		/**
+		 * Partitioned for the reason the arm at the 3.1 comparison states, and proven there: a
+		 * truncated doc comment is not a divergence, because the document publishes the same cut text.
+		 * The claim held here is that the newer document version changes nothing about it.
+		 */
+		expect(
+			comparisonAtLater.emitterWarnings.filter(
+				(warning) => !warning.endsWith("/truncated-doc-comment"),
+			),
+		).toEqual([]);
+		expect([...comparisonAtLater.emitterWarnings].toSorted()).toEqual(
+			[...comparison.emitterWarnings].toSorted(),
+		);
 	});
 
 	/**
@@ -2063,8 +2075,39 @@ describe("the validator and the document agree, over a corpus we did not write",
 		 * honest assertion is not "the declared list is unchanged" but **empty**. A warning from this
 		 * emitter means it is knowingly shipping output the document does not describe; there is no
 		 * quantity of that which is fine.
+		 *
+		 * **`truncated-doc-comment` is partitioned out, and by PROOF rather than by name.** It is the
+		 * one code that says the opposite of a divergence: the compiler drops everything after an
+		 * unescaped `@` in a doc comment, and `@typespec/openapi3` derives every description from the
+		 * same `getDoc`, so the document publishes the identical cut text. There is nothing for this
+		 * arm to measure, because the two artefacts agree exactly.
+		 *
+		 * That is not asserted here, it is asserted in `test/doccomment/doccomment.test.ts`, which
+		 * compiles a fixture through `@typespec/openapi3` and requires the published descriptions to
+		 * be cut at the same point - and requires the spellings that survive to survive, so the claim
+		 * is not vacuous. If that arm ever reds, this exclusion is no longer earned.
+		 *
+		 * It fires once on the corpus, on `payload/xml`, whose published 3.1 document reads
+		 * `S2.2 - Contains a property whose type has` and loses the sentence stating the rule the
+		 * model exists to document. A true finding about a spec this repository did not write.
 		 */
-		expect(comparison.emitterWarnings).toEqual([]);
+		const divergent = comparison.emitterWarnings.filter(
+			(warning) => !warning.endsWith("/truncated-doc-comment"),
+		);
+		expect(divergent).toEqual([]);
+	});
+
+	it("reports the corpus truncation it does find, so the exclusion above is not silent", () => {
+		/**
+		 * **Non-vacuity for the partition.** Excluding a code and then never seeing it is how an
+		 * exclusion rots into an unconditional pass. The corpus contains exactly one such comment; if
+		 * it stops being reported, either upstream fixed the spec or this emitter stopped looking, and
+		 * both are worth a red arm rather than silence.
+		 */
+		const truncated = comparison.emitterWarnings.filter((warning) =>
+			warning.endsWith("/truncated-doc-comment"),
+		);
+		expect(truncated.length).toBeGreaterThanOrEqual(1);
 	});
 
 	it("asserts EVERY kind of divergence it can produce, not a hand-kept list", () => {

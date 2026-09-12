@@ -261,6 +261,50 @@ const diagnostics = {
 		},
 	},
 	/**
+	 * **A doc comment the compiler truncated, so the description this emitter passes on is cut short.**
+	 *
+	 * **An unescaped `@` in a doc comment begins a doc tag, and everything from there to the end of
+	 * the comment leaves the description.** Measured against `@typespec/compiler@1.15.0` through its
+	 * own parser: `parseDocContent` breaks its loop on `Token.At` outside a code fence, and the
+	 * doc-mode scanner turns every `@` into that token. `parseDocTag` then parses the remainder as a
+	 * tag and, for a name it does not know, keeps it as `DocUnknownTag` - which `getDoc` never reads.
+	 * No diagnostic is raised anywhere in that path.
+	 *
+	 * So it is not only `{@link}`. `support@example.com` in prose truncates at `support`, and
+	 * "use @maxLength to bound it" truncates at "use", with no brace anywhere to notice. A consumer
+	 * measured 14 of 1,006 published descriptions cut this way and found it by reading the emitted
+	 * document by hand.
+	 *
+	 * **The check reads the AST, because the truncated string cannot answer.** By the time `getDoc`
+	 * returns, the `@` is gone, so a check over the emitted text would find nothing to match - and
+	 * pattern-matching emitted text is the thing this package refuses to decide anything by. The fact
+	 * is on the node: a tag that is not `param`, `template`, `prop`, `returns`, `return` or `errors`
+	 * parses as `DocUnknownTag`. That is exact, with no heuristic and no false positive on the four
+	 * spellings that survive: a brace in prose, a backticked brace, `\{`, and `\@`.
+	 *
+	 * **Gated on the description actually coming from the comment**, via `getDocData().source`. A type
+	 * carrying an `@doc(...)` decorator takes its description from there, where `@` inside a string
+	 * literal means nothing, so warning would be a false positive - and a warning that fires on
+	 * correct specs is one a consumer turns off wholesale.
+	 *
+	 * **A WARNING, for the reason `default-on-required-property` is one.** The spec is representable:
+	 * `@typespec/openapi3` publishes the same truncated description happily, so refusing it would make
+	 * one spec emit under one emitter and not the other. An error would also set `program.hasError()`
+	 * and cost the whole document over one comment. What is wrong is not that it cannot be served, but
+	 * that the author has written something that does not say what they meant.
+	 *
+	 * **Upstream this is intended, and the escape is sanctioned.** `microsoft/typespec#3374` reported
+	 * exactly this, naming both `{@link}` and email addresses, and was closed as a duplicate of
+	 * `#1358`, which is open on the Backlog. `#3375` then added the `\@` escape deliberately. So the
+	 * remedy this message names is upstream's own, and only the silence is unaccounted for.
+	 */
+	"truncated-doc-comment": {
+		severity: "warning",
+		messages: {
+			default: paramMessage`'${"name"}' has a doc comment that stops at '@${"tag"}': an unescaped '@' begins a doc tag, so everything after it is dropped from the description this emitter and the OpenAPI document beside it both publish. Use '\\@${"tag"}' to escape it, wrap it in backticks, or set the description with '@doc(...)' instead.`,
+		},
+	},
+	/**
 	 * **A discriminated union whose discriminator the document never publishes.**
 	 *
 	 * `@discriminated(#{envelope: "none"})` puts the discriminator inside the variant on the wire -

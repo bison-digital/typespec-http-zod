@@ -2,11 +2,14 @@ import {
 	emitFile,
 	type EmitContext,
 	getDoc,
+	getDocData,
 	getEncode,
+	getLocationContext,
 	getSummary,
 	isErrorModel,
 	isNeverType,
 	isVoidType,
+	navigateProgram,
 	type Model,
 	NoTarget,
 	type Operation,
@@ -2630,6 +2633,60 @@ export interface EmitHttpZodOptions {
  * copies that will not, and the symptom would be a subtly different set of declarations in a file
  * whose name is the contract.
  */
+/**
+ * The doc tags TypeSpec understands. Anything else parses as an unknown tag, and the description
+ * ends where it began. Written out rather than imported: `SyntaxKind` lives behind
+ * `@typespec/compiler/ast`, whose exports map declares no `types` condition, and comparing the tag
+ * NAME needs no AST import at all.
+ */
+const KNOWN_DOC_TAGS = new Set(["param", "template", "prop", "returns", "return", "errors"]);
+
+/**
+ * The shape this reads off a syntax node, declared structurally and deliberately small.
+ *
+ * `@typespec/compiler/ast` says libraries depend on the syntax tree at their own risk and outside
+ * the breaking-change policy. So the surface touched is two fields, and `test/doccomment/` pins the
+ * parse against the installed compiler: an upgrade that changes it turns that arm red rather than
+ * silently switching the guard off.
+ */
+interface DocNodeLike {
+	readonly tags: readonly { readonly tagName: { readonly sv: string } }[];
+}
+
+/** See the `truncated-doc-comment` docblock in `lib.ts` for why this reads the node, not the string. */
+function reportTruncatedDocComments(program: Program): void {
+	const check = (type: Type & { readonly name?: string | symbol }): void => {
+		if (getLocationContext(program, type).type !== "project") return;
+		// An `@doc(...)` decorator wins, and `@` inside a string literal truncates nothing.
+		if (getDocData(program, type)?.source !== "comment") return;
+		const docs = (type.node as { readonly docs?: readonly DocNodeLike[] } | undefined)?.docs;
+		for (const doc of docs ?? []) {
+			for (const tag of doc.tags) {
+				if (KNOWN_DOC_TAGS.has(tag.tagName.sv)) continue;
+				reportDiagnostic(program, {
+					code: "truncated-doc-comment",
+					target: type,
+					format: {
+						name: typeof type.name === "string" && type.name !== "" ? type.name : "(anonymous)",
+						tag: tag.tagName.sv,
+					},
+				});
+			}
+		}
+	};
+	navigateProgram(program, {
+		model: check,
+		modelProperty: check,
+		operation: check,
+		enum: check,
+		enumMember: check,
+		union: check,
+		unionVariant: check,
+		interface: check,
+		scalar: check,
+	});
+}
+
 export async function emitHttpZod(
 	context: EmitContext,
 	wrapper: EmitHttpZodOptions = {},
@@ -2711,6 +2768,11 @@ export async function emitHttpZod(
 			format: { sealed: sealed.join(", "), open: open.join(", ") },
 		});
 	}
+	/**
+	 * Once per program, before the per-service loop: a doc comment belongs to a type, not to a
+	 * service, and a type reachable from two services would otherwise be named twice.
+	 */
+	reportTruncatedDocComments(context.program);
 	for (const snapshot of snapshots) {
 		beginOperationIds();
 		const service = snapshot.service;
