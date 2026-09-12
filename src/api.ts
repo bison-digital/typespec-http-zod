@@ -2252,9 +2252,23 @@ function renderRequestTypes(
 	registry: TypeRegistry,
 ): string {
 	const declarations = registry.declarations().map((declaration) => {
-		// A vocabulary alias stays module-local: the vocabularies artefact already exports these names
-		// as runtime tuples, and exporting both collides on every one.
-		if (declaration.isVocabulary) return `\ntype ${declaration.name} = ${declaration.source};\n`;
+		/**
+		 * **A vocabulary alias is exported like any other declaration.**
+		 *
+		 * It used to stay module-local, on the stated ground that "the vocabularies artefact already
+		 * exports these names as runtime tuples, and exporting both collides on every one". That was
+		 * true of a shape this emitter no longer produces: `vocabularies.gen.ts` has exactly one
+		 * top-level export, `SPEC_VOCABULARIES`, and the enum names are KEYS inside it - see the
+		 * docblock on `renderVocabularies`, which records why the keyed form replaced individually
+		 * named tuples. There is nothing left to collide with.
+		 *
+		 * The stale rationale was load-bearing: `wire-contract.gen.ts` names `Contracts.<EnumName>`
+		 * for an enum used as a request body, and a barrel cannot re-export a declaration that is not
+		 * exported. So that file did not compile for any such spec. `TS2694`, found the first time
+		 * anything compiled the conformance corpus rather than reading it.
+		 */
+		if (declaration.isVocabulary)
+			return `\nexport type ${declaration.name} = ${declaration.source};\n`;
 		return declaration.isObject
 			? `\nexport interface ${declaration.name} ${declaration.source}\n`
 			: `\nexport type ${declaration.name} = ${declaration.source};\n`;
@@ -2510,9 +2524,20 @@ type Declared<T> = T extends (...args: never[]) => unknown
 			: readonly Declared<Element>[]
 		: T extends object
 			? [DeclaredKeyOf<T>] extends [never]
-				? // A shape with no declared keys is a dictionary: it has no optional property to widen,
-					// and an index signature satisfies \`{} extends Pick<T, K>\` for every value type.
-					{ [K in keyof T]: Declared<T[K]> }
+				? [T[keyof T]] extends [never]
+					? // **An indexer whose VALUE type is \`never\` admits no property, so it is an EMPTY
+						// OBJECT rather than a dictionary.** Zod spells an empty object that way:
+						// \`z.strictObject({})\` infers \`Record<string, never>\` under Zod 4, while this
+						// walk emits \`{}\` for the same model. The two describe one shape and compared
+						// unequal, so \`wire-contract.gen.ts\` did not compile for any spec declaring an
+						// empty model. Normalising both to \`{}\` is what makes them agree, and it cannot
+						// equate a real dictionary with an empty object: a dictionary whose values are
+						// \`never\` accepts nothing either.
+						{}
+					: // A shape with no declared keys is a dictionary: it has no optional property to
+						// widen, and an index signature satisfies \`{} extends Pick<T, K>\` for every
+						// value type.
+						{ [K in keyof T]: Declared<T[K]> }
 				: {
 						[K in keyof T as string extends K
 							? never

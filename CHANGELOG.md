@@ -21,6 +21,46 @@ whole emitted file rather than one line, and both are spec-authored text reachin
 unchecked. `objectKey` has answered that question for a property NAME since this package existed;
 `jsDocComment` now answers it for a doc STRING.
 
+### The conformance corpus's emitted output is compiled now, and it was never compiling
+
+`wire-contract.gen.ts` is the only thing that catches this emitter disagreeing with ITSELF: it pairs
+what the validator accepts against the framework-free contract type, by name. It was written for
+every corpus scenario and compiled for none.
+
+**Measured the first time anything ran `tsc` over it: 41 of the 41 scenarios carrying a wire contract
+failed.** Every one of them for the same harness reason - `contracts-package` pointed at
+`vocabularies.gen.js`, which exports `SPEC_VOCABULARIES` and nothing else, so every model name was a
+`TS2694`. That trap is documented word for word in `test/support/compile-fixture.ts`, which avoids it
+with a barrel; the corpus harness walked into it, and nothing said so because nothing compiled the
+output. Both harnesses now call one `writeContractsBarrel`.
+
+With the barrel in place the count fell from 41 to 3, and the three were real:
+
+- **A vocabulary alias was emitted without `export`.** The comment justifying that said the
+  vocabularies artefact "already exports these names as runtime tuples, and exporting both collides
+  on every one" - true of a shape this emitter stopped producing, since `vocabularies.gen.ts` has
+  exactly one top-level export and the enum names are keys inside it. Nothing collided, and a barrel
+  cannot re-export a declaration that is not exported, so `wire-contract.gen.ts` did not compile for
+  any spec with an enum request body.
+
+- **An empty model compared unequal to itself.** `z.strictObject({})` infers `Record<string, never>`
+  under Zod 4 while this walk emits `{}`. `Declared<>` now maps an indexer whose VALUE type is `never`
+  to `{}`, because such an indexer admits no property and is an empty object rather than a dictionary.
+  It cannot equate a real dictionary with an empty object: one whose values are `never` accepts
+  nothing either.
+
+- **`@visibility` is still open, and it is baselined with its reason.** `TypeRegistry` emits one
+  declaration per model name carrying the canonical property set; `SchemaRegistry` emits a
+  visibility-projected schema per position. So `type/model/visibility`'s Read schema declares
+  `readProp` alone while the contract type declares all six. Fixing it means giving `TypeRegistry`
+  the keying and suffixes `SchemaRegistry` already has, which RENAMES published contract types for
+  any spec using `@visibility` - a breaking change that wants deciding rather than slipping in.
+
+`test/conformance/typecheck.test.ts` holds it, with floors so it cannot pass having compiled nothing,
+a ceiling on how many scenarios the emitter may refuse, and the baseline read in both directions so a
+fix that leaves its entry behind fails too. Control: restore the old `contracts-package` and the
+clean count falls from 55 to 27.
+
 ### `truncated-doc-comment`, a warning, because the compiler drops text and says nothing
 
 An unescaped `@` in a doc comment begins a doc tag, and everything from there to the end of the

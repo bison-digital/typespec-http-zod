@@ -1,5 +1,6 @@
-import { rmSync, writeFileSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { join, relative } from "node:path";
+import { CONTRACTS_BARREL_SPECIFIER, writeContractsBarrel } from "./contracts-barrel.js";
 import { fileURLToPath } from "node:url";
 import { compile, NodeHost, type Program } from "@typespec/compiler";
 
@@ -63,19 +64,6 @@ export interface FixtureOptions {
 }
 
 /**
- * The name of the barrel this harness writes beside the emitted output.
- *
- * **A suite that compiles the WHOLE emitted set needs one, and pointing `contracts-package` at
- * `vocabularies.gen.js` instead is a trap that looks fine until it is compiled.**
- * `wire-contract.gen.ts` names request types as well as vocabularies, so under that setting it
- * references members the module does not export - four `TS2694`s and, downstream of them, four
- * identity assertions failing for a reason that has nothing to do with the shapes.
- *
- * A real consumer's contracts package is a barrel over both. So is this.
- */
-const CONTRACTS_BARREL = "contracts.barrel";
-
-/**
  * This package's own `src/runtime.ts`, as a specifier the emitted file can actually resolve.
  *
  * **Relative, and spelled `.js`, and both matter.** An absolute path bakes one machine's checkout
@@ -112,7 +100,7 @@ export async function compileFixture(
 			"typespec-http-zod": {
 				"emitter-output-dir": outDir,
 				"contracts-output-dir": outDir,
-				"contracts-package": options.contractsPackage ?? `./${CONTRACTS_BARREL}.js`,
+				"contracts-package": options.contractsPackage ?? CONTRACTS_BARREL_SPECIFIER,
 				"seal-object-schemas": true,
 				"runtime-module": options.runtimeModule ?? runtimeFixtureModule(outDir),
 				...(options.keyVocabularies === undefined
@@ -130,15 +118,7 @@ export async function compileFixture(
 	 * one here would quietly satisfy an import the test meant to point somewhere else.
 	 */
 	if (options.contractsPackage === undefined) {
-		writeFileSync(
-			join(outDir, `${CONTRACTS_BARREL}.ts`),
-			[
-				"// The contracts package, as a consumer's would be: one specifier over both artefacts.",
-				'export * from "./requests.gen.js";',
-				'export * from "./vocabularies.gen.js";',
-				"",
-			].join("\n"),
-		);
+		writeContractsBarrel(outDir);
 	}
 
 	return {

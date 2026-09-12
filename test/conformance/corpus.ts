@@ -1,8 +1,9 @@
-import { readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeHost, compile, listServices } from "@typespec/compiler";
 import { getVersions } from "@typespec/versioning";
+import { CONTRACTS_BARREL_SPECIFIER, writeContractsBarrel } from "../support/contracts-barrel.js";
 
 /**
  * The independent conformance corpus: `@typespec/http-specs`.
@@ -241,9 +242,20 @@ export async function compileScenario(
 					 * **`contracts-package` has no default for exactly this reason.** It once defaulted to
 					 * one repository's package name, so a consumer who configured nothing got validators
 					 * importing from a package they had never heard of.
+					 *
+					 * **It pointed at `vocabularies.gen.js`, which is the trap `compile-fixture.ts` had
+					 * already written down.** That satisfies the enum import above and nothing else:
+					 * `wire-contract.gen.ts` names request types too, so every scenario emitting one
+					 * referenced members the module does not export. Measured before the change: 41 of the
+					 * 41 scenarios carrying a wire contract failed `tsc`, with `TS2694`, `TS2749` and
+					 * `TS2344` downstream of them. Nothing said so, because nothing compiled corpus output.
+					 *
+					 * The barrel is the wider answer to the same need - one specifier over both artefacts,
+					 * which is what a real consumer's contracts package is - and it is now written by one
+					 * helper that both harnesses call.
 					 */
 					"contracts-output-dir": dirs.zodDir,
-					"contracts-package": "./vocabularies.gen.js",
+					"contracts-package": CONTRACTS_BARREL_SPECIFIER,
 					// Must match what openapi3 is given below. The two emitters answer the same question
 					// about the same models and neither can read the other's options; setting one and not
 					// the other is a contradiction, and this differential is precisely what reports it.
@@ -302,6 +314,13 @@ export async function compileScenario(
 		}
 		return undefined;
 	})();
+
+	/**
+	 * The barrel, written beside the emitted output so `wire-contract.gen.ts` can resolve the shared
+	 * types it names. Written even when the compile raised an error: a scenario that failed is never
+	 * typechecked, and a stray file is cheaper than a branch that could get the condition wrong.
+	 */
+	if (existsSync(dirs.zodDir)) writeContractsBarrel(dirs.zodDir);
 
 	const emitterWarnings = program.diagnostics
 		.filter(
