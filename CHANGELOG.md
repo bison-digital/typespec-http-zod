@@ -8,6 +8,36 @@ published types; a patch will not. The **emitted output is part of the API** - a
 validator's shape, to a declared identifier, or to the `EmittedRoute` a wrapping emitter reads is a
 change a consumer feels, and is treated as such here rather than as an implementation detail.
 
+## [0.25.1] - 2026-09-13
+
+A patch: **the `@typespec/streams` and `@typespec/versioning` peers now admit `0.86.0`.** Nothing
+emitted changes and no published type changes, which is what makes it a patch.
+
+On a `0.x` version a caret pins the MINOR, so `^0.85.0` excluded `0.86.0` outright. The rest of the
+estate has moved -- `typespec-openapi-document@0.5.0` widened the same peer for the same reason --
+and a consumer on `0.86.0` was installing against a range this package said it did not support.
+
+**Verified rather than asserted:** the whole suite runs against `@typespec/compiler@1.16.0`,
+`@typespec/http@1.16.0` and `@typespec/{rest,versioning,streams,sse,events,xml}@0.86.0`. 354 tests,
+five gates green by exit code. The `@typespec/compiler`, `http` and `openapi` peers are unchanged at
+`^1.15.0`, which already admits `1.16.0` because a caret on a `1.x` version does not pin the minor.
+
+### Two things deliberately NOT in this release
+
+Both are real, both are measured, and both are larger than a patch.
+
+- **zod `4.6.2` breaks `compile-schemas`.** A validator that merely REACHES a cycle -- not the
+  deferred declaration itself, which this emitter already skips -- throws
+  `Cannot read properties of undefined (reading '_zod')` inside zod's own `z.compile()` on the first
+  parse. That is the exact failure `test/compile/compile.test.ts` already documents for a `z.lazy()`
+  declaration; on `4.6.2` the rule "skip the deferred one" is no longer sufficient. The `zod` peer
+  still reads `^4.5.0`, which over-claims for anyone who turns the option on. Dev dependency held at
+  `4.5.2` until the emitter skips every cycle-reaching declaration.
+- **`@typespec/http-specs@0.1.0-alpha.43` surfaces four disagreements**, one of which is a genuine
+  `response-body` divergence between the validator and the document rather than a count that moved.
+  Corpus held at `alpha.41` until each is understood; absorbing them by adjusting floors would be
+  exactly the narrowing this suite exists to refuse.
+
 ## [0.25.0] - 2026-09-12
 
 A minor carrying five things: **`EmittedRoute` now publishes `security`**, **two reserved words
