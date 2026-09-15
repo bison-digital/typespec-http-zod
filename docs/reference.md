@@ -126,22 +126,35 @@ Node 22 or later. The emitter runs on the stable TypeSpec 1.x surface: `$onEmit`
 
 ## What a response arm carries
 
-`deps.respond` receives every arm the document declares for an operation and chooses one. Beyond the
-status and the body schema, an arm carries two facts the document publishes and which used to be
-dropped:
+`<operationId>Responses` lists every response the document declares for an operation, one arm per
+status key, in OpenAPI's precedence order: exact codes ascending, then ranges such as `4XX`, then
+`default`. Every arm carries the same facts, whatever kind of status it is and whether it is a
+success or a failure:
 
-| field          | when it is present                                                                                                                                                                                                          |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `headers`      | the response declares `@header`. Each entry pairs the WIRE name the response must set with the `property` on the returned value the value is read from, because `@header("x-correlation-id") correlationId` differs in both |
-| `contentTypes` | the status offers MORE than one media type. A single type is what an application already assumes, so repeating it on every arm would be noise                                                                               |
+| field          | what it is                                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------------------------- |
+| `status`       | the status key as the document writes it: a number, `"4XX"`, or `"default"`                                   |
+| `schema`       | the validator for that status's own body, or `undefined` where the response declares no body                  |
+| `contentTypes` | every media type the document names for that status, including a single one. Absent where there is no body    |
+| `headers`      | each declared header by the WIRE name the response sets, with `optional` for the document's `required: false` |
 
-A response declaring neither carries neither, so "none declared" and "none carried" are the same
-state rather than two an application has to tell apart.
+`contentTypes` and `headers` are absent where the document names none, so "none declared" and "none
+carried" are the same state rather than two an application has to tell apart.
 
-**A redirect is an arm like any other.** An operation whose only declared response is a `302` used to
-be dropped from the emitted output entirely, with no diagnostic: the status filter accepted 2xx only,
-so the operation had no status and was skipped. Statuses below 400 are collected now. 4xx and 5xx stay
-out, because those are error arms and a handler does not reach one by returning normally.
+`armFor(arms, status)` returns the arm that governs a status: the exact code first, then its range,
+then `default`.
+
+**Each status has its own arm, and the handler names the status.** Two success statuses with
+different bodies get two arms with two schemas. There is no selector naming a property to read the
+choice from, because the property name is a TypeSpec detail the document does not publish.
+
+**Every operation is emitted.** An operation whose only success is a `2XX` range, or whose only
+response is a redirect, gets its arms like any other.
+
+`EmittedRoute.responses` publishes the same facts to an emitter built on this API, with each header's
+TypeScript type, whether a body is raw binary (`binary`, whose schema is `z.unknown()`), and whether it
+is a stream of events or lines (`streamed`). `EmittedService.schemaNames` gives the identifier each
+arm's body is declared under, in the same order.
 
 ## What a declared type checks, and what a `format` annotation does not
 

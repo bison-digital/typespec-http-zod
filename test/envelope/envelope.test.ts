@@ -38,12 +38,15 @@ describe("every success status the document declares gets an arm", () => {
 	});
 
 	/**
-	 * **The `@statusCode` union IS the selector.** The handler says which status it means by setting
-	 * that property, so nothing is inferred from the body's shape - which is what
-	 * `statusDiscriminatorOf` had to do, and why it needed a required literal that almost no spec has.
+	 * **No arm names a property to choose it by.** A handler names the status it answers with, and
+	 * `armFor` resolves the arm. A `when` selector keyed on the `@statusCode` property's TypeSpec name
+	 * used to be emitted here, which put a name the document never publishes into the contract.
 	 */
-	it("keys the non-default arm on the status property the spec declares", () => {
-		expect(armsOf("create")).toMatch(/when: \{ property: "statusCode", value: 201 \}/);
+	it("gives each declared status its own arm, with no selector", () => {
+		const arms = armsOf("create");
+		expect(arms).not.toContain("when:");
+		expect(arms).toMatch(/\{ status: 200, schema: itemSchema/);
+		expect(arms).toMatch(/\{ status: 201, schema: itemSchema/);
 	});
 
 	it("leaves a single-status operation exactly as it was", () => {
@@ -56,11 +59,11 @@ describe("every success status the document declares gets an arm", () => {
 
 describe("the emitted arms compile", () => {
 	/**
-	 * **`satisfies readonly ResponseArm[]` is what makes this more than a text assertion.** A numeric
-	 * selector value against a `boolean | string` field is a compile error in the file the emitter
-	 * just wrote, and no arm reading the text would see it.
+	 * **`satisfies readonly ResponseArm[]` is what makes this more than a text assertion.** An arm
+	 * field the runtime type does not declare is a compile error in the file the emitter just wrote,
+	 * and no arm reading the text would see it.
 	 */
-	it("passes tsc, selector values included", () => {
+	it("passes tsc", () => {
 		const { output, failed } = typecheckEmitted(compiled.outDir);
 		expect(output.trim(), output).toBe("");
 		expect(failed).toBe(false);
@@ -68,18 +71,14 @@ describe("the emitted arms compile", () => {
 });
 
 /**
- * **An arm names the property a header value is read from, and the handler has to be able to set
- * it.** `@header` properties are stripped from the body schema, correctly - they are not body - so
- * the type a handler returns did not carry them. Measured on `payload__head`:
- * `Awaitable<Result<void>>` against an arm naming two header properties.
- *
- * The library's half is publishing the property's TYPE alongside its name, so the server emitter can
- * put it in the signature rather than guessing `string`.
+ * **A response header is published by the wire name the response sets.** The handler supplies it
+ * under that name, and the library also publishes its TypeScript type on the route so a server
+ * emitter can put it in the signature rather than guessing `string`.
  */
 describe("a response header is something the handler can supply", () => {
-	it("publishes the header property with its type, not just its name", () => {
+	it("publishes the header by its wire name, not its property name", () => {
 		const arms = armsOf("tagged");
-		expect(arms).toContain('name: "x-correlation-id"');
-		expect(arms).toContain('property: "correlationId"');
+		expect(arms).toContain('{ name: "x-correlation-id", optional: false }');
+		expect(arms).not.toContain("correlationId");
 	});
 });

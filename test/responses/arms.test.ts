@@ -44,16 +44,16 @@ describe("a response arm carries what the document declares about it", () => {
 		expect(arms).toMatch(/schema: noteSchema/);
 	});
 
-	it("pairs the wire name with the property the value is read from", () => {
+	it("names each header by the WIRE name the response sets, with its optionality", () => {
 		/**
-		 * **Both names, and the pairing is the assertion.** The response sets `x-correlation-id`; the
-		 * value lives at `correlationId` on what the handler returned. An arm carrying only one of them
-		 * would make every `respond` implementation guess the other, and the two differ exactly when
-		 * `@header("...")` renames - which is the common case for any header with a hyphen.
+		 * **The wire name, and not the TypeSpec property behind it.** The response sets
+		 * `x-correlation-id`; the property is `correlationId`. The pair used to be carried so a runtime
+		 * could read the value off a flattened result, which made the handler contract depend on a
+		 * property name the document never publishes. A result is keyed by what the document states.
 		 */
-		expect(armsFor("create")).toContain('{ name: "x-correlation-id", property: "correlationId" }');
-		// The un-renamed one still pairs, rather than being special-cased away.
-		expect(armsFor("create")).toContain('{ name: "location", property: "location" }');
+		expect(armsFor("create")).toContain('{ name: "x-correlation-id", optional: false }');
+		expect(armsFor("create")).toContain('{ name: "location", optional: false }');
+		expect(armsFor("create")).not.toContain("correlationId");
 	});
 
 	it("gives an arm declaring no headers none, so nothing was invented", () => {

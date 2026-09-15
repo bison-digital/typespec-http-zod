@@ -21,7 +21,6 @@ import {
 } from "@typespec/compiler";
 import {
 	getAuthenticationForOperation,
-	isStatusCode,
 	resolveRequestVisibility,
 	Visibility,
 	type HttpOperation,
@@ -333,104 +332,148 @@ function statusKeysOf(program: Program, response: HttpOperationResponse): Status
 	return keys;
 }
 
-/** Whether a document status key describes a SUCCESS, so the success arms already carry it. */
-function isSuccessKey(status: StatusKey): boolean {
-	return status === "2XX" || (typeof status === "number" && status >= 200 && status < 300);
+/**
+ * A header one response declares, as a handler has to supply it.
+ *
+ * **The WIRE name only.** A result a handler returns is keyed by what the response sets, which is
+ * what the document publishes under `responses.<status>.headers`. The TypeSpec property behind it
+ * used to be carried beside the name so a runtime could read the value off a flattened result; that
+ * made the handler contract depend on a property name the document never states.
+ */
+export interface EmittedResponseHeader {
+	readonly name: string;
+	/** The TypeScript type of the value, so a server emitter can put it in a signature. */
+	readonly type: string;
+	/** The document's `required: false`. */
+	readonly optional: boolean;
 }
 
 /**
- * Every FAILURE arm the operation declares, each with the schema for ITS OWN body.
+ * One response the document declares for an operation, keyed the way the document keys it.
  *
- * **None of these reached the generated output at all, and a census is the proof.** Measured on one
- * service, the document declared `200`x9, `201`x3, `202`x1, `401`x1 and `default`x2, and only the
- * first three were emitted. So the schema for a failure never arrived, and no application could have
- * checked what it sends when something goes wrong even if it wanted to.
+ * **Complete on its own, because a server emitter types a handler's return one member per arm.**
+ * The route used to carry these facts in five separate projections - a primary status and body, a
+ * list of failure arms, headers for numeric statuses only, media types for numeric statuses only,
+ * and a selector for choosing between successes - and each projection had a hole the others did not:
  *
- * **Then every arm that did arrive carried the SERVICE-WIDE error schema.** The spike declares
- * `@error model WebhookUnauthorized { ...ProblemDetails; @statusCode 401 }` and openapi3 publishes
- * the 401 as `$ref: WebhookUnauthorized` while we answered with `problemDetailsSchema`. The shapes
- * were identical there, so nothing was mis-validated - but the component the document names for that
- * response had no declaration at all.
+ * - a range or `default` arm never carried its headers or media types;
+ * - a second success status carried the FIRST status's body, because the selector assumed one model;
+ * - a failure's inline body was an expression nothing outside the arm list could name;
+ * - an operation whose only success was a `2XX` range was dropped without a diagnostic.
  *
- * **`"default"` used to be the one arm with no body of its own**, filled in downstream from the
- * service-wide schema. That was backwards: a catch-all response declares a body like any other
- * response, and `response/status-code-range` gives two operations whose `default` is a DIFFERENT
- * model from every other failure they declare. Reading each response's own body answers all three at
- * once, and is why the emitter no longer needs to believe a service has one error shape.
- *
- * Arms come out in the order OpenAPI resolves them - exact codes, then ranges, then the catch-all -
- * so a consumer scanning for the first match applies the precedence the specification states.
+ * One record per status, built in one pass over `@typespec/http`'s own resolution, has no such gaps
+ * to keep in step.
  */
+export interface EmittedResponse {
+	readonly status: StatusKey;
+	/** This status's body, as an emitted Zod expression, or `undefined` where it declares none. */
+	readonly schema: string | undefined;
+	/**
+	 * Every media type the document names for this status, in declaration order.
+	 *
+	 * Empty exactly when the response carries no body. **A single type is still carried**, because
+	 * assuming the one type is JSON is how a `text/plain` arm became indistinguishable from a JSON one.
+	 */
+	readonly contentTypes: readonly string[];
+	readonly headers: readonly EmittedResponseHeader[];
+	/**
+	 * The body is raw binary, so `schema` is `z.unknown()` - see {@link isRawBinaryMediaType}. A server
+	 * serves such a body as bytes or a stream rather than serialising it.
+	 */
+	readonly binary: boolean;
+	/**
+	 * The body is a stream of events or lines (`@typespec/streams`). The schema describes the stream as
+	 * the document does, a string, which is not something a server validates a stream against.
+	 */
+	readonly streamed: boolean;
+}
+
 /**
- * The headers each response status declares, keyed by the status the arm answers with.
+ * Every response the operation declares, one per status key, in OpenAPI's precedence order.
  *
- * **Read from `@typespec/http`'s own resolution**, which separates a response's headers from its
- * body and gives each one under its WIRE name with the declaring property behind it. Deriving either
- * name any other way would be a second spelling of a fact the compiler already resolved.
+ * **Each response's own body, headers and media types, and nothing borrowed from another.** The
+ * failure arms used to be collected here separately from the success, and before that every failure
+ * carried the service-wide error schema: `@error model WebhookUnauthorized { ...ProblemDetails;
+ * @statusCode 401 }` is published as `$ref: WebhookUnauthorized`, and `response/status-code-range`
+ * gives two operations whose `default` is a different model from every other failure they declare.
+ * Reading each status's own response answers both, and is why nothing here believes a service has
+ * one error shape or one success shape.
+ *
+ * Where two responses resolve to the same status the first body wins, which is what the document
+ * does, and media types and headers are the union across them.
+ *
+ * Call inside `withVisibility(program, Visibility.Read, ...)`: a response is read at `Read`, and
+ * resolving it under a request visibility declares components under the wrong suffix.
  */
-function responseHeadersOf(
-	program: Program,
-	operation: HttpOperation,
-): { status: StatusKey; headers: { name: string; property: string; type: string }[] }[] {
-	const byStatus = new Map<StatusKey, { name: string; property: string; type: string }[]>();
-	for (const response of operation.responses) {
-		const status = response.statusCodes;
-		if (typeof status !== "number") continue;
-		const headers: { name: string; property: string; type: string }[] = [];
-		for (const content of response.responses) {
-			for (const [name, property] of Object.entries(content.headers ?? {})) {
-				if (!headers.some((existing) => existing.name === name)) {
-					/**
-					 * **The TYPE too, because a handler has to be able to SET this.** A `@header`
-					 * property is stripped from the body schema - correctly, it is not body - so a server
-					 * emitter has to put it back into the type a handler returns, and it cannot do that
-					 * from a name alone. Measured before this existed: an arm naming `contentType` and
-					 * `metadata` against a handler declared `Awaitable<Result<void>>`.
-					 */
-					headers.push({ name, property: property.name, type: typeToTs(program, property.type) });
-				}
-			}
-		}
-		if (headers.length === 0) continue;
-		const existing = byStatus.get(status) ?? [];
-		byStatus.set(status, [
-			...existing,
-			...headers.filter((h) => !existing.some((e) => e.name === h.name)),
-		]);
-	}
-	return [...byStatus].map(([status, headers]) => ({ status, headers }));
-}
-
-/** The media types each numeric response status offers, from the compiler's own resolution. */
-function responseMediaTypesOf(
-	operation: HttpOperation,
-): { status: StatusKey; contentTypes: string[] }[] {
-	const byStatus = new Map<StatusKey, string[]>();
-	for (const response of operation.responses) {
-		const status = response.statusCodes;
-		if (typeof status !== "number") continue;
-		const types = responseContentTypesOf(operation, status);
-		if (types.length === 0) continue;
-		byStatus.set(status, types);
-	}
-	return [...byStatus].map(([status, contentTypes]) => ({ status, contentTypes }));
-}
-
-function errorArmsOf(
+function responsesOf(
 	program: Program,
 	operation: HttpOperation,
 	registry: SchemaRegistry,
-): { status: StatusKey; schema: string | undefined }[] {
-	const arms = new Map<StatusKey, string | undefined>();
+): EmittedResponse[] {
+	const byStatus = new Map<
+		string,
+		{
+			readonly status: StatusKey;
+			body: Type | undefined;
+			readonly contentTypes: Set<string>;
+			readonly headers: EmittedResponseHeader[];
+			streamed: boolean;
+		}
+	>();
 	for (const response of operation.responses) {
 		for (const status of statusKeysOf(program, response)) {
-			if (isSuccessKey(status) || arms.has(status)) continue;
-			arms.set(status, bodySchemaOf(response, registry));
+			const key = String(status);
+			const entry = byStatus.get(key) ?? {
+				status,
+				body: undefined,
+				contentTypes: new Set<string>(),
+				headers: [],
+				streamed: false,
+			};
+			for (const content of response.responses) {
+				if (entry.body === undefined && content.body?.bodyKind === "single") {
+					entry.body = bodyTypeOf(content.body.type);
+				}
+				for (const contentType of content.body?.contentTypes ?? []) {
+					entry.contentTypes.add(contentType);
+				}
+				for (const [name, property] of Object.entries(content.headers ?? {})) {
+					if (entry.headers.some((existing) => existing.name === name)) continue;
+					entry.headers.push({
+						name,
+						type: typeToTs(program, property.type),
+						optional: property.optional,
+					});
+				}
+			}
+			if (streamedTypeOf(program, response.type) !== undefined) entry.streamed = true;
+			byStatus.set(key, entry);
 		}
 	}
-	return [...arms]
-		.map(([status, schema]) => ({ status, schema }))
-		.toSorted((a, b) => statusPrecedenceOf(a.status) - statusPrecedenceOf(b.status));
+	return [...byStatus.values()]
+		.map((entry) => {
+			const contentTypes = [...entry.contentTypes];
+			const binary =
+				entry.body !== undefined && isBinaryPart(entry.body) && isRawBinaryMediaType(contentTypes);
+			return {
+				status: entry.status,
+				schema:
+					entry.body === undefined
+						? undefined
+						: binary
+							? "z.unknown()"
+							: registry.expressionFor(entry.body),
+				contentTypes,
+				headers: entry.headers,
+				binary,
+				streamed: entry.streamed,
+			};
+		})
+		.toSorted(
+			(a, b) =>
+				statusPrecedenceOf(a.status) - statusPrecedenceOf(b.status) ||
+				statusOrderOf(a.status) - statusOrderOf(b.status),
+		);
 }
 
 /**
@@ -448,17 +491,10 @@ function statusPrecedenceOf(status: StatusKey): number {
 	return typeof status === "number" ? 0 : 1;
 }
 
-/** A response's own body, as an emitted Zod expression - `undefined` where it declares none. */
-function bodySchemaOf(
-	response: HttpOperationResponse,
-	registry: SchemaRegistry,
-): string | undefined {
-	for (const content of response.responses) {
-		if (content.body?.bodyKind !== "single") continue;
-		const type = bodyTypeOf(content.body.type);
-		if (type !== undefined) return registry.expressionFor(type);
-	}
-	return undefined;
+/** Ascending within one precedence class, so the order does not depend on declaration order. */
+function statusOrderOf(status: StatusKey): number {
+	if (typeof status === "number") return status;
+	return status === "default" ? 0 : Number(status.charAt(0));
 }
 
 /**
@@ -680,78 +716,6 @@ function isArrayType(type: Type): boolean {
 }
 
 /**
- * How to choose between an operation's two success statuses, read from the declared arms.
- *
- * **A discriminator, not a trial-parse.** "Try the 200 schema, and if it fails use the 202" is the
- * banned fallback wearing a different hat: a genuine validation failure on the first arm would be
- * reported as the second arm's shape. Each arm pins a **required literal** property instead -
- * `awaiting: true` on the accepted one - and a consumer reads that one property.
- *
- * This replaces hand-written per-operation closures, which existed only because a spec declaring the
- * SAME body model for both statuses could not say which was which.
- */
-function statusDiscriminatorOf(
-	operation: HttpOperation,
-	statuses: readonly number[],
-): { property: string; value: boolean | string; status: number } | undefined {
-	if (statuses.length < 2) return undefined;
-	for (const status of statuses) {
-		const body = successBodyOf(operation, status);
-		if (body?.kind !== "Model") continue;
-		for (const [name, property] of body.properties) {
-			// The OTHER arm carries the same property as optional; a required literal is the mark.
-			if (property.optional) continue;
-			if (property.type.kind === "Boolean" || property.type.kind === "String") {
-				return { property: name, value: property.type.value, status };
-			}
-		}
-	}
-	return undefined;
-}
-
-/**
- * How a handler says WHICH success status it means, when the spec declares more than one.
- *
- * **The `@statusCode` property is the selector, and it is the one the spec already wrote.**
- * `model Created { @statusCode statusCode: 200 | 201; @body body: Item }` declares both statuses and
- * names the property that chooses between them, so nothing has to be inferred from the body's shape.
- *
- * That inference is what {@link statusDiscriminatorOf} does, and it needs a required literal property
- * on one of the bodies. Measured across the whole conformance corpus: it fires ZERO times, so before
- * this the second arm had never been emitted by any spec at all - `armFor` could not select a status
- * that was never written. Both remain: a discriminator still serves two DIFFERENT response models,
- * this serves one model declaring a union of statuses.
- *
- * All statuses of such a model share one body by construction - it is one model - so every arm
- * carries the same schema and only the status and the selector value differ.
- */
-function statusSelectorOf(
-	program: Program,
-	operation: HttpOperation,
-	statuses: readonly number[],
-): { property: string; statuses: readonly number[] } | undefined {
-	if (statuses.length < 2) return undefined;
-	for (const response of operation.responses) {
-		const type = response.type;
-		if (type === undefined || type.kind !== "Model") continue;
-		for (const [name, property] of type.properties) {
-			if (isStatusCode(program, property)) return { property: name, statuses };
-		}
-	}
-	return undefined;
-}
-
-/** The emitted schema for a specific success status, used for the second arm of a dual-status op. */
-function alternateSchemaFor(
-	operation: HttpOperation,
-	status: number,
-	registry: SchemaRegistry,
-): string | undefined {
-	const body = successBodyOf(operation, status);
-	return body === undefined ? undefined : registry.expressionFor(body);
-}
-
-/**
  * The Zod for a **multipart** request body, built from its parts.
  *
  * **`requestBodyOf` returns a type only for `bodyKind === "single"`, so every multipart operation
@@ -962,9 +926,16 @@ export interface EmittedRoute {
 	 * carries one of each.
 	 */
 	readonly reservedPathParameters: readonly string[];
-	readonly statusCode: number;
-	readonly statusCodes: readonly number[];
-	/** Media types the success body can be served as - the basis for `Accept` negotiation. */
+	/**
+	 * Every response the document declares, one per status key, in OpenAPI's precedence order. See
+	 * {@link EmittedResponse}.
+	 */
+	readonly responses: readonly EmittedResponse[];
+	/**
+	 * Media types the lowest exact success status can be served as - the basis for `Accept`
+	 * negotiation between several operations sharing one route. Empty where that status carries no
+	 * body, or where the operation declares no exact success status at all.
+	 */
 	readonly responseContentTypes: readonly string[];
 	/**
 	 * Media types the request body may be SENT as.
@@ -1007,21 +978,6 @@ export interface EmittedRoute {
 	/** The `accept` literal this operation answers to, when it declares one. */
 	readonly accept: { readonly name: string; readonly value: string } | undefined;
 	/**
-	 * `undefined` when the operation's success response carries no body - a `204`, or any `@delete`
-	 * returning `void`.
-	 *
-	 * **This used to be required, and requiring it silently deleted routes.** `collectRoutes`
-	 * skipped any operation `successBodyOf` could not answer for, with no diagnostic: measured across
-	 * `@typespec/http-specs`, the document declared 540 operations and this emitter mounted 256, with
-	 * 282 of the 284 missing ones bodyless. `payload/multipart` produced `GENERATED_ROUTES = []`
-	 * against seventeen declared operations and compiled clean. Even `parameters/path` lost both of
-	 * its operations, because they answer `NoContentResponse`.
-	 *
-	 * A bodyless success is ordinary HTTP, not an edge case. The route is emitted; a server
-	 * answers the declared status with no body.
-	 */
-	readonly responseSchema: string | undefined;
-	/**
 	 * The input property that receives the UNPARSED body, when the operation declares one.
 	 *
 	 * A `bytes` body means the bytes themselves are the contract: where a signature covers exactly
@@ -1060,48 +1016,6 @@ export interface EmittedRoute {
 	 * permits, in a shape that contract forbids.
 	 */
 	readonly optionalBody: boolean;
-	/** Declared failures, each with the schema for its OWN body, in OpenAPI's precedence order. */
-	readonly errorArms: readonly {
-		readonly status: StatusKey;
-		readonly schema: string | undefined;
-	}[];
-	/**
-	 * The headers each response status declares, as the document publishes them.
-	 *
-	 * **`deps.respond` could not set a header the contract promises.** A spec may declare `@header` on
-	 * a response model - a `Location` on a 302, a `Link`, a correlation echo - and the document
-	 * publishes it under `responses.<code>.headers`, but the arm carried a status and a body schema and
-	 * nothing else. So the server could not answer faithfully, and a redirect could not be served at
-	 * all. Reported as blocking by a consumer, and it is a fact the document already states.
-	 *
-	 * **Both names are carried, because two different things need them.** `name` is the WIRE name,
-	 * which is what the response sets; `property` is the name on the returned value, which is where the
-	 * value is read from. `@header("x-correlation-id") correlationId: string` is `x-correlation-id` on
-	 * the wire and `correlationId` in the handler's result, and an emitter given only one of them would
-	 * have to guess the other.
-	 */
-	readonly responseHeaders: readonly {
-		readonly status: StatusKey;
-		readonly headers: readonly {
-			readonly name: string;
-			readonly property: string;
-			/** The TypeScript type of the value, so a server emitter can put it in a signature. */
-			readonly type: string;
-		}[];
-	}[];
-	/**
-	 * The media types each response status offers.
-	 *
-	 * **`responseContentTypes` above carries this for the PRIMARY status only, and an arm carried
-	 * none at all.** An operation whose one status offers `application/json` and `text/event-stream`
-	 * emitted a single arm holding the JSON schema, and the alternative was dropped from the list
-	 * entirely, so `deps.respond` could not tell what it was answering with and a non-JSON operation
-	 * could not be served faithfully. Reported by two consumers independently.
-	 */
-	readonly responseMediaTypes: readonly {
-		readonly status: StatusKey;
-		readonly contentTypes: readonly string[];
-	}[];
 	/**
 	 * No caller is established, so the operation receives no `ServiceContext`.
 	 *
@@ -1135,19 +1049,6 @@ export interface EmittedRoute {
 	 * a fact rather than an absence.
 	 */
 	readonly security: readonly SecurityRequirement[];
-	/** Which of two success statuses to answer, and the literal property that decides it. */
-	readonly statusBy: { property: string; value: boolean | string; status: number } | undefined;
-	/**
-	 * The property a handler sets to choose between several declared success statuses, and the
-	 * statuses it may carry - read from a `@statusCode` typed as a union of literals.
-	 *
-	 * **Published because the handler has to be able to SAY it.** The property is HTTP metadata, so it
-	 * is stripped from the body schema (correctly - it is not body), which means a server emitter has
-	 * to add it back to the type a handler returns or the arms name something unsatisfiable.
-	 */
-	readonly statusSelector: { property: string; statuses: readonly number[] } | undefined;
-	/** The schema for the SECOND success status, when the operation declares two distinct arms. */
-	readonly alternateResponseSchema: string | undefined;
 }
 
 /**
@@ -1444,11 +1345,13 @@ export function collectRoutes(
 	const routes: EmittedRoute[] = [];
 	{
 		for (const operation of service.operations) {
+			/**
+			 * **Every operation is a route, whatever its responses are.** This used to require an exact
+			 * 2xx or 3xx, which dropped an operation whose only success was a `2XX` range without a word
+			 * - the same silent shape as the 282 bodyless operations an earlier rule dropped, because a
+			 * range is not a number. A bodyless success is ordinary HTTP, and so is a ranged one.
+			 */
 			const statusCode = successStatusOf(operation);
-			if (statusCode === undefined) continue;
-			// No body is a legitimate success - see `EmittedRoute.responseSchema`. Skipping here is what
-			// dropped 282 operations across the conformance corpus without a word.
-			const responseType = successBodyOf(operation, statusCode);
 			const requestType = requestBodyOf(operation);
 			/**
 			 * **A streamed operation's EVENT payloads are not reachable from its body.**
@@ -1471,9 +1374,6 @@ export function collectRoutes(
 				operation.operation,
 				operation.verb,
 			);
-			const statusCodes = successStatusesOf(operation);
-			const discriminator = statusDiscriminatorOf(operation, statusCodes);
-			const statusSelector = statusSelectorOf(program, operation, statusCodes);
 			/**
 			 * A `bytes` body means the BYTES are the contract.
 			 *
@@ -1551,9 +1451,8 @@ export function collectRoutes(
 				reservedPathParameters: operation.parameters.parameters
 					.filter((parameter) => parameter.type === "path" && parameter.allowReserved)
 					.map((parameter) => parameter.name),
-				statusCode,
-				statusCodes,
-				responseContentTypes: responseContentTypesOf(operation, statusCode),
+				responseContentTypes:
+					statusCode === undefined ? [] : responseContentTypesOf(operation, statusCode),
 				requestContentTypes: [...(operation.parameters.body?.contentTypes ?? [])],
 				/**
 				 * `@summary` first, `@doc` as the fallback.
@@ -1592,47 +1491,21 @@ export function collectRoutes(
 						accept: split.accept,
 					};
 				})(),
-				responseSchema:
-					responseType === undefined
-						? undefined
-						: withVisibility(program, Visibility.Read, () =>
-								/**
-								 * A raw binary body is `z.unknown()`, matching what a binary multipart part
-								 * already emits and what the document actually asserts - see
-								 * {@link isRawBinaryMediaType}.
-								 */
-								isBinaryPart(responseType) &&
-								isRawBinaryMediaType(responseContentTypesOf(operation, statusCode))
-									? "z.unknown()"
-									: registry.expressionFor(responseType),
-							),
+				/**
+				 * Read at `Visibility.Read`, as openapi3 reads a response, and after the request walks so
+				 * declarations keep the order they had. Resolving responses under the ambient request
+				 * visibility declared six components under the wrong suffix - measured:
+				 * type/model/visibility gained six divergences.
+				 */
+				responses: withVisibility(program, Visibility.Read, () =>
+					responsesOf(program, operation, registry),
+				),
 				rawBodyProperty,
 				bodyProperty,
 				optionalBody,
-				// Responses are read at Visibility.Read, exactly as the success body above is. Resolving
-				// them under the ambient request visibility declared six components under the wrong
-				// suffix - measured: type/model/visibility gained six divergences.
-				errorArms: withVisibility(program, Visibility.Read, () =>
-					errorArmsOf(program, operation, registry),
-				),
-				responseHeaders: responseHeadersOf(program, operation),
-				responseMediaTypes: responseMediaTypesOf(operation),
 				scopes: authentication.scopes,
 				security: authentication.security,
 				noAuth: authentication.noAuth,
-				statusBy: discriminator,
-				statusSelector,
-				/**
-				 * **Each arm is validated against its OWN shape.**
-				 *
-				 * A consumer checks its value against the arm's schema, and with one schema
-				 * for two statuses the acknowledged response was checked against the resolved arm's
-				 * shape - a 502 on a perfectly good 202.
-				 */
-				alternateResponseSchema:
-					discriminator === undefined
-						? undefined
-						: alternateSchemaFor(operation, discriminator.status, registry),
 			});
 		}
 	}
@@ -1893,8 +1766,15 @@ export interface RouteSchemaNames {
 	readonly query: string | undefined;
 	readonly header: string | undefined;
 	readonly body: string | undefined;
-	readonly response: string | undefined;
-	readonly alternateResponse: string | undefined;
+	/**
+	 * The identifier each response's body is declared under, parallel to `EmittedRoute.responses` and
+	 * in the same order. `schema` is `undefined` exactly where that response carries no body.
+	 *
+	 * **An identifier for every arm, failures included.** A success body used to be named and a
+	 * failure's inline body stayed an expression inside the arm list, so a server emitter could not
+	 * write `z.infer<typeof ...>` for the one response it most needs a handler to be able to return.
+	 */
+	readonly arms: readonly { readonly status: StatusKey; readonly schema: string | undefined }[];
 	/**
 	 * The `readonly ResponseArm[]` const - what the operation may answer with, and with which body.
 	 *
@@ -1972,11 +1852,22 @@ function nameRouteSchemas(
 		// A raw body is read as text, never parsed, so it has no validator - the bytes are the contract.
 		const body =
 			route.rawBodyProperty === undefined ? declare("Body", route.requestSchema) : undefined;
-		const response = declare("Response", route.responseSchema);
-		const alternateResponse = declare("AlternateResponse", route.alternateResponseSchema);
+		/**
+		 * One identifier per distinct body, suffixed by the status that first carries it. Two statuses
+		 * sharing one inline body share its declaration rather than emitting it twice.
+		 */
+		const declaredBodies = new Map<string, string | undefined>();
+		const arms = route.responses.map((response) => {
+			if (response.schema === undefined) return { status: response.status, schema: undefined };
+			if (!declaredBodies.has(response.schema)) {
+				const suffix = response.status === "default" ? "Default" : String(response.status);
+				declaredBodies.set(response.schema, declare(`Response${suffix}`, response.schema));
+			}
+			return { status: response.status, schema: declaredBodies.get(response.schema) };
+		});
 		const responses = schemaConst(route.operationId, "Responses");
 		declarations.push(
-			`export const ${responses} = ${responseArmsOf(route, response, alternateResponse)} satisfies readonly ResponseArm[];`,
+			`export const ${responses} = ${responseArmsOf(route, arms)} satisfies readonly ResponseArm[];`,
 		);
 		names.set(route.operationId, {
 			operationId: route.operationId,
@@ -1984,8 +1875,7 @@ function nameRouteSchemas(
 			query,
 			header,
 			body,
-			response,
-			alternateResponse,
+			arms,
 			responses,
 		});
 	}
@@ -1993,114 +1883,34 @@ function nameRouteSchemas(
 }
 
 /**
- * What an operation may answer with, as a literal - each declared status paired with the body the
- * document gives it, in OpenAPI's own precedence order.
+ * What an operation may answer with, as a literal - each declared status with the body, media types
+ * and headers the document gives it, in OpenAPI's own precedence order.
  *
- * **This docblock was orphaned in the source it came from**, sitting above an unrelated function
- * while the one it describes had none. Reattached.
+ * **Rendered from one record per status, so no arm can shadow another.** The primary success arm and
+ * the failure arms used to be rendered from separate projections and then deduplicated by matching
+ * the emitted text for `status:`, which is how a redirect came to be declared twice and how a
+ * failure arm came to carry no headers while a success arm with the same headers did.
+ *
+ * `contentTypes` and `headers` are written only where the document names some, so "none declared"
+ * and "none carried" are the same state rather than two a runtime has to tell apart.
  */
 function responseArmsOf(
 	route: EmittedRoute,
-	response: string | undefined,
-	alternate: string | undefined,
+	arms: readonly { readonly status: StatusKey; readonly schema: string | undefined }[],
 ): string {
-	const arms: string[] = [];
-	const primary = response ?? "undefined";
-	/**
-	 * The headers this status declares, rendered onto the arm that answers with it.
-	 *
-	 * Emitted only where there are some: an arm for a response declaring none must not acquire an
-	 * empty list, or every `respond` implementation has to tell "none declared" from "none carried".
-	 */
-	/**
-	 * The media types this status offers.
-	 *
-	 * **Emitted whenever the document names any, including a single one.** It was emitted only for
-	 * several, on the reasoning that one type is what a `respond` already assumes - and that reasoning
-	 * was wrong, because it assumed the one type is JSON. A `text/plain` arm and a JSON arm were then
-	 * indistinguishable to a generic `respond`: the document knew and the runtime did not, so consumers
-	 * restated the media type in their own result envelope to get it back.
-	 */
-	const mediaTypesFor = (status: StatusKey): string => {
-		const declared =
-			route.responseMediaTypes.find((entry) => entry.status === status)?.contentTypes ?? [];
-		if (declared.length === 0) return "";
-		return `, contentTypes: [${declared.map((t) => JSON.stringify(t)).join(", ")}]`;
-	};
-	const headersFor = (status: StatusKey): string => {
-		const declared = route.responseHeaders.find((entry) => entry.status === status)?.headers ?? [];
-		if (declared.length === 0) return "";
-		const rendered = declared
-			.map((h) => `{ name: ${JSON.stringify(h.name)}, property: ${JSON.stringify(h.property)} }`)
-			.join(", ");
-		return `, headers: [${rendered}]`;
-	};
-	if (route.statusSelector !== undefined) {
-		/**
-		 * **One arm per declared status, keyed on the property the spec already named.**
-		 *
-		 * The selector arms come first and the default last, the same order the discriminator below
-		 * uses: anything scanning for a match wants the specific ones before the fallback. Every arm
-		 * carries the same schema because a `@statusCode` union is ONE model - the statuses differ,
-		 * the body does not.
-		 */
-		const { property, statuses } = route.statusSelector;
-		for (const status of statuses.filter((candidate) => candidate !== route.statusCode)) {
-			arms.push(
-				`{ status: ${status}, schema: ${primary}${mediaTypesFor(status)}${headersFor(status)}, when: { property: ${JSON.stringify(property)}, value: ${status} } }`,
-			);
-		}
-		arms.push(
-			`{ status: ${route.statusCode}, schema: ${primary}${mediaTypesFor(route.statusCode)}${headersFor(route.statusCode)} }`,
-		);
-	} else if (route.statusBy === undefined) {
-		arms.push(
-			`{ status: ${route.statusCode}, schema: ${primary}${mediaTypesFor(route.statusCode)}${headersFor(route.statusCode)} }`,
-		);
-	} else {
-		const alternateSchema = alternate ?? "undefined";
-		const { property, value, status } = route.statusBy;
-		arms.push(
-			`{ status: ${status}, schema: ${alternateSchema}${mediaTypesFor(status)}${headersFor(status)}, when: { property: ${JSON.stringify(property)}, value: ${JSON.stringify(value)} } }`,
-			`{ status: ${route.statusCode}, schema: ${primary}${mediaTypesFor(route.statusCode)}${headersFor(route.statusCode)} }`,
-		);
-	}
-	/**
-	 * The failure arms, which used to be dropped entirely.
-	 *
-	 * **The document declares what an error body looks like and the server never passed it on**, so
-	 * `respond` could not check what it sends on failure even in principle.
-	 *
-	 * **This used to fall back to the service-wide error schema, and the fallback was the defect.**
-	 * `arm.schema ?? errorSchema` was reached by every arm the emitter could not resolve a body for -
-	 * which, while `"default"` was deliberately given none, meant every catch-all in every service
-	 * answered with whichever shape `errorBodyOf` had settled on rather than the one its own response
-	 * declares. Each arm resolves its own body now, so an arm with no schema is a response the document
-	 * says carries no body, and saying `undefined` is the truthful answer rather than a guess.
-	 */
-	/**
-	 * **An error arm whose status the primary arm already answers is dropped, primary winning.**
-	 *
-	 * `errorArmsOf` excludes 2xx from the failure arms, so widening the primary to include 3xx made a
-	 * redirect BOTH: `[{ status: 302, schema: undefined, headers: [...] }, { status: 302, schema:
-	 * undefined }]`, two arms for one status where the second shadows the first's headers for anything
-	 * scanning past the first match.
-	 *
-	 * Widening `isSuccessKey` to match would be wrong in the other direction: an operation declaring a
-	 * 200 AND a 302 has 200 as its primary, so the 302 must stay a failure arm to be emitted at all.
-	 * Deduplicating here keeps both cases, because it asks what was actually emitted rather than what
-	 * might have been.
-	 */
-	const emitted = new Set<string>();
-	for (const arm of arms) {
-		const status = /status: ([^,}]+)/.exec(arm)?.[1]?.trim();
-		if (status !== undefined) emitted.add(status);
-	}
-	for (const arm of route.errorArms) {
-		if (emitted.has(String(arm.status)) || emitted.has(JSON.stringify(arm.status))) continue;
-		arms.push(`{ status: ${JSON.stringify(arm.status)}, schema: ${arm.schema ?? "undefined"} }`);
-	}
-	return `[${arms.join(", ")}]`;
+	const rendered = route.responses.map((response, index) => {
+		const schema = arms[index]?.schema ?? "undefined";
+		const contentTypes =
+			response.contentTypes.length === 0
+				? ""
+				: `, contentTypes: [${response.contentTypes.map((type) => JSON.stringify(type)).join(", ")}]`;
+		const headers =
+			response.headers.length === 0
+				? ""
+				: `, headers: [${response.headers.map((header) => `{ name: ${JSON.stringify(header.name)}, optional: ${header.optional} }`).join(", ")}]`;
+		return `{ status: ${JSON.stringify(response.status)}, schema: ${schema}${contentTypes}${headers} }`;
+	});
+	return `[${rendered.join(", ")}]`;
 }
 
 /** One operation's success response - the shape a producer must contain, and may exceed. */

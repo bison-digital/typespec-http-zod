@@ -108,6 +108,7 @@ interface DocumentResponse {
 	readonly content?: Readonly<
 		Record<string, { readonly schema?: JsonSchema; readonly itemSchema?: JsonSchema }>
 	>;
+	readonly headers?: Readonly<Record<string, { readonly required?: boolean }>>;
 }
 
 interface DocumentOperation {
@@ -354,6 +355,8 @@ function validatorFor(
 interface EmittedArm {
 	readonly status: number | string;
 	readonly schema?: unknown;
+	readonly contentTypes?: readonly string[];
+	readonly headers?: readonly { readonly name: string; readonly optional: boolean }[];
 }
 
 /**
@@ -372,10 +375,17 @@ function responseArmsFor(
 	const exact = emitted[`${operationId}Responses`];
 	if (Array.isArray(exact)) return { arms: exact as EmittedArm[], merged: false };
 	const parts: EmittedArm[] = [];
+	/**
+	 * **Every member, not only the first.** openapi3 joins the members' ids with `_`, so a member is
+	 * any `_`-delimited run of the merged id. Matching by prefix found the first member alone - which
+	 * was enough while only statuses were compared, since every member declares the same ones, and
+	 * reported the other members' media types as missing the moment media types were compared.
+	 */
+	const delimited = `_${operationId}_`;
 	for (const [key, value] of Object.entries(emitted)) {
 		if (!key.endsWith("Responses") || !Array.isArray(value)) continue;
 		const candidate = key.slice(0, -"Responses".length);
-		if (candidate !== "" && operationId.startsWith(`${candidate}_`)) {
+		if (candidate !== "" && delimited.includes(`_${candidate}_`)) {
 			parts.push(...(value as EmittedArm[]));
 		}
 	}
@@ -904,6 +914,10 @@ interface Comparison {
 	readonly streamItemBodies: number;
 	/** Non-object response bodies whose top-level KIND is compared. */
 	readonly responseBodyKindsCompared: number;
+	/** Arms whose media types were compared with the document's `content` keys for that status. */
+	readonly responseMediaTypesCompared: number;
+	/** Arms whose headers were compared with the document's `headers` for that status. */
+	readonly responseHeadersCompared: number;
 	/** `content-type`/`accept` validators set aside: stated via `content` keys, not as parameters. */
 	/**
 	 * Content-negotiation headers the parameter arm sets aside, split into the two honest answers.
@@ -985,6 +999,8 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 	/** Responses whose body the document describes as stream ITEMS - a 3.2 shape, not a gap. */
 	let streamItemBodies = 0;
 	let responseBodyKindsCompared = 0;
+	let responseMediaTypesCompared = 0;
+	let responseHeadersCompared = 0;
 	let requestBodiesCompared = 0;
 	let requestBodyKindsCompared = 0;
 	let unreadableRequestBodies = 0;
@@ -1343,6 +1359,53 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 							if (response === undefined) continue;
 							const arm = emittedArms.arms.find((candidate) => String(candidate.status) === status);
 							if (arm === undefined) continue;
+							/**
+							 * **What else the document says about this status: its media types and its
+							 * headers.** A server serves an arm from these. They were carried for exact
+							 * statuses only, and on a failure arm not at all, and nothing compared them:
+							 * a `4XX` arm dropping its `Retry-After` was invisible to every arm above,
+							 * because the status and the body were both right.
+							 *
+							 * A negotiated entry is several members behind one document response, so the
+							 * union of the members' arms for this status is what the document lists.
+							 */
+							const sameStatus = emittedArms.arms.filter(
+								(candidate) => String(candidate.status) === status,
+							);
+							const documentTypes = Object.keys(response.content ?? {}).toSorted();
+							const armTypes = [
+								...new Set(sameStatus.flatMap((candidate) => candidate.contentTypes ?? [])),
+							].toSorted();
+							responseMediaTypesCompared++;
+							if (documentTypes.join(",") !== armTypes.join(",")) {
+								add(
+									"response-media-types",
+									`${scenario.name}:${operationId}.${status}`,
+									`document=[${documentTypes}] emitted=[${armTypes}]`,
+								);
+							}
+							const documentHeaders = Object.entries(response.headers ?? {})
+								.map(
+									([name, header]) => `${name.toLowerCase()}${header.required === true ? "" : "?"}`,
+								)
+								.toSorted();
+							const armHeaders = [
+								...new Set(
+									sameStatus.flatMap((candidate) =>
+										(candidate.headers ?? []).map(
+											(header) => `${header.name.toLowerCase()}${header.optional ? "?" : ""}`,
+										),
+									),
+								),
+							].toSorted();
+							responseHeadersCompared++;
+							if (documentHeaders.join(",") !== armHeaders.join(",")) {
+								add(
+									"response-headers",
+									`${scenario.name}:${operationId}.${status}`,
+									`document=[${documentHeaders}] emitted=[${armHeaders}]`,
+								);
+							}
 							if (!responseHasBody(response)) {
 								if (arm.schema !== undefined) {
 									add(
@@ -1624,6 +1687,8 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 		unreadableResponseBodies,
 		streamItemBodies,
 		responseBodyKindsCompared,
+		responseMediaTypesCompared,
+		responseHeadersCompared,
 		requestBodiesCompared,
 		requestBodyKindsCompared,
 		unreadableRequestBodies,
@@ -2006,6 +2071,13 @@ describe("the validator and the document agree, over a corpus we did not write",
 		 */
 		expect(comparison.responsesCompared).toBeGreaterThanOrEqual(550);
 		expect(comparison.responseBodiesCompared).toBeGreaterThanOrEqual(190);
+		/**
+		 * **Media types and headers per arm, compared for every status whose arm was found.** Held
+		 * open by the same floor as the statuses, so the comparison cannot be skipped by a change that
+		 * stops finding arms.
+		 */
+		expect(comparison.responseMediaTypesCompared).toBeGreaterThanOrEqual(550);
+		expect(comparison.responseHeadersCompared).toBeGreaterThanOrEqual(550);
 		/**
 		 * **An upper bound, because this number SUPPRESSES findings.** Every other floor here guards
 		 * against an arm going quiet; this one guards the opposite failure. A reachability walk that

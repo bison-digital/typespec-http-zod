@@ -114,7 +114,8 @@ export async function $onEmit(context: EmitContext) {
 	for (const service of services) {
 		for (const route of service.routes) {
 			const names = service.schemaNames.get(route.operationId);
-			// names.path, names.query, names.header, names.body, names.response, names.responses
+			// names.path, names.query, names.header, names.body, names.arms, names.responses
+			// route.responses: each declared status with its body, media types and headers
 		}
 	}
 }

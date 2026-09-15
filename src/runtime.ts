@@ -16,11 +16,7 @@ import type { ZodType } from "zod";
  */
 
 /**
- * One status an operation may answer with, and the schema the document publishes for it.
- *
- * `when` is present only where an operation declares two success arms discriminated by a property of
- * the result - the application reads that property, because only it knows how to see inside its own
- * result envelope. Everything else about the choice is decided at generation time.
+ * One status an operation may answer with, and what the document publishes for it.
  *
  * **Failure arms are here too, and for a while they were not.** The document declares what an
  * error response looks like, and the generated server passed on only the success statuses - so an
@@ -34,6 +30,11 @@ import type { ZodType } from "zod";
  * status not otherwise listed. Sorting once at generation time is what keeps every application from
  * re-deriving the rule - and from getting it silently wrong when a `404` and a `4XX` both apply.
  *
+ * **Nothing here says how to choose an arm from a value.** An application names the status it is
+ * answering with, and {@link armFor} says which arm governs it. A `when` field used to name a
+ * property of the result to read the choice from; that made the choice depend on a TypeSpec property
+ * name the document never states, and it is gone.
+ *
  * **`schema: undefined` is a statement, not an absence.** A response the document says carries no
  * body has no validator, and that is the truthful answer. It is also why the generated arms are
  * annotated with `satisfies readonly ResponseArm[]` rather than `as const`: measured, `as const`
@@ -42,31 +43,28 @@ import type { ZodType } from "zod";
  */
 export interface ResponseArm {
 	/**
-	 * The media types this response offers, where the document names more than one.
+	 * Every media type this response offers, including a single one.
 	 *
-	 * Absent where it names one, which is what an application already assumes. Present, it is the set
-	 * to negotiate against: `selectContentType` takes the caller's `Accept` and these.
+	 * **A single type is carried too.** Omitting it assumed the one type is JSON, and a generic
+	 * responder could then not tell a `text/plain` arm from a JSON one: the document knew and the
+	 * runtime did not. Absent only where the response carries no body.
 	 */
 	readonly contentTypes?: readonly string[];
 	/**
-	 * The headers this response declares, as the document publishes them.
+	 * The headers this response declares, by the WIRE name the response sets.
 	 *
-	 * **Two names, because two different things need them.** `name` is the WIRE name, which is what
-	 * the response sets; `property` is the name on the value the handler returned, which is where the
-	 * value is read from. `@header("x-correlation-id") correlationId: string` is `x-correlation-id`
-	 * on the wire and `correlationId` in the result.
-	 *
-	 * Absent where the response declares none, so "none declared" and "none carried" are the same
-	 * thing rather than two states an application has to tell apart.
+	 * `optional` is the document's `required: false`. Absent where the response declares none, so
+	 * "none declared" and "none carried" are the same thing rather than two states an application has
+	 * to tell apart.
 	 */
-	readonly headers?: readonly { readonly name: string; readonly property: string }[];
+	readonly headers?: readonly { readonly name: string; readonly optional: boolean }[];
 	/**
 	 * The status this arm answers with: an exact code, a `4XX`-style range, or the catch-all.
 	 *
 	 * **`"default"` is carried as itself, not resolved to a number.** OpenAPI's `default` response
 	 * means "any status not listed", and an emitter picking one would be answering a question the
-	 * contract deliberately left to the application. The application maps its own failure to a status;
-	 * this says which schema the body must match once it has.
+	 * contract deliberately left to the application. The application names its own status; this says
+	 * which schema the body must match once it has.
 	 *
 	 * **A range is carried as itself for the same reason, and it used to be dropped entirely.**
 	 * `@minValue(400) @maxValue(499) @statusCode _: int32` is a `4XX` entry in the document; the
@@ -77,15 +75,6 @@ export interface ResponseArm {
 	 */
 	readonly status: number | "default" | `${1 | 2 | 3 | 4 | 5}XX`;
 	readonly schema: ZodType | undefined;
-	/**
-	 * How a handler said WHICH arm it meant, where an operation declares more than one success.
-	 *
-	 * **`number` too, because a `@statusCode` union selects by the status itself.**
-	 * `model Created { @statusCode statusCode: 200 | 201 }` names the property that chooses and its
-	 * values are the statuses; the discriminator case carries a boolean or string literal off the body
-	 * instead. Both answer the same question, so both use this one field.
-	 */
-	readonly when?: { readonly property: string; readonly value: boolean | number | string };
 }
 
 /**

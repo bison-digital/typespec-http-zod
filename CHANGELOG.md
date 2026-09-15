@@ -8,6 +8,43 @@ published types; a patch will not. The **emitted output is part of the API** - a
 validator's shape, to a declared identifier, or to the `EmittedRoute` a wrapping emitter reads is a
 change a consumer feels, and is treated as such here rather than as an implementation detail.
 
+## [Unreleased]
+
+**Breaking: one complete response record per status.** A server emitter can now type a handler's
+return as the union of every response the document declares, because each arm carries its own body,
+media types and headers, whatever kind of status it is.
+
+`EmittedRoute` carried responses in five projections, and each had a hole the others did not:
+
+- **a second success status carried the first status's body.** `op two(): Opened | Queued`, with
+  `Queued` declaring a different model at 202, emitted `{ status: 202, schema: noteSchema }`, and the
+  202 body's component was never declared at all;
+- **a failure arm carried no headers and no media types.** A `429` declaring `Retry-After`, or a
+  `4XX` range, published both in the document and neither in its arm;
+- **a failure's inline body was an expression inside the arm list**, so nothing outside it could name
+  the schema;
+- **an operation whose only success was a `2XX` range was dropped** without a diagnostic.
+
+Replaced by `EmittedRoute.responses`, one `EmittedResponse` per status key in OpenAPI's precedence
+order, built in one pass over `@typespec/http`'s resolution. `RouteSchemaNames.arms` gives an
+identifier for every body, failures included.
+
+**Removed:** `EmittedRoute.statusCode`, `statusCodes`, `responseSchema`, `errorArms`,
+`responseHeaders`, `responseMediaTypes`, `statusBy`, `statusSelector`, `alternateResponseSchema`;
+`RouteSchemaNames.response` and `alternateResponse`; `ResponseArm.when`; and the `property` of a
+response header, which is now `{ name, optional }` by wire name. A handler names the status it
+answers with, so no arm names a TypeSpec property to read the choice from.
+
+**Emitted output changes:** every arm carries `contentTypes` and `headers` where the document names
+them; a success body declared inline is named `<operationId>Response<status>` rather than
+`<operationId>Response`; arms are ordered exact codes ascending, then ranges, then `default`.
+
+**Graded:** `test/responses/complete.test.ts`, eight arms, each red before the change. The
+conformance differential now compares every arm's media types and headers with the document across
+the corpus. Controls: dropping failure-arm media types, or every header, turns it red. The corpus
+declares no header on a failure arm, so that case is held by the fixture suite, where dropping
+failure-arm headers turns three arms red.
+
 ## [0.25.1] - 2026-09-13
 
 A patch: **the `@typespec/streams` and `@typespec/versioning` peers now admit `0.86.0`.** Nothing
