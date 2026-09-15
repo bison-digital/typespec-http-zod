@@ -56,6 +56,14 @@ failure-arm headers turns three arms red.
   documents. A part is now decoded by the rule path, query and header values already use, so text that
   is not a well-formed number still fails against the document's schema. `test/multipart/` holds the
   arm, proven red first.
+- **A multipart part whose media type is JSON now accepts the JSON text a form carries.** A client
+  sends `HttpPart<Address>` or `HttpPart<int32[]>` as text with `Content-Type: application/json` and
+  no filename, so `c.req.parseBody()` hands over a string and the schema refused it with
+  `expected object, received string`. Measured on the exact bytes the Postman CLI sends, and by request against
+  a server generated from the same spec: a 400. Such a part is now JSON-parsed before the document's
+  schema applies, and text that is not JSON is refused as such, including for a JSON part whose schema
+  admits a string. `test/multipart/` holds the arms, proven red first. A part sent as a file (with a
+  filename) still arrives as a `File`, which a synchronous validator cannot read, and is refused.
 
 ## [0.25.1] - 2026-09-13
 

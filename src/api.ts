@@ -827,11 +827,13 @@ function multipartSchemaOf(
 					? `z.unknown().refine(${MULTIPART_FILE_REFINEMENT})`
 					: isBinaryPart(type)
 						? "z.unknown()"
-						: wireDecoded(
-								registry.expressionFor(type),
-								wireKindOf(program, type),
-								elementKindOf(program, type),
-							);
+						: isJsonPart(part)
+							? jsonTextDecoded(registry.expressionFor(type))
+							: wireDecoded(
+									registry.expressionFor(type),
+									wireKindOf(program, type),
+									elementKindOf(program, type),
+								);
 		// `multi` is `HttpPart<T>[]` - the same part repeated, which arrives as an array.
 		const value = part.multi === true ? `z.array(${inner})` : inner;
 		// `.exactOptional()` for the same reason as a model property: `parseBody` yields present keys
@@ -906,6 +908,31 @@ function isFilePart(type: Type): boolean {
 }
 
 /** `bytes`, or a model built on `File` - the parts openapi3 publishes as an empty schema. */
+/**
+ * Whether a multipart part travels as JSON: every media type `@typespec/http` resolves for it is a
+ * JSON one. That is `application/json` for a model or array part, and whatever an explicit
+ * `@header contentType` names for a part that declares one.
+ */
+function isJsonPart(part: HttpOperationPart): boolean {
+	const contentTypes = part.body?.contentTypes ?? [];
+	return (
+		contentTypes.length > 0 &&
+		contentTypes.every((contentType) => /^application\/(?:[\w.+-]+\+)?json$/i.test(contentType))
+	);
+}
+
+/**
+ * **A JSON part is decoded from the JSON text a form carries** before the document's schema applies.
+ * A client writes the part as text with `Content-Type: application/json` and no filename, so
+ * `c.req.parseBody()` hands over a string; the schema alone refused every such request with
+ * `expected object, received string`. Text that is not JSON is an issue of its own rather than a
+ * string passed on, so a part whose schema admits a string still refuses malformed JSON. A value that
+ * is not text is left alone for the schema to judge.
+ */
+function jsonTextDecoded(declared: string): string {
+	return `z.preprocess((raw, ctx) => { if (typeof raw !== "string") return raw; try { return JSON.parse(raw); } catch { ctx.addIssue({ code: "custom", message: "Invalid JSON in a multipart part" }); return z.NEVER; } }, ${declared})`;
+}
+
 function isBinaryPart(type: Type): boolean {
 	if (type.kind === "Scalar") {
 		for (let scalar: Scalar | undefined = type; scalar !== undefined; scalar = scalar.baseScalar) {

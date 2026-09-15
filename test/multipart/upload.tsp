@@ -55,3 +55,22 @@ model Measurements {
 }
 
 @post @route("/measurements") op measurements(@header contentType: "multipart/form-data", @multipartBody body: Measurements): void;
+
+/**
+ * **Parts whose media type is JSON, which a form also carries as text.** `@typespec/http` resolves
+ * `application/json` for a model or array part, and a client writes the part as JSON text with that
+ * `Content-Type` and no filename, so `c.req.parseBody()` hands it over as a string.
+ */
+model Profile {
+  name: HttpPart<string>;
+  address: HttpPart<Address>;
+  scores: HttpPart<int32[]>;
+
+  /** A JSON part whose schema admits a string, so malformed JSON text must be refused as JSON. */
+  note: HttpPart<{
+    @body body: string;
+    @header contentType: "application/json";
+  }>;
+}
+
+@post @route("/profiles") op profile(@header contentType: "multipart/form-data", @multipartBody body: Profile): void;

@@ -140,3 +140,84 @@ describe("a number or boolean part arrives as the text a form carries", () => {
 		expect(parse({ temperature: "0.5", count: "3", flag: "yes" }).success).toBe(false);
 	});
 });
+
+/**
+ * **A part whose media type is JSON arrives as JSON text**, and is decoded before the document's
+ * schema applies. `@typespec/http` resolves `application/json` for a model or array part; a client
+ * sends that part as text with `Content-Type: application/json` and no filename, so the parser hands
+ * the handler a string. Measured before the fix, on the bytes the Postman CLI sends for
+ * `address: HttpPart<Address>`: `expected object, received string`, and a server generated from the
+ * same spec answered 400.
+ */
+describe("a JSON part arrives as the JSON text a form carries", () => {
+	let schemas: Record<string, ZodType>;
+
+	beforeAll(async () => {
+		const compiled = await compileFixture(here, "upload", { outName: "upload-json-parts" });
+		schemas = (await import(join(compiled.outDir, "schemas.gen.ts"))) as Record<string, ZodType>;
+	});
+
+	const parse = (value: unknown) => (schemas["profileSchema"] as ZodType).safeParse(value);
+
+	/** The bytes the Postman CLI 1.56.1 sends for these parts, captured from its run against a socket. */
+	const sent = async (
+		address: string,
+		scores: string,
+		note = '"a note"',
+	): Promise<Record<string, unknown>> => {
+		const boundary = "--------------------------428824510061142568669433";
+		const part = (name: string, contentType: string, value: string) =>
+			`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\nContent-Type: ${contentType}\r\n\r\n${value}\r\n`;
+		const bytes = `${part("name", "text/plain", "name")}${part("address", "application/json", address)}${part("scores", "application/json", scores)}${part("note", "application/json", note)}--${boundary}--\r\n`;
+		const form = await new Request("https://multipart.test/profiles", {
+			method: "POST",
+			headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+			body: bytes,
+		}).formData();
+		return Object.fromEntries(form.entries());
+	};
+
+	it("accepts the multipart body a client actually sends, decoded to the values the document means", async () => {
+		const arrived = await sent('{"city":"London"}', "[1,2]");
+		// Non-vacuity: the parser produced text, which is what the schema has to accept.
+		expect(arrived).toEqual({
+			name: "name",
+			address: '{"city":"London"}',
+			scores: "[1,2]",
+			note: '"a note"',
+		});
+		const result = parse(arrived);
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({
+			name: "name",
+			address: { city: "London" },
+			scores: [1, 2],
+			note: "a note",
+		});
+	});
+
+	it("still refuses JSON text that is malformed, or not the shape the document declares", async () => {
+		expect(parse(await sent('{"city":', "[1,2]")).success).toBe(false);
+		expect(parse(await sent('{"city":42}', "[1,2]")).success).toBe(false);
+		expect(parse(await sent('{"city":"London"}', '["one"]')).success).toBe(false);
+		// The note's schema admits any string, so only the JSON decoding can refuse text that is not JSON.
+		expect(parse(await sent('{"city":"London"}', "[1,2]", "a note")).success).toBe(false);
+	});
+
+	it("does not decode a text part, so a string that happens to be JSON stays a string", async () => {
+		// `note` travels as JSON, so even its string value arrives as JSON text.
+		const result = parse({
+			name: "[1]",
+			address: { city: "London" },
+			scores: [1],
+			note: '"a note"',
+		});
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({
+			name: "[1]",
+			address: { city: "London" },
+			scores: [1],
+			note: "a note",
+		});
+	});
+});

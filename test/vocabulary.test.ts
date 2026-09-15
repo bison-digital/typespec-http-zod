@@ -88,6 +88,18 @@ const SCALAR_DECODE = [
 ];
 
 /**
+ * A multipart part whose media type is JSON, decoded from the JSON text a form carries.
+ *
+ * **The document describes the decoded value; the transport carries text.** `@typespec/http` resolves
+ * `application/json` for a model or array part, a client writes it as JSON text with that content
+ * type and no filename, and `c.req.parseBody()` hands over a string. Measured on the bytes the Postman
+ * CLI sends: `expected object, received string`, and a 400 from a generated server. Text that is not
+ * JSON becomes an issue rather than a string, so the decode never widens what a part admits.
+ */
+const JSON_PART_DECODE =
+	/z\.preprocess\(\(raw, ctx\) => \{ if \(typeof raw !== "string"\) return raw; try \{ return JSON\.parse\(raw\); \} catch \{ ctx\.addIssue\(\{ code: "custom", message: "Invalid JSON in a multipart part" \}\); return z\.NEVER; \} \}, /g;
+
+/**
  * A `content-type` header reduced to the media type, discarding the parameters the document does not
  * mention.
  *
@@ -162,12 +174,23 @@ describe("the generated validator says only what the document can say", () => {
 	});
 
 	it("permits `z.preprocess` only as a wire decode of a known shape", () => {
-		const permitted = [DELIMITER_SPLIT, EXPLODED_BOX, ...SCALAR_DECODE, ...MEDIA_TYPE_DECODE];
+		const permitted = [
+			DELIMITER_SPLIT,
+			EXPLODED_BOX,
+			...SCALAR_DECODE,
+			...MEDIA_TYPE_DECODE,
+			JSON_PART_DECODE,
+		];
+		let jsonParts = 0;
 		for (const file of files) {
 			const source = readFileSync(file, "utf8");
 			const all = (source.match(/z\.preprocess\(/g) ?? []).length;
 			expect(countOf(source, permitted), `an unrecognised z.preprocess in ${file}`).toBe(all);
+			jsonParts += countOf(source, [JSON_PART_DECODE]);
 		}
+		// Four across the corpus when written; set at half, this file's convention, so the allowance
+		// cannot outlive the shape it was written for.
+		expect(jsonParts).toBeGreaterThanOrEqual(2);
 	});
 
 	it("finds the delimiter splits it is meant to permit", () => {
