@@ -1102,6 +1102,13 @@ export interface EmittedRoute {
 	 */
 	readonly pathSchema: string | undefined;
 	readonly querySchema: string | undefined;
+	/**
+	 * The query OBJECT itself, which differs from `querySchema` only where a form-exploded record or
+	 * model is gathered into it: `querySchema` is then `z.preprocess(gather, <this>)`, the validator a
+	 * request's raw query goes through, and this is the object with a `.shape` a consumer building
+	 * arguments from already-structured JSON can spread. Equal to `querySchema` otherwise.
+	 */
+	readonly queryFieldsSchema: string | undefined;
 	readonly headerSchema: string | undefined;
 	/** The header schema minus `accept`, used when this route's operations negotiate. */
 	readonly negotiatedHeaderSchema: string | undefined;
@@ -1390,6 +1397,8 @@ function parameterSchemasOf(
 ): {
 	path: string | undefined;
 	query: string | undefined;
+	/** The query OBJECT, before any exploded record or model is gathered into it. */
+	queryFields: string | undefined;
 	header: string | undefined;
 	/** The header schema MINUS `accept`, for a route whose operations negotiate. */
 	negotiatedHeader: string | undefined;
@@ -1537,6 +1546,7 @@ function parameterSchemasOf(
 			query === undefined
 				? undefined
 				: gathered.reduce((inner, gather) => `z.preprocess(${gather}, ${inner})`, query),
+		queryFields: query,
 		header: shape("header"),
 		negotiatedHeader: shape("header-without-accept"),
 		accept,
@@ -1725,6 +1735,7 @@ export function collectRoutes(
 					return {
 						pathSchema: split.path,
 						querySchema: split.query,
+						queryFieldsSchema: split.queryFields,
 						headerSchema: split.header,
 						negotiatedHeaderSchema: split.negotiatedHeader,
 						accept: split.accept,
@@ -2026,6 +2037,12 @@ export interface RouteSchemaNames {
 	readonly operationId: string;
 	readonly path: string | undefined;
 	readonly query: string | undefined;
+	/**
+	 * The query object's identifier, with a `.shape`. Equal to `query` except where a form-exploded
+	 * record or model is gathered, when `query` is `z.preprocess(gather, <queryFields>)` and has no
+	 * `.shape`. A consumer spreading request fields reads this; a validator of a raw request reads `query`.
+	 */
+	readonly queryFields: string | undefined;
 	readonly header: string | undefined;
 	readonly body: string | undefined;
 	/**
@@ -2105,7 +2122,19 @@ function nameRouteSchemas(
 		};
 		// Order follows the request: what identifies the resource, then what filters it, then its body.
 		const path = declare("Path", route.pathSchema);
-		const query = declare("Query", route.querySchema);
+		/**
+		 * Where a query group is gathered, its object is declared on its own and the wire validator wraps
+		 * that identifier, so both have a name and only the second pipes.
+		 */
+		const gathers =
+			route.queryFieldsSchema !== undefined && route.querySchema !== route.queryFieldsSchema;
+		const queryFields = gathers ? declare("QueryFields", route.queryFieldsSchema) : undefined;
+		const query = declare(
+			"Query",
+			gathers && queryFields !== undefined && route.queryFieldsSchema !== undefined
+				? route.querySchema?.replace(route.queryFieldsSchema, queryFields)
+				: route.querySchema,
+		);
 		const negotiating = shared.has(`${route.verb} ${route.path}`);
 		const header = declare(
 			"Header",
@@ -2135,6 +2164,7 @@ function nameRouteSchemas(
 			operationId: route.operationId,
 			path,
 			query,
+			queryFields: gathers ? queryFields : query,
 			header,
 			body,
 			arms,

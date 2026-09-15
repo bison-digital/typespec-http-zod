@@ -120,6 +120,22 @@ describe("a query value is decoded from its form expansion", () => {
 		expect(parsed("queryExplodeModelQuery", { field: "status" }).success).toBe(false);
 	});
 
+	/**
+	 * **A gathered group is a pipe, and a pipe has no `.shape`.** A consumer that builds arguments from
+	 * already-structured JSON (typespec-http-mcp spreads each group's `.shape`) needs the object itself,
+	 * so it is declared on its own and the wire validator wraps it. Measured before: the MCP corpus
+	 * typecheck failed on `routes` with `Property 'shape' does not exist on type 'ZodPreprocess<...>'`.
+	 */
+	it("declares a gathered query object on its own, with the shape a consumer can spread", () => {
+		const fields = schemas["queryExplodeRecordQueryFields"] as unknown as {
+			shape?: Record<string, unknown>;
+		};
+		expect(Object.keys(fields?.shape ?? {})).toEqual(["param"]);
+		expect(parsed("queryExplodeRecordQueryFields", { param: { a: 1 } }).success).toBe(true);
+		// Only where something is gathered: an ordinary group is not declared twice.
+		expect(schemas["plainQueryFields"]).toBeUndefined();
+	});
+
 	it("control: an ordinary query list still splits on its delimiter", () => {
 		expect(parsed("plainQuery", { tags: "a,b" }).data).toEqual({ tags: AB });
 	});
