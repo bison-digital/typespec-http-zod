@@ -84,3 +84,33 @@ describe("a multipart body is checked part by part", () => {
 		expect(accepts("renamedSchema", { identifier: "abc" })).toBe(false);
 	});
 });
+
+/**
+ * **A text part is decoded the way a path, query or header value is, and for the same reason**: a
+ * form carries text, and `type: number` describes what the part means once decoded. The same rule as
+ * `wireDecoded` for parameters, so a malformed value still fails against the document's schema.
+ */
+describe("a number or boolean part arrives as the text a form carries", () => {
+	let schemas: Record<string, ZodType>;
+
+	beforeAll(async () => {
+		const compiled = await compileFixture(here, "upload", { outName: "upload-text-parts" });
+		schemas = (await import(join(compiled.outDir, "schemas.gen.ts"))) as Record<string, ZodType>;
+	});
+
+	const parse = (value: unknown) => (schemas["measurementsSchema"] as ZodType).safeParse(value);
+
+	it("accepts the request http-specs documents, decoded to the values the document means", () => {
+		const result = parse({ temperature: "0.5", count: "3", flag: "true" });
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({ temperature: 0.5, count: 3, flag: true });
+	});
+
+	it("still refuses text that is not the number or boolean the document declares", () => {
+		expect(parse({ temperature: "warm", count: "3", flag: "true" }).success).toBe(false);
+		// `Number("")` is 0; an empty part must not become a zero the document never received.
+		expect(parse({ temperature: "", count: "3", flag: "true" }).success).toBe(false);
+		expect(parse({ temperature: "0.5", count: "3.5", flag: "true" }).success).toBe(false);
+		expect(parse({ temperature: "0.5", count: "3", flag: "yes" }).success).toBe(false);
+	});
+});

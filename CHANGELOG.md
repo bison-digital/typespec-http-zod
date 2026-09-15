@@ -45,6 +45,16 @@ the corpus. Controls: dropping failure-arm media types, or every header, turns i
 declares no header on a failure arm, so that case is held by the fixture suite, where dropping
 failure-arm headers turns three arms red.
 
+### Fixed
+
+- **A multipart part that means a number or a boolean now accepts the text a form carries.** A part's
+  validator was the document's schema alone, so `HttpPart<float64>` was `z.number()` and
+  `c.req.parseBody()`'s `"0.5"` was refused. Measured by request against a server generated from
+  `@typespec/http-specs` `payload/multipart/non-string-float`: a 400 for the exact request the scenario
+  documents. A part is now decoded by the rule path, query and header values already use, so text that
+  is not a well-formed number still fails against the document's schema. `test/multipart/` holds the
+  arm, proven red first.
+
 ## [0.25.1] - 2026-09-13
 
 A patch: **the `@typespec/streams` and `@typespec/versioning` peers now admit `0.86.0`.** Nothing

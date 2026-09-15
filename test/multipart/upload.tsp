@@ -39,3 +39,19 @@ model Renamed {
 
 @post @route("/upload") op upload(@header contentType: "multipart/form-data", @multipartBody body: Upload): void;
 @post @route("/renamed") op renamed(@header contentType: "multipart/form-data", @multipartBody body: Renamed): void;
+
+/**
+ * **Parts that mean numbers and booleans, which a form still carries as text.** `c.req.parseBody()`
+ * hands a text part over as a string, and `payload/multipart/non-string-float` in `@typespec/http-specs`
+ * documents exactly this request: a `text/plain` part whose value is `0.5`. `z.number()` refused it.
+ */
+model Measurements {
+  temperature: HttpPart<{
+    @body body: float64;
+    @header contentType: "text/plain";
+  }>;
+  count: HttpPart<int32>;
+  flag: HttpPart<boolean>;
+}
+
+@post @route("/measurements") op measurements(@header contentType: "multipart/form-data", @multipartBody body: Measurements): void;

@@ -767,11 +767,20 @@ function multipartTsOf(
 }
 
 function multipartSchemaOf(
+	program: Program,
 	body: { readonly parts: readonly HttpOperationPart[]; readonly type?: Type },
 	registry: SchemaRegistry,
 ): string {
 	const entries = body.parts.map((part) => {
 		const type = part.body?.type;
+		/**
+		 * **A form carries text, so a part that means a number or a boolean is decoded first**, by the
+		 * same rule {@link wireDecoded} applies to path, query and header values: `"0.5"` becomes
+		 * `0.5`, and text that is not a well-formed number is passed on unchanged to fail against the
+		 * schema the document publishes. `c.req.parseBody()` hands a text part over as a string, so
+		 * `z.number()` alone refused every conformant request; measured on `@typespec/http-specs`
+		 * `payload/multipart/non-string-float`, a 400 for the request the scenario documents.
+		 */
 		const inner =
 			type === undefined
 				? "z.unknown()"
@@ -779,7 +788,11 @@ function multipartSchemaOf(
 					? `z.unknown().refine(${MULTIPART_FILE_REFINEMENT})`
 					: isBinaryPart(type)
 						? "z.unknown()"
-						: registry.expressionFor(type);
+						: wireDecoded(
+								registry.expressionFor(type),
+								wireKindOf(program, type),
+								elementKindOf(program, type),
+							);
 		// `multi` is `HttpPart<T>[]` - the same part repeated, which arrives as an array.
 		const value = part.multi === true ? `z.array(${inner})` : inner;
 		// `.exactOptional()` for the same reason as a model property: `parseBody` yields present keys
@@ -1475,7 +1488,7 @@ export function collectRoutes(
 					// such route mounted with nothing checking the request at all.
 					const parameterBody = operation.parameters.body;
 					if (parameterBody?.bodyKind === "multipart") {
-						return multipartSchemaOf(parameterBody, registry);
+						return multipartSchemaOf(program, parameterBody, registry);
 					}
 					return requestType === undefined ? undefined : registry.expressionFor(requestType);
 				}),
