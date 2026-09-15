@@ -106,6 +106,32 @@ describe("a number or boolean part arrives as the text a form carries", () => {
 		expect(result.data).toEqual({ temperature: 0.5, count: 3, flag: true });
 	});
 
+	/**
+	 * **The same values, as they actually arrive.** The arm above hands the schema strings, which is
+	 * only a claim about the wire until something parses a real body. These are the exact bytes the
+	 * Postman CLI sends for these parts (captured from its run, `Content-Type: text/plain` on each part
+	 * and no filename), parsed by `Request.formData()`, the WHATWG parser Hono's `parseBody` wraps.
+	 * Before the fix a server generated from `payload/multipart/non-string-float` answered this body
+	 * with `400 expected number, received string`.
+	 */
+	it("accepts the multipart body a client actually sends, parsed as a server parses it", async () => {
+		const boundary = "--------------------------116697384997113919143159";
+		const part = (name: string, value: string) =>
+			`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\nContent-Type: text/plain\r\n\r\n${value}\r\n`;
+		const bytes = `${part("temperature", "0.5")}${part("count", "3")}${part("flag", "true")}--${boundary}--\r\n`;
+		const form = await new Request("https://multipart.test/measurements", {
+			method: "POST",
+			headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+			body: bytes,
+		}).formData();
+		const arrived = Object.fromEntries(form.entries());
+		// Non-vacuity: what the parser produced is text, which is the whole point of the arm.
+		expect(arrived).toEqual({ temperature: "0.5", count: "3", flag: "true" });
+		const result = parse(arrived);
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({ temperature: 0.5, count: 3, flag: true });
+	});
+
 	it("still refuses text that is not the number or boolean the document declares", () => {
 		expect(parse({ temperature: "warm", count: "3", flag: "true" }).success).toBe(false);
 		// `Number("")` is 0; an empty part must not become a zero the document never received.
