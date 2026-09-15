@@ -284,14 +284,24 @@ function modelToTs(program: Program, model: Model): string {
  * types then failed to typecheck against a server that was correct: `z.object({ "x-thing": ... })`
  * on one side and `{ thing: string }` on the other.
  */
+/**
+ * The TypeScript type of a property's VALUE, without its key or its optionality.
+ *
+ * Shared with the annotation the registry writes on a deferred (getter) property, so the type that
+ * annotation claims is by construction the type this walk renders for the same property.
+ */
+export function propertyTypeToTs(program: Program, property: ModelProperty): string {
+	// `@encode` changes the wire TYPE, resolved exactly as `zod.ts` resolves it - a property encoded as
+	// a string on one side and an array on the other fails the emitted assertion, and deserves to.
+	const encoded = getEncode(program, property)?.type;
+	return typeToTs(program, encoded ?? property.type);
+}
+
 export function propertyToTs(program: Program, property: ModelProperty, wireName?: string): string {
 	// The WIRE name, resolved exactly as `zod.ts` resolves it - `wire-contract.gen.ts` asserts the
 	// emitted Zod infers this type, so the two must name every property identically or it fails.
 	const key = objectKey(wireName ?? resolveEncodedName(program, property, "application/json"));
-	// `@encode` changes the wire TYPE, resolved exactly as `zod.ts` resolves it - a property encoded as
-	// a string on one side and an array on the other fails the emitted assertion, and deserves to.
-	const encoded = getEncode(program, property)?.type;
-	const value = typeToTs(program, encoded ?? property.type);
+	const value = propertyTypeToTs(program, property);
 	/**
 	 * **A defaulted property used to be REQUIRED here, and that was the OUTPUT type's answer to a
 	 * question this file does not ask.**

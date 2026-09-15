@@ -1,9 +1,10 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { ZodType } from "zod";
 import { compileFixture, type CompiledFixture } from "../support/compile-fixture.js";
+import { typecheckEmitted } from "../support/typecheck-emitted.js";
 
 /**
  * **A recursive model is an ordinary construct, and the emitter has to serve it.**
@@ -129,6 +130,42 @@ describe("a recursive model is emitted as a reference, not refused and not inlin
 		expect(accepts(schemas.openNodeSchema as ZodType, { label: "a", child: { label: 1 } })).toBe(
 			false,
 		);
+	});
+	/**
+	 * **A schema WRAPPING a recursive one has to infer too, and it did not.**
+	 *
+	 * The getter that defers a back edge was emitted with no return type, which infers for the
+	 * declaration itself and collapses for anything built on top of it: measured, `z.infer` of
+	 * `z.record(z.string(), treeIndexSchema)` - what `@body body: Record<TreeIndex>` emits - gave
+	 * `byName?: unknown`, and `.parse()` on it returned `unknown` outright. The generated server then
+	 * failed to compile (`TS2322`, `type/dictionary` in the conformance corpus), and nothing here said
+	 * the emitted TYPE was weaker than the document.
+	 *
+	 * **Compiled rather than read**, because a type collapsing to `unknown` reads exactly like one
+	 * that did not: every arm above still passes. The consumer below is the value a handler writes.
+	 */
+	it("infers through a schema that wraps a recursive one, not `unknown`", () => {
+		writeFileSync(
+			join(compiled.outDir, "wrapping.consumer.ts"),
+			`import { z } from "zod";
+import { treeIndexSchema, treeNodeSchema } from "./schemas.gen.js";
+
+const index = z.record(z.string(), treeIndexSchema);
+export const value: z.infer<typeof index> = {
+	root: { label: "a", byName: { child: { label: "b" } } },
+};
+export const parsed: string | undefined = index.parse({})["root"]?.byName?.["child"]?.label;
+
+const nodes = z.array(treeNodeSchema);
+export const depth: string | undefined = nodes.parse([])[0]?.children?.[0]?.label;
+
+// @ts-expect-error the wrapped type is not unknown: a number label is refused at depth
+export const refused: z.infer<typeof index> = { root: { label: "a", byName: { c: { label: 1 } } } };
+`,
+		);
+		const { output, failed } = typecheckEmitted(compiled.outDir);
+		expect(output).toBe("");
+		expect(failed).toBe(false);
 	});
 });
 

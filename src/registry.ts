@@ -1,14 +1,16 @@
 import type { Model, ModelProperty, Program, Type } from "@typespec/compiler";
 import { getVisibilitySuffix, Visibility } from "@typespec/http";
 import { reportDiagnostic } from "./lib.js";
-import { propertyToTs, typeToTsBody, withTsRefResolver } from "./types.js";
+import { propertyToTs, propertyTypeToTs, typeToTsBody, withTsRefResolver } from "./types.js";
 import {
 	captureBackEdges,
 	currentVisibility,
+	isOptionalAt,
 	isTransformedBy,
 	noteBackEdge,
 	propertyToZod,
 	typeToZodBody,
+	withDeferredAnnotator,
 	withRefResolver,
 	withSyntheticDeclarations,
 } from "./zod.js";
@@ -525,11 +527,41 @@ export class SchemaRegistry {
 				return this.expressionFor(candidate);
 			},
 			() =>
-				withSyntheticDeclarations(
-					(name, build) => this.#declareSynthetic(name, build),
-					() => typeToZodBody(this.#program, type),
+				withDeferredAnnotator(
+					(property) => this.#deferredAnnotationOf(property),
+					() =>
+						withSyntheticDeclarations(
+							(name, build) => this.#declareSynthetic(name, build),
+							() => typeToZodBody(this.#program, type),
+						),
 				),
 		);
+	}
+
+	/**
+	 * The Zod type a property emitted as a getter is annotated with, or `undefined` for none.
+	 *
+	 * **Written here because naming a type is this class's job.** The walk in `zod.ts` produces the
+	 * getter; only the registry resolves a named type to the declaration that carries it, so only it
+	 * can write `Record<string, InnerModel>` rather than inlining the model and recursing forever.
+	 * `types.ts` is the same walk `propertyToTs` uses, so the annotation cannot drift from the type
+	 * the wire contract compares against.
+	 *
+	 * **A DEFAULTED property is left unannotated.** `propertyToZod` emits `.default(...)` only where
+	 * `defaultOf` could render the value and reports a diagnostic where it could not, so an annotation
+	 * written here would have to predict that decision; predicting it wrongly would put a type on the
+	 * getter that its own value does not satisfy. A recursive property carrying a default is the one
+	 * shape this leaves as it was.
+	 */
+	#deferredAnnotationOf(property: ModelProperty): string | undefined {
+		if (property.defaultValue !== undefined) return undefined;
+		const declared = withTsRefResolver(
+			(candidate) => declaredNameOf(candidate),
+			() => propertyTypeToTs(this.#program, property),
+		);
+		const core = `z.ZodType<${declared}, ${declared}>`;
+		const optional = property.optional || isOptionalAt(this.#program, property);
+		return `: ${optional ? `z.ZodExactOptional<${core}>` : core}`;
 	}
 
 	/** Every declaration, dependencies first. */

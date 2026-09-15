@@ -57,6 +57,19 @@ failure-arm headers turns three arms red.
 
 ### Fixed
 
+- **A request body that is not a MODEL is named rather than merged into the parameters.** `@body body:
+string` emitted a handler input of `Record<string, never>` and a call site of `{}`: the server
+  validated the body and handed the handler nothing, from a compile that reported success. An enum or
+  union body failed loudly instead (`TS2698`), which is what four conformance scenarios had been
+  pinned on. A `bytes` body is unaffected: `rawBodyProperty` already names it.
+- **`EmittedRoute.requestTextual` is new**, so a server can read a body the document says IS text.
+  `text/plain` has no JSON, form or multipart reader, and a server emitter had no way to tell a string
+  body from a model framed as text - so it emitted no body middleware and the body was never read.
+- **A recursive model's schema no longer infers `unknown` in anything that WRAPS it.** The getter that
+  defers a back edge carried no return type, so `z.infer` of `z.record(z.string(), innerModelSchema)`
+  gave `children?: unknown` and `.parse()` on it returned `unknown` outright. The getter is annotated
+  now, which leaves `.shape` and `.extend` intact - annotating the declaration would not have. A
+  recursive property carrying a DEFAULT is the one shape left unannotated, and says so in the source.
 - **A multipart part that means a number or a boolean now accepts the text a form carries.** A part's
   validator was the document's schema alone, so `HttpPart<float64>` was `z.number()` and
   `c.req.parseBody()`'s `"0.5"` was refused. Measured by request against a server generated from

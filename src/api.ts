@@ -1083,6 +1083,20 @@ export interface EmittedRoute {
 	 * writes the server, exactly as `responseContentTypes` leaves negotiation to it.
 	 */
 	readonly requestContentTypes: readonly string[];
+	/**
+	 * Whether the request body IS the text a caller sends, rather than a structure parsed out of it.
+	 *
+	 * **A server cannot answer this from the media type alone**, and `typespec-hono` had no way to ask:
+	 * `@body body: string` under `text/plain` has no JSON, form or multipart reader, so the body was
+	 * never read and the handler was handed nothing. The same media type carrying a MODEL has no
+	 * serialisation this emitter can derive, and must still be refused - so the question is about the
+	 * TYPE, which only this package resolves.
+	 *
+	 * True where the body's type is a string (a scalar based on `string`, a literal, a template, or a
+	 * union of those - the same rule {@link EmittedResponse.textual} applies to a response) and the
+	 * document declares no JSON media type for it.
+	 */
+	readonly requestTextual: boolean;
 	readonly summary: string | undefined;
 	readonly requestSchema: string | undefined;
 	/**
@@ -1646,9 +1660,28 @@ export function collectRoutes(
 			 * `multipartTsOf`, both recorded above.
 			 */
 			const optionalMultipartBody = bodyParameter?.bodyKind === "multipart" && optionalBody;
+			/**
+			 * **A body that is not a MODEL has no properties to merge, and merging it anyway lost it.**
+			 *
+			 * `@body body: string` emitted a handler input of `Record<string, never>` and a call site of
+			 * `{}`: the server validated the body and then never handed it to the handler, silently, from
+			 * a compile that reported success. `@body body: SomeEnum` was the same rule failing loudly,
+			 * `TS2698: Spread types may only be created from object types`, which is what
+			 * `payload/media-type`, `type/enum/*`, `type/scalar` and `versioning/returnTypeChangedFrom`
+			 * had been pinned on in the conformance corpus.
+			 *
+			 * A scalar, an enum, a union or a literal body is therefore NAMED, which is the treatment an
+			 * indexed or optional body already gets and for the same reason: the merge cannot express it.
+			 *
+			 * **Except a `bytes` body**, which {@link EmittedRoute.rawBodyProperty} already names, and
+			 * naming it twice would put the same value under two keys.
+			 */
+			const unmergeableBody =
+				requestType !== undefined && requestType.kind !== "Model" && rawBodyProperty === undefined;
 			const bodyProperty =
 				(requestType?.kind === "Model" && (requestType.indexer !== undefined || optionalBody)) ||
-				optionalMultipartBody
+				optionalMultipartBody ||
+				unmergeableBody
 					? (bodyParameter?.property?.name ?? "body")
 					: undefined;
 			const authentication = authenticationFor(program, operation);
@@ -1692,6 +1725,13 @@ export function collectRoutes(
 				responseContentTypes:
 					statusCode === undefined ? [] : responseContentTypesOf(operation, statusCode),
 				requestContentTypes: [...(operation.parameters.body?.contentTypes ?? [])],
+				// `isRawBinaryMediaType` is "every declared type is non-JSON", which is the same question
+				// here: a string body under `application/json` IS json, and its reader is the JSON one.
+				requestTextual:
+					requestType !== undefined &&
+					rawBodyProperty === undefined &&
+					isStringType(requestType) &&
+					isRawBinaryMediaType([...(operation.parameters.body?.contentTypes ?? [])]),
 				/**
 				 * `@summary` first, `@doc` as the fallback.
 				 *

@@ -30,6 +30,29 @@ import { reportDiagnostic } from "./lib.js";
 const UNREPRESENTABLE = "z.never()";
 
 /**
+ * **Installed by the registry, which is the only place that knows what a declared type is CALLED.**
+ *
+ * A property emitted as a getter needs its Zod type written out - see the getter docblock in
+ * `modelToZod`. Naming the type is the registry's job (it resolves a named type to its declaration,
+ * versioned name included), and `types.ts` already imports this module, so the annotation is handed
+ * in rather than computed here.
+ */
+let annotateDeferred: (property: ModelProperty) => string | undefined = () => undefined;
+
+export function withDeferredAnnotator<T>(
+	annotator: (property: ModelProperty) => string | undefined,
+	run: () => T,
+): T {
+	const previous = annotateDeferred;
+	annotateDeferred = annotator;
+	try {
+		return run();
+	} finally {
+		annotateDeferred = previous;
+	}
+}
+
+/**
  * TypeSpec type -> Zod source text.
  *
  * **Deliberately partial, and it fails loudly rather than guessing.** A general TypeSpec->Zod
@@ -849,9 +872,26 @@ function modelToZod(program: Program, model: Model): string {
 			const { value, deferred } = captureBackEdges(() =>
 				withDeclarationSite(property, () => propertyToZod(program, property)),
 			);
+			/**
+			 * **A getter without a return type infers `unknown`, and the collapse is SILENT.**
+			 *
+			 * The docblock above claims the getter keeps `z.infer` inferring the recursive type. It does
+			 * for the declaration itself, and not for a schema that WRAPS it: measured on the conformance
+			 * corpus, `z.record(z.string(), innerModelSchema)` - what `@body body: Record<InnerModel>`
+			 * emits - infers `children?: unknown`, and `.parse()` on it returns `unknown` outright. The
+			 * generated server then failed to compile with `TS2322`, in `type/dictionary`, which is how
+			 * this was found; nothing said the emitted TYPE was weaker than the document.
+			 *
+			 * Annotating the GETTER rather than the declaration is what keeps `.shape` and `.extend`,
+			 * which inheritance and every group spread depend on. `: z.ZodType<T, T>` names both of Zod's
+			 * parameters for the reason `renderSchemas` names both: one leaves the input side `unknown`.
+			 */
+			const annotation = deferred ? (annotateDeferred(property) ?? "") : "";
 			return {
 				deferred,
-				text: deferred ? `\tget ${key}() {\n\t\treturn ${value};\n\t},` : `\t${key}: ${value},`,
+				text: deferred
+					? `\tget ${key}()${annotation} {\n\t\treturn ${value};\n\t},`
+					: `\t${key}: ${value},`,
 			};
 		});
 	const entries = members.map((member) => member.text);
