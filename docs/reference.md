@@ -64,6 +64,16 @@ does not mean what they almost certainly intended.
   `@path(#{ allowReserved: true })` on a required parameter the route template does not already name;
   naming it in both places, or marking an optional parameter, is refused by `@typespec/http` with
   `use-uri-template`.
+- **A route's RFC 6570 form is carried in the route record, and its values are decoded.**
+  `@typespec/http` strips every operator from `path`, so `array{.param*}` and `array{;param}` both
+  reach it as `array{param}`. `EmittedRoute.pathSegments` carries each segment as literal text or one
+  expression (its parameter, the literal around it, operator and explode), and `literalQuery` the pairs
+  of a query string written into the route (`?fixed=true{&param}`). A server mounts from those and hands
+  the path validator the segment's text; the validator undoes the expansion (`array.a.b` is
+  `["a", "b"]`, `record;a=1;b=2` is `{ a: 1, b: 2 }`) and refuses text that is not the declared one. A
+  form-exploded query record or model (`?a=1&b=2`) is gathered back under its parameter name. The
+  decoders are declared in `schemas.gen.ts` only where a validator calls them. A segment holding two
+  expressions is `unsupported`.
 
 - **A `@head` operation gets validators here and cannot be served by every router.** That is a
   property of the server rather than of this package.

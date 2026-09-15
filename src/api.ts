@@ -15,6 +15,7 @@ import {
 	type Operation,
 	type ModelProperty,
 	type Program,
+	resolveEncodedName,
 	resolvePath,
 	type Scalar,
 	type Type,
@@ -34,6 +35,18 @@ import { SchemaRegistry, TypeRegistry } from "./registry.js";
 import { typeToTs } from "./types.js";
 import { resolveStreamModule, streamedTypeOf, withStreamModule } from "./streams.js";
 import { resolveVersioningModule, serviceSnapshots } from "./versioning.js";
+import {
+	EXPLODED_QUERY_SOURCE,
+	type EmittedPathSegment,
+	type ExpansionShape,
+	explodedQueryCall,
+	needsExpansionDecoding,
+	routeTemplateOf,
+	URI_EXPANSION_SOURCE,
+	uriExpansionCall,
+} from "./uri-template.js";
+
+export type { EmittedPathSegment } from "./uri-template.js";
 import {
 	collectExternalImports,
 	noteDeclaredVocabularies,
@@ -568,7 +581,12 @@ export type SecurityRequirement = Readonly<Record<string, readonly string[]>>;
 function authenticationFor(
 	program: Program,
 	operation: HttpOperation,
-): { security: SecurityRequirement[]; scopes: string[]; noAuth: boolean } {
+): {
+	security: SecurityRequirement[];
+	scopes: string[];
+	noAuth: boolean;
+	authentication: "none" | "optional" | "required";
+} {
 	const options = getAuthenticationForOperation(program, operation.operation)?.options ?? [];
 	const security: SecurityRequirement[] = [];
 	let noAuth = false;
@@ -593,12 +611,25 @@ function authenticationFor(
 					? [...new Set(scheme.flows.flatMap((flow) => flow.scopes.map((scope) => scope.value)))]
 					: [];
 		}
-		if (anonymous && Object.keys(requirement).length === 0) continue;
-		if (Object.keys(requirement).length > 0) security.push(requirement);
+		/**
+		 * **An option that needs nothing is published as `{}`, and kept.** `NoAuth | X` is
+		 * `security: [{}, { X: [] }]` in the document `@typespec/openapi3` writes from the same program,
+		 * and `{}` is the requirement every caller satisfies. Dropping it published `[{ X: [] }]`, a
+		 * contract that refuses the anonymous caller the document accepts; typespec-hono had carried a
+		 * corrected copy of this rule of its own because this one was wrong.
+		 */
+		if (anonymous || Object.keys(requirement).length > 0) security.push(requirement);
 	}
 
 	const scopes = [...new Set(security.flatMap((requirement) => Object.values(requirement).flat()))];
-	return { security, scopes, noAuth };
+	const anonymous = security.some((requirement) => Object.keys(requirement).length === 0);
+	const real = security.some((requirement) => Object.keys(requirement).length > 0);
+	return {
+		security,
+		scopes,
+		noAuth,
+		authentication: !real ? "none" : anonymous ? "optional" : "required",
+	};
 }
 
 /**
@@ -1006,6 +1037,26 @@ export interface EmittedRoute {
 	 */
 	readonly reservedPathParameters: readonly string[];
 	/**
+	 * **The route as a server has to mount it: one entry per `/` segment, read from the operation's
+	 * RFC 6570 `uriTemplate`.** `path` cannot say this, because `@typespec/http` strips every operator
+	 * from it: `array{.param*}` (`array.a.b`), `array{;param}` (`array;param=a,b`) and
+	 * `array{/param}` (`array/a,b`) all reach `path` as `array{param}`. A router mounted from `path`
+	 * answered 404 to 31 of the requests `@typespec/http-specs` declares conformant.
+	 *
+	 * An expression segment names its parameter's wire name, the literal text around it in the same
+	 * segment, its operator and explode modifier, and whether it is optional or reserved. A server
+	 * hands `pathSchema` the TEXT of that segment (for an exploding `/` expression, of every segment
+	 * after it), and `pathSchema` undoes the expansion. A segment holding more than one expression is
+	 * `unsupported`: no segment router can split it.
+	 */
+	readonly pathSegments: readonly EmittedPathSegment[];
+	/**
+	 * A query string written into the route itself, as the pairs it spells:
+	 * `/items?fixed=true{&param}` carries `[["fixed", "true"]]`. It identifies the route as much as
+	 * the path does, and it is never part of `pathSegments`. Empty when there is none.
+	 */
+	readonly literalQuery: readonly (readonly [string, string])[];
+	/**
 	 * Every response the document declares, one per status key, in OpenAPI's precedence order. See
 	 * {@link EmittedResponse}.
 	 */
@@ -1101,8 +1152,22 @@ export interface EmittedRoute {
 	 * Whether a tenant exists follows from whether the request was authenticated - there is no user,
 	 * account or membership to build one from otherwise. Reading it here is what lets a server
 	 * derive an operation's call shape rather than a hand-written table restating it per row.
+	 *
+	 * @deprecated Read {@link EmittedRoute.authentication}, which tells `none` from `optional`.
 	 */
 	readonly noAuth: boolean;
+	/**
+	 * **Whether the operation needs a caller, in the three states its `security` can say.**
+	 *
+	 * - `none`: no requirement asks for anything (`@useAuth(NoAuth)`, or no authentication at all).
+	 * - `optional`: an anonymous alternative sits beside a real one (`NoAuth | BearerAuth`). A caller
+	 *   who presents a credential is authenticated; one who presents none is still admitted.
+	 * - `required`: every alternative asks for something.
+	 *
+	 * **`noAuth` could not tell the first two apart**, so a server passing it through treated
+	 * `NoAuth | BearerAuth` as "no caller", and a caller with a valid token was never seen as one.
+	 */
+	readonly authentication: "none" | "optional" | "required";
 	/**
 	 * The OAuth scopes the operation requires, from `@useAuth`.
 	 *
@@ -1124,8 +1189,10 @@ export interface EmittedRoute {
 	 * again and rebuild this itself, and two of them did.
 	 *
 	 * Satisfying **any one** requirement authorises; every scheme within a requirement must be
-	 * satisfied together. Empty where the operation declares `@useAuth(NoAuth)` or nothing, which is
-	 * a fact rather than an absence.
+	 * satisfied together. An anonymous alternative is the empty requirement `{}`, exactly as the
+	 * document publishes it: `NoAuth | BearerAuth` is `[{}, { "BearerAuth": [] }]` and
+	 * `@useAuth(NoAuth)` is `[{}]`. Empty where the operation declares no authentication at all.
+	 * Whether a caller is needed is {@link EmittedRoute.authentication}.
 	 */
 	readonly security: readonly SecurityRequirement[];
 }
@@ -1319,6 +1386,7 @@ function parameterSchemasOf(
 	program: Program,
 	operation: HttpOperation,
 	registry: SchemaRegistry,
+	segments: readonly EmittedPathSegment[],
 ): {
 	path: string | undefined;
 	query: string | undefined;
@@ -1330,6 +1398,11 @@ function parameterSchemasOf(
 } {
 	const byTarget: Record<string, string[]> = {};
 	let accept: { name: string; value: string } | undefined;
+	/** Form-exploded records and models, gathered back under their names around the query object. */
+	const gathered: string[] = [];
+	const queryNames = operation.parameters.parameters
+		.filter((parameter) => parameter.type === "query")
+		.map((parameter) => parameter.name);
 	for (const parameter of operation.parameters.parameters) {
 		if (parameter.type !== "path" && parameter.type !== "query" && parameter.type !== "header") {
 			continue;
@@ -1381,11 +1454,61 @@ function parameterSchemasOf(
 		 * occurrences arrive already an array and pass through untouched, exactly as the delimiter
 		 * arm leaves a pre-split value alone.
 		 */
-		const expression = isExplodedCollection(parameter)
+		const boxedOrSplit = isExplodedCollection(parameter)
 			? `z.preprocess((raw) => (typeof raw === "string" ? [raw] : raw), ${decoded})`
 			: delimiter === undefined
 				? decoded
 				: `z.preprocess((raw) => (typeof raw === "string" ? raw.split(${JSON.stringify(delimiter)}) : raw), ${decoded})`;
+		/**
+		 * **An RFC 6570 expansion is undone OUTSIDE everything above**, because it is the first thing the
+		 * wire did: `array.a.b` becomes `["a", "b"]`, then the element decoder and the document's schema
+		 * run on that. See {@link uriExpansionCall}.
+		 */
+		const shape = expansionShapeOf(parameter.param.type);
+		const values = recordValuesOf(program, parameter.param.type);
+		let expression = boxedOrSplit;
+		if (parameter.type === "path") {
+			const segment = segments.find(
+				(candidate): candidate is Extract<EmittedPathSegment, { kind: "expression" }> =>
+					candidate.kind === "expression" && candidate.parameter === parameter.name,
+			);
+			if (segment !== undefined && needsExpansionDecoding(segment, shape)) {
+				expression = `z.preprocess(${uriExpansionCall({ ...segment, name: parameter.name, shape, values })}, ${decoded})`;
+			}
+		} else if (parameter.type === "query" && shape === "record") {
+			if (parameter.explode === true) {
+				/**
+				 * `{?param*}` over an object expands to the object's own keys, so there is no `param` key for
+				 * this entry to read; the gatherer around the query object puts one back.
+				 */
+				const model =
+					parameter.param.type.kind === "Model" && parameter.param.type.indexer === undefined
+						? parameter.param.type
+						: undefined;
+				const properties = model === undefined ? [] : modelPropertiesOf(model);
+				gathered.push(
+					explodedQueryCall({
+						name: parameter.name,
+						others: queryNames.filter((name) => name !== parameter.name),
+						keys:
+							model === undefined
+								? undefined
+								: properties.map((property) =>
+										resolveEncodedName(program, property, "application/json"),
+									),
+						numbers: properties
+							.filter((property) => wireKindOf(program, property.type) === "number")
+							.map((property) => resolveEncodedName(program, property, "application/json")),
+						booleans: properties
+							.filter((property) => wireKindOf(program, property.type) === "boolean")
+							.map((property) => resolveEncodedName(program, property, "application/json")),
+						values,
+					}),
+				);
+			} else {
+				expression = `z.preprocess(${uriExpansionCall({ prefix: "", suffix: "", operator: "", name: parameter.name, explode: false, shape, values })}, ${decoded})`;
+			}
+		}
 		const entry = `\t${objectKey(parameter.name)}: ${expression},`;
 		(byTarget[parameter.type] ??= []).push(entry);
 		/**
@@ -1407,13 +1530,38 @@ function parameterSchemasOf(
 		const entries = byTarget[target];
 		return entries === undefined ? undefined : `z.object({\n${entries.join("\n")}\n})`;
 	};
+	const query = shape("query");
 	return {
 		path: shape("path"),
-		query: shape("query"),
+		query:
+			query === undefined
+				? undefined
+				: gathered.reduce((inner, gather) => `z.preprocess(${gather}, ${inner})`, query),
 		header: shape("header"),
 		negotiatedHeader: shape("header-without-accept"),
 		accept,
 	};
+}
+
+/** What a parameter's value decodes into once its expansion is undone. */
+function expansionShapeOf(type: Type): ExpansionShape {
+	if (isArrayType(type)) return "list";
+	return type.kind === "Model" ? "record" : "scalar";
+}
+
+/** How a record's values decode, read from its indexer the way a scalar's kind is read. */
+function recordValuesOf(program: Program, type: Type): "number" | "boolean" | "" {
+	if (type.kind !== "Model" || isArrayType(type) || type.indexer === undefined) return "";
+	return wireKindOf(program, type.indexer.value) ?? "";
+}
+
+/** A model's properties, its base model's first, as the document lists them. */
+function modelPropertiesOf(model: Model): ModelProperty[] {
+	const chain: Model[] = [];
+	for (let current: Model | undefined = model; current !== undefined; current = current.baseModel) {
+		chain.unshift(current);
+	}
+	return chain.flatMap((current) => [...current.properties.values()]);
 }
 
 export function collectRoutes(
@@ -1505,6 +1653,16 @@ export function collectRoutes(
 					? (bodyParameter?.property?.name ?? "body")
 					: undefined;
 			const authentication = authenticationFor(program, operation);
+			const template = routeTemplateOf(
+				operation.uriTemplate,
+				operation.parameters.parameters
+					.filter((parameter) => parameter.type === "path")
+					.map((parameter) => ({
+						name: parameter.name,
+						optional: parameter.param.optional,
+						reserved: parameter.type === "path" && parameter.allowReserved,
+					})),
+			);
 			routes.push({
 				operationId: operationIdOf(program, operation.operation),
 				verb: operation.verb.toUpperCase(),
@@ -1530,6 +1688,8 @@ export function collectRoutes(
 				reservedPathParameters: operation.parameters.parameters
 					.filter((parameter) => parameter.type === "path" && parameter.allowReserved)
 					.map((parameter) => parameter.name),
+				pathSegments: template.segments,
+				literalQuery: template.literalQuery,
 				responseContentTypes:
 					statusCode === undefined ? [] : responseContentTypesOf(operation, statusCode),
 				requestContentTypes: [...(operation.parameters.body?.contentTypes ?? [])],
@@ -1560,7 +1720,7 @@ export function collectRoutes(
 				}),
 				...(() => {
 					const split = withVisibility(program, requestVisibility, () =>
-						parameterSchemasOf(program, operation, registry),
+						parameterSchemasOf(program, operation, registry, template.segments),
 					);
 					return {
 						pathSchema: split.path,
@@ -1585,6 +1745,7 @@ export function collectRoutes(
 				scopes: authentication.scopes,
 				security: authentication.security,
 				noAuth: authentication.noAuth,
+				authentication: authentication.authentication,
 			});
 		}
 	}
@@ -1793,6 +1954,14 @@ function renderSchemas(
 	 * pass like any other.
 	 */
 	parts.push(renderExternalImports(externals, [...declarations, ...routeDeclarations].join("")));
+	/**
+	 * **The RFC 6570 decoders are declared here, once, and only where a validator calls them**, for the
+	 * reason `z` is imported only when used: an unused declaration fails the lint a generated file has
+	 * to pass. Declared rather than imported, so this file still depends on no runtime.
+	 */
+	const referenced = identifiersIn(routeDeclarations.join(""));
+	if (referenced.has("uriExpansion")) parts.push(URI_EXPANSION_SOURCE);
+	if (referenced.has("explodedQuery")) parts.push(EXPLODED_QUERY_SOURCE);
 	if (routeDeclarations.length > 0) {
 		parts.push(`
 /** One declared response: its status key, its body's schema, its media types and its headers. */

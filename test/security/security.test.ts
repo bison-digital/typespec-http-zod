@@ -7,6 +7,7 @@ import {
 	type HttpOperation,
 } from "@typespec/http";
 import type { Program } from "@typespec/compiler";
+import { getOpenAPI3 } from "@typespec/openapi3";
 import { beforeAll, describe, expect, it } from "vitest";
 import { collectRoutes, type EmittedRoute } from "../../src/index.js";
 import { SchemaRegistry } from "../../src/registry.js";
@@ -59,6 +60,8 @@ interface Row {
 	readonly route: EmittedRoute;
 	readonly operation: HttpOperation;
 	readonly program: Program;
+	/** What `@typespec/openapi3` publishes as this operation's `security`, from the same program. */
+	readonly published: readonly Readonly<Record<string, readonly string[]>>[];
 }
 
 let rows: Row[] = [];
@@ -68,6 +71,13 @@ beforeAll(async () => {
 	for (const scenario of SCENARIOS) {
 		const program = await compile(NodeHost, join(specs, scenario, "main.tsp"), { noEmit: true });
 		const [services] = getAllHttpServices(program);
+		const [record] = await getOpenAPI3(program, { "openapi-versions": ["3.1.0"] });
+		const document = JSON.parse(
+			JSON.stringify(record !== undefined && !record.versioned ? record.document : {}),
+		) as {
+			security?: Record<string, string[]>[];
+			paths?: Record<string, Record<string, { security?: Record<string, string[]>[] }>>;
+		};
 		for (const service of services) {
 			const routes = collectRoutes(program, new SchemaRegistry(program), service);
 			for (const route of routes) {
@@ -77,7 +87,9 @@ beforeAll(async () => {
 						candidate.path === route.path,
 				);
 				if (operation !== undefined) {
-					collected.push({ scenario, route, operation, program });
+					const entry = document.paths?.[operation.path]?.[operation.verb.toLowerCase()];
+					const published = entry?.security ?? document.security ?? [];
+					collected.push({ scenario, route, operation, program, published });
 				}
 			}
 		}
@@ -147,13 +159,55 @@ describe("security carries what the projections discard", () => {
 		expect(scopeless.length).toBeGreaterThanOrEqual(1);
 	});
 
-	it("drops an option that demands nothing, rather than publishing NoAuth as a scheme", () => {
+	it("never publishes NoAuth as a scheme", () => {
 		for (const row of rows) {
 			for (const requirement of row.route.security) {
 				expect(Object.keys(requirement)).not.toContain("noAuth");
-				expect(Object.keys(requirement).length).toBeGreaterThanOrEqual(1);
 			}
 		}
+	});
+
+	/**
+	 * **The requirements are the document's, anonymous alternative included.** `NoAuth | X` publishes
+	 * `security: [{}, {X: []}]`, where `{}` is the requirement nothing is needed to satisfy. Dropping
+	 * it published `[{X: []}]`, a contract that refuses the anonymous caller the document accepts;
+	 * typespec-hono carried its own corrected copy of this rule because the library's was wrong. The
+	 * expectation is `@typespec/openapi3`'s own `security` for each operation, from the same program.
+	 */
+	it("equals the security @typespec/openapi3 publishes for the operation", () => {
+		const disagreements = rows.flatMap((row) =>
+			JSON.stringify(row.route.security) === JSON.stringify(row.published)
+				? []
+				: [
+						`${row.scenario} ${row.route.operationId}: emitted ${JSON.stringify(row.route.security)}, published ${JSON.stringify(row.published)}`,
+					],
+		);
+		expect(disagreements).toEqual([]);
+		// Non-vacuity: the corpus publishes an anonymous alternative beside a real one.
+		expect(
+			rows.some(
+				(row) =>
+					row.published.some((requirement) => Object.keys(requirement).length === 0) &&
+					row.published.some((requirement) => Object.keys(requirement).length > 0),
+			),
+		).toBe(true);
+	});
+
+	/**
+	 * **Whether a caller is needed, in the three states the document can say.** `none` where no
+	 * requirement needs anything, `optional` where an anonymous alternative sits beside a real one, and
+	 * `required` otherwise. Derived here from the published `security`, never from `src/`.
+	 */
+	it("says whether a caller is none, optional or required, as the published security does", () => {
+		for (const row of rows) {
+			const anonymous = row.published.some((requirement) => Object.keys(requirement).length === 0);
+			const real = row.published.some((requirement) => Object.keys(requirement).length > 0);
+			const expected = !real ? "none" : anonymous ? "optional" : "required";
+			expect(row.route.authentication, `${row.scenario} ${row.route.operationId}`).toBe(expected);
+		}
+		expect(new Set(rows.map((row) => row.route.authentication))).toEqual(
+			new Set(["optional", "required"]),
+		);
 	});
 
 	it("every scope in the flat list is demanded by some requirement", () => {

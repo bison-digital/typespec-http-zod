@@ -99,6 +99,33 @@ const SCALAR_DECODE = [
 const JSON_PART_DECODE =
 	/z\.preprocess\(\(raw, ctx\) => \{ if \(typeof raw !== "string"\) return raw; try \{ return JSON\.parse\(raw\); \} catch \{ ctx\.addIssue\(\{ code: "custom", message: "Invalid JSON in a multipart part" \}\); return z\.NEVER; \} \}, /g;
 
+/** A JSON string literal, as `JSON.stringify` writes one into emitted source. */
+const JSON_STRING = String.raw`"(?:[^"\\]|\\.)*"`;
+/** A JSON array of such strings. */
+const JSON_STRINGS = String.raw`\[(?:${JSON_STRING}(?:,${JSON_STRING})*)?\]`;
+
+/**
+ * An RFC 6570 expansion undone back into the value it expanded, from the route's own template.
+ *
+ * **The document describes the value; the router hands over the segment text.** `array{.param*}`
+ * arrives as `array.a.b` for `["a", "b"]`, and a path list was never split nor a record paired, so
+ * typespec-hono answered 404 or 400 to the requests `@typespec/http-specs` `routes` declares. The
+ * decoder refuses text that is not the declared expansion, so it never widens what a parameter admits.
+ */
+const URI_EXPANSION_DECODE = new RegExp(
+	String.raw`z\.preprocess\(\(raw, ctx\) => uriExpansion\(raw, ctx, \{ prefix: ${JSON_STRING}, suffix: ${JSON_STRING}, operator: "(?:|\+|#|\.|/|;)", name: ${JSON_STRING}, explode: (?:true|false), shape: "(?:scalar|list|record)", values: "(?:number|boolean|)" \}\), `,
+	"g",
+);
+
+/**
+ * A form-exploded record or model gathered back under its parameter name: `?a=1&b=2` has no
+ * `param` key until this puts one there, and the query object's schema then validates the result.
+ */
+const EXPLODED_QUERY_GATHER = new RegExp(
+	String.raw`z\.preprocess\(\(raw\) => explodedQuery\(raw, \{ name: ${JSON_STRING}, others: ${JSON_STRINGS}, keys: (?:null|${JSON_STRINGS}), numbers: ${JSON_STRINGS}, booleans: ${JSON_STRINGS}, values: "(?:number|boolean|)" \}\), `,
+	"g",
+);
+
 /**
  * A `content-type` header reduced to the media type, discarding the parameters the document does not
  * mention.
@@ -180,14 +207,23 @@ describe("the generated validator says only what the document can say", () => {
 			...SCALAR_DECODE,
 			...MEDIA_TYPE_DECODE,
 			JSON_PART_DECODE,
+			URI_EXPANSION_DECODE,
+			EXPLODED_QUERY_GATHER,
 		];
 		let jsonParts = 0;
+		let expansions = 0;
+		let gathers = 0;
 		for (const file of files) {
 			const source = readFileSync(file, "utf8");
 			const all = (source.match(/z\.preprocess\(/g) ?? []).length;
 			expect(countOf(source, permitted), `an unrecognised z.preprocess in ${file}`).toBe(all);
 			jsonParts += countOf(source, [JSON_PART_DECODE]);
+			expansions += countOf(source, [URI_EXPANSION_DECODE]);
+			gathers += countOf(source, [EXPLODED_QUERY_GATHER]);
 		}
+		// 24 and 3 across the corpus when written, all in `routes`; set at half.
+		expect(expansions).toBeGreaterThanOrEqual(12);
+		expect(gathers).toBeGreaterThanOrEqual(1);
 		// Four across the corpus when written; set at half, this file's convention, so the allowance
 		// cannot outlive the shape it was written for.
 		expect(jsonParts).toBeGreaterThanOrEqual(2);

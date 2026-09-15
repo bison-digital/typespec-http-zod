@@ -72,6 +72,27 @@ failure-arm headers turns three arms red.
   schema applies, and text that is not JSON is refused as such, including for a JSON part whose schema
   admits a string. `test/multipart/` holds the arms, proven red first. A part sent as a file (with a
   filename) still arrives as a `File`, which a synchronous validator cannot read, and is refused.
+- **`EmittedRoute.security` keeps an anonymous alternative, as the document publishes it.**
+  `@useAuth(NoAuth | BearerAuth)` is `security: [{}, { "BearerAuth": [] }]` in the document
+  `@typespec/openapi3` writes, and this published `[{ "BearerAuth": [] }]`: a contract refusing the
+  anonymous caller the document accepts. `@useAuth(NoAuth)` is now `[{}]`. `test/security/` compares
+  every operation's `security` with openapi3's own, red first. **Felt by a consumer that assumed every
+  requirement names a scheme**; one applying the documented rule (any one requirement, every scheme in
+  it) admits `{}` unchanged.
+- **A path value in an RFC 6570 form, and a form-exploded query record or model, are decoded before
+  they are validated.** A path list was never split and a record never paired, and `{?param*}` over an
+  object has no `param` key at all, so a server built on this library refused or never routed 34 of
+  the requests `@typespec/http-specs` declares conformant. See `EmittedRoute.pathSegments` below.
+  `test/expansion/` holds the arms, red first, with the values and URIs the `routes` scenario documents.
+
+### Added
+
+- **`EmittedRoute.authentication`: `"none" | "optional" | "required"`**, whether an operation needs a
+  caller. `noAuth` could not tell `@useAuth(NoAuth)` from `NoAuth | BearerAuth`, so a server passing it
+  on never saw a caller who presented a valid token on an optional route. `noAuth` is deprecated.
+- **`EmittedRoute.pathSegments` and `literalQuery`**, the route as a server has to mount it, read from
+  `uriTemplate`. `path` strips every operator, so a router mounted from it could not match
+  `array{.param*}`, `array{;param}`, `optional{/name}` or a literal query string.
 
 ## [0.25.1] - 2026-09-13
 
