@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compileEmittedSet } from "./support/emitted-set.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DEFAULT_RUNTIME_MODULE } from "../src/index.js";
 
 /**
  * **What a stranger gets when they install this package.**
@@ -42,7 +41,7 @@ const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf
 function packageOf(specifier: string): string | undefined {
 	if (specifier.startsWith(".") || specifier.startsWith("node:")) return undefined;
 	// An emitted import line is itself a template literal, so its specifier can be a placeholder -
-	// `${runtimeModule}` is decided by the consumer's option, not by this manifest.
+	// `${contractsPackage}` is decided by the consumer's option, not by this manifest.
 	if (specifier.includes("${")) return undefined;
 	const parts = specifier.split("/");
 	return specifier.startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0];
@@ -103,7 +102,7 @@ describe("the package declares what it needs to run outside this checkout", () =
 		for (const file of emitted) {
 			for (const specifier of specifiersIn(readFileSync(file, "utf8"))) {
 				const owner = packageOf(specifier);
-				// Whatever the consumer pointed `runtime-module` and `contracts-package` at is theirs.
+				// Whatever the consumer pointed `contracts-package` at is theirs.
 				if (owner === undefined || owner === manifest.name) continue;
 				used.add(owner);
 			}
@@ -113,66 +112,21 @@ describe("the package declares what it needs to run outside this checkout", () =
 	});
 
 	/**
-	 * **The `runtime-module` DEFAULT, which no compile in this suite can exercise.**
+	 * **The generated output imports no runtime module at all.**
 	 *
-	 * **This branch was ungraded across the entire suite, and it shipped wrong in the sibling
-	 * package.** Every fixture overrides `runtime-module` - it has to, because
-	 * `typespec-http-zod/runtime` is correct for a consumer and unresolvable from this package's own
-	 * `.out/`, so a suite that left it alone would emit files it could not load. The consequence is
-	 * that what a consumer who configures NOTHING gets was decided by a constant nothing read.
-	 *
-	 * `typespec-hono` inherited that default and it was wrong twice over: its generated files import
-	 * six names this module does not export, and it is a TRANSITIVE dependency of its consumers, so
-	 * under a strict `node_modules` the specifier does not resolve whatever it exports. Measured there
-	 * as two `TS2307`s in a fresh project, after `tsp compile` reported zero diagnostics.
-	 *
-	 * Both halves are checkable without resolving anything, which is what makes this arm possible at
-	 * all: the specifier must be one this package's own `exports` publishes, and every name the emitted
-	 * output imports from its runtime module must be a name that module actually exports.
+	 * `schemas.gen.ts` used to import `ResponseArm` from wherever `runtime-module` pointed, and that
+	 * default shipped wrong in the sibling package: its generated files imported names this module does
+	 * not export, through a specifier its consumers could not resolve. The option is gone because the
+	 * arm shape is now declared in the file that uses it, so the class of defect has nothing left to
+	 * attach to - which is worth asserting rather than trusting, since re-adding an import is one line.
 	 */
-	describe("what the generated output imports when the consumer configures nothing", () => {
-		it("defaults to a subpath this package actually publishes", () => {
-			const owner = packageOf(DEFAULT_RUNTIME_MODULE);
-			expect(owner).toBe(manifest.name);
-			/** `typespec-http-zod/runtime` -> the `./runtime` key `exports` has to carry. */
-			const subpath = `.${DEFAULT_RUNTIME_MODULE.slice(manifest.name.length)}`;
-			expect(Object.keys(manifest.exports ?? {})).toContain(subpath);
-		});
-
-		it("imports from its runtime module only names that module exports", () => {
-			/**
-			 * The fixture points `runtime-module` at a relative path to `src/runtime.ts`, and a consumer
-			 * gets the published subpath. Both spell the same module, so the NAMES are comparable either
-			 * way - which is the half that broke in the sibling, independently of resolution.
-			 */
-			const runtimeImports = emitted.flatMap((file) => [
-				...readFileSync(file, "utf8").matchAll(
-					/^import(?:\s+type)?\s*\{([^}]*)\}\s*from\s*"([^"]+)"/gm,
-				),
-			]);
-			const imported = new Set<string>();
-			for (const match of runtimeImports) {
-				const specifier = match[2] ?? "";
-				const isRuntime =
-					specifier === DEFAULT_RUNTIME_MODULE || /(^|\/)runtime(\.js)?$/.test(specifier);
-				if (!isRuntime) continue;
-				for (const name of (match[1] ?? "").split(",")) {
-					const bare = name.trim().replace(/^type\s+/, "");
-					if (bare !== "") imported.add(bare);
-				}
-			}
-			// Non-vacuity: a regex that stops matching would otherwise report agreement about nothing.
-			expect(imported.size).toBeGreaterThanOrEqual(1);
-
-			const runtimeSource = readFileSync(join(packageRoot, "src", "runtime.ts"), "utf8");
-			const exported = new Set(
-				[
-					...runtimeSource.matchAll(/^export (?:type |interface |function |const |class )(\w+)/gm),
-				].map((match) => match[1] ?? ""),
-			);
-			expect(exported.size).toBeGreaterThanOrEqual(1);
-			expect([...imported].filter((name) => !exported.has(name)).toSorted()).toEqual([]);
-		});
+	it("imports no runtime module from any generated file", () => {
+		const runtimeImports = emitted.flatMap((file) =>
+			specifiersIn(readFileSync(file, "utf8"))
+				.filter((specifier) => /(^|\/)runtime(\.gen)?(\.js)?$/.test(specifier))
+				.map((specifier) => `${specifier} in ${file}`),
+		);
+		expect(runtimeImports).toEqual([]);
 	});
 
 	/**

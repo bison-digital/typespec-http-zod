@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAllHttpServices } from "@typespec/http";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -131,5 +131,28 @@ describe("whether a non-JSON body is text a server can serve as is", () => {
 	it("keeps each media type on the arm, so the two are told apart by what the document says", () => {
 		expect(armOf("text", 200).contentTypes).toEqual(["text/plain"]);
 		expect(armOf("xml", 200).contentTypes).toEqual(["application/xml"]);
+	});
+});
+
+describe("the arm shape declared in schemas.gen.ts is the published runtime's", () => {
+	it("hands every emitted arm list to typespec-http-zod/runtime's ResponseArm with no cast", () => {
+		/**
+		 * `schemas.gen.ts` declares its own `ResponseArm` so it imports no runtime. An application
+		 * reads the arms through the published one, so the two have to agree, and only a compile can
+		 * say they do: the consumer below is compiled beside the emitted files, under the same settings.
+		 */
+		const runtime = relative(compiled.outDir, join(here, "..", "..", "src", "runtime.js"));
+		writeFileSync(
+			join(compiled.outDir, "arms.consumer.ts"),
+			`import type { ResponseArm } from ${JSON.stringify(runtime.startsWith(".") ? runtime : `./${runtime}`)};
+import { guardedResponses, twoResponses, rangedResponses, inlineResponses, textResponses } from "./schemas.gen.js";
+
+export const read: readonly (readonly ResponseArm[])[] = [guardedResponses, twoResponses, rangedResponses, inlineResponses, textResponses];
+`,
+		);
+		const { output, failed } = typecheckEmitted(compiled.outDir);
+		rmSync(join(compiled.outDir, "arms.consumer.ts"), { force: true });
+		expect(output.trim(), output).toBe("");
+		expect(failed).toBe(false);
 	});
 });

@@ -10,9 +10,9 @@ import type { ZodType } from "zod";
  * the sake of two declarations. `test/packaging.test.ts` asserts the separation rather than trusting
  * it.
  *
- * A consumer may substitute this entirely: the `runtime-module` option decides the specifier the
- * generated files import from, so an application that wants its own declarations points at its own
- * module and re-declares these names.
+ * The emitted `schemas.gen.ts` does not import it: the arm lists there are annotated with a copy of
+ * {@link ResponseArm} declared in that file, so the output depends on no runtime at all. This module
+ * is what an application reading those arms imports, and `armFor` is the rule it reads them by.
  */
 
 /**

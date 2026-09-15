@@ -1677,7 +1677,6 @@ function renderSchemas(
 	registry: SchemaRegistry,
 	externals: ExternalImports,
 	routeDeclarations: readonly string[],
-	runtimeModule: string,
 	compileSchemas: boolean,
 ): string {
 	const declarations = registry.declarations().map((d) => {
@@ -1777,19 +1776,34 @@ function renderSchemas(
 		[...declarations, ...routeDeclarations].join("").match(/[A-Za-z_$][\w$]*/g) ?? [],
 	).has("z");
 	const parts = [generatedBanner()];
-	if (usesZod) parts.push('\nimport { z } from "zod";\n');
+	if (usesZod || routeDeclarations.length > 0) parts.push('\nimport { z } from "zod";\n');
 	/**
-	 * A TYPE import, so nothing of this package's survives into the emitted JavaScript.
+	 * **The arm shape is declared IN this file, not imported, and that is what lets two emitters share
+	 * it.** It used to be `import type { ResponseArm } from <runtime-module>`, the one line of this
+	 * file that depended on where a runtime lived. A server emitter and a tool emitter pointed at one
+	 * output directory both write `schemas.gen.ts`, and `emitFile` is a silent last-writer-wins, so the
+	 * two had to agree on that specifier or the order of `emit:` decided which import survived. With
+	 * the shape declared here the file depends on no runtime at all, and `runtime-module` had nothing
+	 * left to decide.
 	 *
-	 * The annotation is what makes a misspelled or omitted `schema` a compile error rather than an arm
-	 * that silently validates nothing - see the option's own docblock for the measurement. Emitted only
-	 * when there are arms to annotate, because an unused import fails the lint a generated file has to
+	 * The annotation is still what makes a misspelled or omitted `schema` a compile error rather than
+	 * an arm that silently validates nothing. Not exported: the type an application reads an arm
+	 * through is `typespec-http-zod/runtime`'s, which is structurally the same. Emitted only where
+	 * there are arms to annotate, because an unused declaration fails the lint a generated file has to
 	 * pass like any other.
 	 */
-	if (routeDeclarations.length > 0) {
-		parts.push(`import type { ResponseArm } from ${JSON.stringify(runtimeModule)};\n`);
-	}
 	parts.push(renderExternalImports(externals, [...declarations, ...routeDeclarations].join("")));
+	if (routeDeclarations.length > 0) {
+		parts.push(`
+/** One declared response: its status key, its body's schema, its media types and its headers. */
+type ResponseArm = {
+	readonly status: number | "default" | \`\${1 | 2 | 3 | 4 | 5}XX\`;
+	readonly schema: z.ZodType | undefined;
+	readonly contentTypes?: readonly string[];
+	readonly headers?: readonly { readonly name: string; readonly optional: boolean }[];
+};
+`);
+	}
 	parts.push(declarations.join(""));
 	if (routeDeclarations.length > 0) parts.push(`\n${routeDeclarations.join("\n")}\n`);
 	return parts.join("");
@@ -2538,36 +2552,8 @@ export interface ResolvedServiceOptions {
 	/** Whether every emitted validator is wrapped in `z.compile()`. See the option's own docblock. */
 	readonly compileSchemas: boolean;
 	readonly keyVocabularies: readonly string[];
-	readonly runtimeModule: string;
 	/** The command that regenerates, for the banner. `undefined` keeps the generic line. */
 	readonly regenerateHint: string | undefined;
-}
-
-/** What the generated files import their runtime contract from when nothing says otherwise. */
-export const DEFAULT_RUNTIME_MODULE = "typespec-http-zod/runtime";
-
-/**
- * What a WRAPPING emitter may change about this one, without changing what a consumer may set.
- *
- * **`defaultRuntimeModule` is a default, not an override.** A consumer's `runtime-module` still
- * wins; this only decides what `schemas.gen.ts` and any file a wrapper emits beside it import from
- * when the consumer says nothing.
- *
- * **It exists because this package's own default is wrong for a wrapper, and shipped that way.**
- * `typespec-hono` emits `import type { AppEnv, Awaitable, Ctx, Result, RouteDeps }` and
- * `import { selectContentType }` from whatever this resolves to. None of those six is exported here -
- * this module exports `ResponseArm` and `armFor`, and nothing else. Worse, `typespec-http-zod` is a
- * TRANSITIVE dependency of a `typespec-hono` consumer, so under a strict `node_modules` the specifier
- * does not resolve at all whatever it exports. Measured in a fresh project installed from tarballs:
- * `tsp compile` succeeded with zero diagnostics and `tsc` then reported **two `TS2307`s**, one in each
- * generated file.
- *
- * Nothing in either suite saw it, because every compile in both harnesses sets `runtime-module`
- * explicitly. The default branch was ungraded across 240 tests.
- */
-export interface EmitHttpZodOptions {
-	/** The specifier generated files import their runtime contract from when the consumer sets none. */
-	readonly defaultRuntimeModule?: string;
 }
 
 /**
@@ -2635,12 +2621,8 @@ function reportTruncatedDocComments(program: Program): void {
 	});
 }
 
-export async function emitHttpZod(
-	context: EmitContext,
-	wrapper: EmitHttpZodOptions = {},
-): Promise<readonly EmittedService[]> {
+export async function emitHttpZod(context: EmitContext): Promise<readonly EmittedService[]> {
 	const options = context.options as EmitterOptions;
-	const defaultRuntimeModule = wrapper.defaultRuntimeModule ?? DEFAULT_RUNTIME_MODULE;
 	/**
 	 * Each service already projected to the version it currently serves - see `versioning.ts`.
 	 *
@@ -2738,8 +2720,6 @@ export async function emitHttpZod(
 				perService?.["seal-object-schemas"] ?? options["seal-object-schemas"] ?? false,
 			compileSchemas: perService?.["compile-schemas"] ?? options["compile-schemas"] ?? false,
 			keyVocabularies: perService?.["key-vocabularies"] ?? options["key-vocabularies"] ?? [],
-			runtimeModule:
-				perService?.["runtime-module"] ?? options["runtime-module"] ?? defaultRuntimeModule,
 			regenerateHint: perService?.["regenerate-hint"] ?? options["regenerate-hint"],
 		};
 		beginBanner(resolved.regenerateHint);
@@ -2816,13 +2796,7 @@ export async function emitHttpZod(
 
 		await emitFile(context.program, {
 			path: resolvePath(outputDir, "schemas.gen.ts"),
-			content: renderSchemas(
-				registry,
-				externals,
-				declarations,
-				resolved.runtimeModule,
-				resolved.compileSchemas,
-			),
+			content: renderSchemas(registry, externals, declarations, resolved.compileSchemas),
 		});
 
 		if (resolved.contractsOutputDir !== undefined) {

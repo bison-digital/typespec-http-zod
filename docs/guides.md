@@ -109,7 +109,7 @@ names rather than agreeing about them.
 import { emitHttpZod } from "typespec-http-zod";
 
 export async function $onEmit(context: EmitContext) {
-	const services = await emitHttpZod(context, { defaultRuntimeModule: "my-emitter/runtime" });
+	const services = await emitHttpZod(context);
 
 	for (const service of services) {
 		for (const route of service.routes) {
@@ -121,9 +121,10 @@ export async function $onEmit(context: EmitContext) {
 }
 ```
 
-`defaultRuntimeModule` sets what generated files import from when the consumer sets no
-`runtime-module`. A consumer's own setting still wins. Use it when your generated files import more
-than `ResponseArm`, so they resolve against your package rather than this one.
+The files this package writes import no runtime: `schemas.gen.ts` declares the arm shape it annotates
+its response lists with. A wrapping emitter that writes beside them - a server, a tool surface - owns
+whatever its own files import, so two emitters pointed at one output directory write a byte-identical
+`schemas.gen.ts` whenever their options match.
 
 `EmitterOptionsSchema` is published so a wrapping emitter can derive its option contract rather than
 restate it.

@@ -95,24 +95,6 @@ export interface EmitterOptions {
 	 */
 	"key-vocabularies"?: string[];
 	/**
-	 * The specifier the generated files import their runtime contract from. Defaults to
-	 * `typespec-http-zod/runtime`.
-	 *
-	 * **This is here because the emitted response arms are annotated, and the annotation earns its
-	 * keep.** `schemas.gen.ts` declares what each operation may answer with as
-	 * `... satisfies readonly ResponseArm[]`. Measured against the alternative: `as const` needs no
-	 * import at all, and catches a wrong `status` - but it is **blind** to a misspelled or omitted
-	 * `schema`, because `schema: undefined` is legitimate for a bodyless response. The typo then
-	 * produces a valid-looking arm that validates nothing, which is the failure this package exists to
-	 * prevent. `satisfies` reports both, at the declaration, naming the key.
-	 *
-	 * An emitter built on this library points the default at its own runtime, which re-exports these
-	 * names; an application that substitutes its own result or context types points it at its own
-	 * module and re-declares them. That is also what makes the emitted output loadable from this
-	 * package's own tests, where the package name does not resolve.
-	 */
-	"runtime-module"?: string;
-	/**
 	 * The command that regenerates these files, written into every banner.
 	 *
 	 * **`DO NOT EDIT` says what not to do and not what to do instead.** Only the project knows whether
@@ -138,7 +120,6 @@ export interface EmitterOptions {
 			"seal-object-schemas"?: boolean;
 			"compile-schemas"?: boolean;
 			"key-vocabularies"?: string[];
-			"runtime-module"?: string;
 			"regenerate-hint"?: string;
 		}
 	>;
@@ -159,7 +140,6 @@ export const EmitterOptionsSchema: JSONSchemaType<EmitterOptions> = {
 		"seal-object-schemas": { type: "boolean", nullable: true },
 		"compile-schemas": { type: "boolean", nullable: true },
 		"key-vocabularies": { type: "array", items: { type: "string" }, nullable: true },
-		"runtime-module": { type: "string", nullable: true },
 		"regenerate-hint": { type: "string", nullable: true },
 		services: {
 			type: "object",
@@ -174,7 +154,6 @@ export const EmitterOptionsSchema: JSONSchemaType<EmitterOptions> = {
 					"seal-object-schemas": { type: "boolean", nullable: true },
 					"compile-schemas": { type: "boolean", nullable: true },
 					"key-vocabularies": { type: "array", items: { type: "string" }, nullable: true },
-					"runtime-module": { type: "string", nullable: true },
 					"regenerate-hint": { type: "string", nullable: true },
 				},
 				required: [],

@@ -37,17 +37,16 @@ Each row was checked by planting a defect and confirming the named arm goes red.
 
 ## The published surface
 
-| thing                                     | must agree with                       | what catches a disagreement                                                                                            |
-| ----------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `package.json` `exports`                  | what `dist/` actually contains        | `packaging.test.ts` packs and inspects the tarball                                                                     |
-| `DEFAULT_RUNTIME_MODULE`                  | a subpath this package publishes      | `packaging.test.ts`                                                                                                    |
-| names the output imports from `./runtime` | what `runtime.ts` exports             | `packaging.test.ts`                                                                                                    |
-| `src/` imports                            | declared peer dependencies            | `packaging.test.ts`                                                                                                    |
-| the README install line                   | whether `./runtime` exports a value   | `documentation.test.ts`                                                                                                |
-| `docs/reference.md`                       | every diagnostic and option in `$lib` | `documentation.test.ts`, both directions: an undocumented one fails, and a declared diagnostic with no call site fails |
-| `CHANGELOG.md`                            | `package.json`'s version              | `documentation.test.ts`                                                                                                |
-| `README.md`                               | that `docs/` is reachable             | `documentation.test.ts`                                                                                                |
-| `test/reference/service.tsp`              | the vendored copy in `typespec-hono`  | `vendored.test.ts` against the sha256 in `test/reference/PROVENANCE.md`                                                |
+| thing                          | must agree with                       | what catches a disagreement                                                                                                    |
+| ------------------------------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `package.json` `exports`       | what `dist/` actually contains        | `packaging.test.ts` packs and inspects the tarball                                                                             |
+| the generated output's imports | no runtime module at all              | `packaging.test.ts`; the arm shape `schemas.gen.ts` declares is compiled against `./runtime`'s by `responses/complete.test.ts` |
+| `src/` imports                 | declared peer dependencies            | `packaging.test.ts`                                                                                                            |
+| the README install line        | whether `./runtime` exports a value   | `documentation.test.ts`                                                                                                        |
+| `docs/reference.md`            | every diagnostic and option in `$lib` | `documentation.test.ts`, both directions: an undocumented one fails, and a declared diagnostic with no call site fails         |
+| `CHANGELOG.md`                 | `package.json`'s version              | `documentation.test.ts`                                                                                                        |
+| `README.md`                    | that `docs/` is reachable             | `documentation.test.ts`                                                                                                        |
+| `test/reference/service.tsp`   | the vendored copy in `typespec-hono`  | `vendored.test.ts` against the sha256 in `test/reference/PROVENANCE.md`                                                        |
 
 ## Known gaps
 

@@ -1,7 +1,6 @@
 import { rmSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { CONTRACTS_BARREL_SPECIFIER, writeContractsBarrel } from "./contracts-barrel.js";
-import { fileURLToPath } from "node:url";
 import { compile, NodeHost, type Program } from "@typespec/compiler";
 
 /**
@@ -25,14 +24,6 @@ export interface CompiledFixture {
 }
 
 export interface FixtureOptions {
-	/**
-	 * Where the emitted files import their runtime contract from.
-	 *
-	 * **A fixture cannot use the default.** `typespec-http-zod/runtime` is correct for a consumer
-	 * and unresolvable from this package's own `.out/`, so a suite that left it alone would emit files
-	 * it cannot load - and would be measuring nothing while looking green.
-	 */
-	readonly runtimeModule?: string;
 	/**
 	 * Where the emitted Zod and wire assertions import their shared types from. The default points at
 	 * the vocabularies module alone, which is enough for a suite that only loads the schemas - but
@@ -63,20 +54,6 @@ export interface FixtureOptions {
 	readonly outDir?: string;
 }
 
-/**
- * This package's own `src/runtime.ts`, as a specifier the emitted file can actually resolve.
- *
- * **Relative, and spelled `.js`, and both matter.** An absolute path bakes one machine's checkout
- * into generated output; a `.ts` extension is rejected under `nodenext` without
- * `allowImportingTsExtensions`. Writing `./x.js` for a neighbouring `x.ts` is TypeScript's own
- * convention under node resolution, and it is what a real consumer's build sees.
- */
-function runtimeFixtureModule(outDir: string): string {
-	const runtime = fileURLToPath(new URL("../../src/runtime.ts", import.meta.url));
-	const specifier = relative(outDir, runtime).replaceAll("\\", "/").replace(/\.ts$/, ".js");
-	return specifier.startsWith(".") ? specifier : `./${specifier}`;
-}
-
 export async function compileFixture(
 	dir: string,
 	name: string,
@@ -102,7 +79,6 @@ export async function compileFixture(
 				"contracts-output-dir": outDir,
 				"contracts-package": options.contractsPackage ?? CONTRACTS_BARREL_SPECIFIER,
 				"seal-object-schemas": true,
-				"runtime-module": options.runtimeModule ?? runtimeFixtureModule(outDir),
 				...(options.keyVocabularies === undefined
 					? {}
 					: { "key-vocabularies": [...options.keyVocabularies] }),

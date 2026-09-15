@@ -41,6 +41,14 @@ answers with, so no arm names a TypeSpec property to read the choice from.
 them; a success body declared inline is named `<operationId>Response<status>` rather than
 `<operationId>Response`; arms are ordered exact codes ascending, then ranges, then `default`.
 
+**`runtime-module` and `EmitHttpZodOptions.defaultRuntimeModule` are removed**, and `emitHttpZod`
+takes the emit context alone. `schemas.gen.ts` declares the `ResponseArm` shape it annotates its arm
+lists with instead of importing it, so the emitted output depends on no runtime. That line was the one
+place two emitters sharing an output directory could disagree about `schemas.gen.ts`, whose writer is
+decided by the order of `emit:`, and it was the only thing the option decided. `typespec-http-zod/runtime`
+still exports `ResponseArm` and `armFor` for an application reading the arms; a compile arm holds the
+declared shape assignable to it.
+
 **Graded:** `test/responses/complete.test.ts`, eight arms, each red before the change. The
 conformance differential now compares every arm's media types and headers with the document across
 the corpus. Controls: dropping failure-arm media types, or every header, turns it red. The corpus

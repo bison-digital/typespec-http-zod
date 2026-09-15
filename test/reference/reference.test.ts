@@ -94,7 +94,9 @@ describe("the reference service emits", () => {
 		 */
 		const arms = [...schemas.matchAll(/satisfies readonly ResponseArm\[\]/g)];
 		expect(arms.length).toBeGreaterThanOrEqual(9);
-		expect(schemas).toMatch(/^import type \{ ResponseArm \} from /m);
+		// Declared in the file rather than imported, so the output depends on no runtime module.
+		expect(schemas).toMatch(/^type ResponseArm = \{$/m);
+		expect(schemas).not.toMatch(/import type \{ ResponseArm \}/);
 	});
 
 	it("gives the overlapping-status operation all four of its declared arms", async () => {
