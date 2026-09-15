@@ -121,7 +121,7 @@ describe("the corpus exercises authentication at all", () => {
 			"a scheme with no scopes",
 		).toBe(true);
 		expect(
-			rows.some((row) => row.route.noAuth),
+			rows.some((row) => row.route.authentication === "optional"),
 			"an anonymous option",
 		).toBe(true);
 		expect(

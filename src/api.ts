@@ -569,7 +569,7 @@ export type SecurityRequirement = Readonly<Record<string, readonly string[]>>;
 /**
  * Everything the document says about authenticating an operation, read ONCE.
  *
- * **`scopes` and `noAuth` were two lossy projections of this, each with its own read of the same
+ * **`scopes` and a boolean `noAuth` were two lossy projections of this, each with its own read of the same
  * fact.** A flat scope union cannot say which scheme demanded what, so an emitter that wanted the
  * gate the document actually publishes had to call `getAuthenticationForOperation` a third time and
  * rebuild the requirements itself -- which is what both server emitters were doing, in two
@@ -584,12 +584,10 @@ function authenticationFor(
 ): {
 	security: SecurityRequirement[];
 	scopes: string[];
-	noAuth: boolean;
 	authentication: "none" | "optional" | "required";
 } {
 	const options = getAuthenticationForOperation(program, operation.operation)?.options ?? [];
 	const security: SecurityRequirement[] = [];
-	let noAuth = false;
 
 	for (const option of options) {
 		const requirement: Record<string, readonly string[]> = {};
@@ -602,7 +600,6 @@ function authenticationFor(
 			 */
 			if (scheme.type === "noAuth") {
 				anonymous = true;
-				noAuth = true;
 				continue;
 			}
 			/** Scopes belong to the flows of an OAuth2 scheme; every other kind has none. */
@@ -627,7 +624,6 @@ function authenticationFor(
 	return {
 		security,
 		scopes,
-		noAuth,
 		authentication: !real ? "none" : anonymous ? "optional" : "required",
 	};
 }
@@ -1154,16 +1150,6 @@ export interface EmittedRoute {
 	 */
 	readonly optionalBody: boolean;
 	/**
-	 * No caller is established, so the operation receives no `ServiceContext`.
-	 *
-	 * Whether a tenant exists follows from whether the request was authenticated - there is no user,
-	 * account or membership to build one from otherwise. Reading it here is what lets a server
-	 * derive an operation's call shape rather than a hand-written table restating it per row.
-	 *
-	 * @deprecated Read {@link EmittedRoute.authentication}, which tells `none` from `optional`.
-	 */
-	readonly noAuth: boolean;
-	/**
 	 * **Whether the operation needs a caller, in the three states its `security` can say.**
 	 *
 	 * - `none`: no requirement asks for anything (`@useAuth(NoAuth)`, or no authentication at all).
@@ -1171,8 +1157,9 @@ export interface EmittedRoute {
 	 *   who presents a credential is authenticated; one who presents none is still admitted.
 	 * - `required`: every alternative asks for something.
 	 *
-	 * **`noAuth` could not tell the first two apart**, so a server passing it through treated
-	 * `NoAuth | BearerAuth` as "no caller", and a caller with a valid token was never seen as one.
+	 * **This replaced `noAuth`, which could not tell the first two apart**, so a server passing it
+	 * through treated `NoAuth | BearerAuth` as "no caller", and a caller with a valid token was never
+	 * seen as one.
 	 */
 	readonly authentication: "none" | "optional" | "required";
 	/**
@@ -1188,7 +1175,7 @@ export interface EmittedRoute {
 	/**
 	 * What the DOCUMENT says a caller must satisfy, in the shape the document says it.
 	 *
-	 * **`scopes` and `noAuth` are lossy projections of this, and publishing only those was a defect
+	 * **`scopes` is a lossy projection of this (and a boolean `noAuth` was another), and publishing only those was a defect
 	 * both server emitters had to work around.** A flat scope union cannot say WHICH scheme demanded
 	 * what, so `@useAuth(BearerAuth)` -- which reaches OpenAPI as `security: [{ "BearerAuth": [] }]`
 	 * -- arrived here as an empty scope list indistinguishable from no authentication at all. An
@@ -1763,7 +1750,6 @@ export function collectRoutes(
 				optionalBody,
 				scopes: authentication.scopes,
 				security: authentication.security,
-				noAuth: authentication.noAuth,
 				authentication: authentication.authentication,
 			});
 		}

@@ -89,7 +89,8 @@ failure-arm headers turns three arms red.
 
 - **`EmittedRoute.authentication`: `"none" | "optional" | "required"`**, whether an operation needs a
   caller. `noAuth` could not tell `@useAuth(NoAuth)` from `NoAuth | BearerAuth`, so a server passing it
-  on never saw a caller who presented a valid token on an optional route. `noAuth` is deprecated.
+  on never saw a caller who presented a valid token on an optional route. **Breaking: `noAuth` is
+  removed**; read `authentication !== "required"` where it meant "a caller may be absent".
 - **`RouteSchemaNames.queryFields` and `EmittedRoute.queryFieldsSchema`**, the query object with a
   `.shape`. Where a form-exploded record or model is gathered, `<id>Query` is
   `z.preprocess(gather, <id>QueryFields)` and has no `.shape`, so a consumer spreading request fields
