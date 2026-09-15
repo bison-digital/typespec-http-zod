@@ -121,3 +121,15 @@ describe("an inline body has a name", () => {
 		expect(armOf("inline", 404).schema).not.toBe(armOf("inline", 200).schema);
 	});
 });
+
+describe("whether a non-JSON body is text a server can serve as is", () => {
+	it("marks a string body textual and a model body not", () => {
+		expect(routeOf("text").responses.map((response) => response.textual)).toEqual([true]);
+		expect(routeOf("xml").responses.map((response) => response.textual)).toEqual([false]);
+	});
+
+	it("keeps each media type on the arm, so the two are told apart by what the document says", () => {
+		expect(armOf("text", 200).contentTypes).toEqual(["text/plain"]);
+		expect(armOf("xml", 200).contentTypes).toEqual(["application/xml"]);
+	});
+});

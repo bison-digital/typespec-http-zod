@@ -386,6 +386,16 @@ export interface EmittedResponse {
 	 * the document does, a string, which is not something a server validates a stream against.
 	 */
 	readonly streamed: boolean;
+	/**
+	 * The body's type is a string, so under a media type that is not JSON it IS the text served.
+	 *
+	 * **The fact a server needs to serve a non-JSON body at all.** A `string` declared as `text/plain`
+	 * is validated and written as is; a MODEL declared as `application/xml` has no serialisation an
+	 * emitter can derive from the document, so the text has to come from the application. Forty arms in
+	 * the conformance corpus are the second kind and three are the first, and a server that could not
+	 * tell them apart would either refuse the text or validate XML against a JSON schema.
+	 */
+	readonly textual: boolean;
 }
 
 /**
@@ -467,6 +477,7 @@ function responsesOf(
 				headers: entry.headers,
 				binary,
 				streamed: entry.streamed,
+				textual: entry.body !== undefined && isStringType(entry.body),
 			};
 		})
 		.toSorted(
@@ -489,6 +500,34 @@ function responsesOf(
 function statusPrecedenceOf(status: StatusKey): number {
 	if (status === "default") return 2;
 	return typeof status === "number" ? 0 : 1;
+}
+
+/**
+ * Whether a type's values are strings: `string` or a scalar built on it, a string literal or template,
+ * or a union of those.
+ *
+ * Read from the type rather than from the emitted schema, which would be a decision made by matching
+ * generated text - `z.iso.datetime()` is a string and does not begin with `z.string`.
+ */
+function isStringType(type: Type): boolean {
+	switch (type.kind) {
+		case "String":
+		case "StringTemplate":
+			return true;
+		case "Scalar":
+			for (
+				let scalar: Scalar | undefined = type;
+				scalar !== undefined;
+				scalar = scalar.baseScalar
+			) {
+				if (scalar.name === "string") return true;
+			}
+			return false;
+		case "Union":
+			return [...type.variants.values()].every((variant) => isStringType(variant.type));
+		default:
+			return false;
+	}
 }
 
 /** Ascending within one precedence class, so the order does not depend on declaration order. */

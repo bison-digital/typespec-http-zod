@@ -99,3 +99,19 @@ op inline():
         y: string;
       };
     };
+
+/** A string body under a non-JSON media type: the body IS the text. */
+@route("/text")
+@get
+op text(): {
+  @header contentType: "text/plain";
+  @body body: string;
+};
+
+/** A model under a non-JSON media type: nothing here can say how it becomes text. */
+@route("/xml")
+@get
+op xml(): {
+  @header contentType: "application/xml";
+  @body body: Note;
+};

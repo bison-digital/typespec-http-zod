@@ -152,8 +152,9 @@ choice from, because the property name is a TypeSpec detail the document does no
 response is a redirect, gets its arms like any other.
 
 `EmittedRoute.responses` publishes the same facts to an emitter built on this API, with each header's
-TypeScript type, whether a body is raw binary (`binary`, whose schema is `z.unknown()`), and whether it
-is a stream of events or lines (`streamed`). `EmittedService.schemaNames` gives the identifier each
+TypeScript type, whether a body is raw binary (`binary`, whose schema is `z.unknown()`), whether it
+is a stream of events or lines (`streamed`), and whether its type is a string (`textual`), which is
+what decides whether a body under a non-JSON media type is the text itself. `EmittedService.schemaNames` gives the identifier each
 arm's body is declared under, in the same order.
 
 ## What a declared type checks, and what a `format` annotation does not

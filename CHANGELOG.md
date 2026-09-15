@@ -27,7 +27,9 @@ media types and headers, whatever kind of status it is.
 
 Replaced by `EmittedRoute.responses`, one `EmittedResponse` per status key in OpenAPI's precedence
 order, built in one pass over `@typespec/http`'s resolution. `RouteSchemaNames.arms` gives an
-identifier for every body, failures included.
+identifier for every body, failures included. Each record also says whether its body is raw binary, a
+stream, or a string (`textual`), which is what a server needs to serve a non-JSON body: a string
+under `text/plain` is the text, a model under `application/xml` is not.
 
 **Removed:** `EmittedRoute.statusCode`, `statusCodes`, `responseSchema`, `errorArms`,
 `responseHeaders`, `responseMediaTypes`, `statusBy`, `statusSelector`, `alternateResponseSchema`;
