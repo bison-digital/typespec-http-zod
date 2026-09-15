@@ -115,6 +115,13 @@ describe("a query value is decoded from its form expansion", () => {
 		});
 	});
 
+	it("leaves the route's own literal query out of an exploded record: ?fixed=true&a=1&b=2", () => {
+		// `fixed` stays a key of its own, which the query object does not declare and so does not keep.
+		expect(parsed("continuationRecordQuery", { fixed: "true", a: "1", b: "2" }).data).toEqual({
+			param: RECORD,
+		});
+	});
+
 	it("still refuses what the document refuses once gathered", () => {
 		expect(parsed("queryExplodeRecordQuery", { a: "one" }).success).toBe(false);
 		expect(parsed("queryExplodeModelQuery", { field: "status" }).success).toBe(false);

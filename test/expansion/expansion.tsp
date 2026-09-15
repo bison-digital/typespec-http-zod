@@ -49,5 +49,8 @@ model Filter {
 /** A literal query string the route itself carries, continued by a parameter. */
 @route("/continuation/primitive?fixed=true{&param}") @get op continuation(param: string): void;
 
+/** A literal query string beside an exploded record: `fixed` belongs to the route, never to the record. */
+@route("/continuation/record?fixed=true{&param*}") @get op continuationRecord(param: Record<int32>): void;
+
 /** The controls: an ordinary whole-segment parameter and an ordinary query list stay as they were. */
 @route("/plain/{id}") @get op plain(@path id: string, @query tags: string[]): void;

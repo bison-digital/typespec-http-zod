@@ -1394,6 +1394,8 @@ function parameterSchemasOf(
 	operation: HttpOperation,
 	registry: SchemaRegistry,
 	segments: readonly EmittedPathSegment[],
+	/** The names of a query string written into the route itself, which no parameter may gather. */
+	literalQueryNames: readonly string[],
 ): {
 	path: string | undefined;
 	query: string | undefined;
@@ -1498,7 +1500,7 @@ function parameterSchemasOf(
 				gathered.push(
 					explodedQueryCall({
 						name: parameter.name,
-						others: queryNames.filter((name) => name !== parameter.name),
+						others: [...queryNames.filter((name) => name !== parameter.name), ...literalQueryNames],
 						keys:
 							model === undefined
 								? undefined
@@ -1730,7 +1732,13 @@ export function collectRoutes(
 				}),
 				...(() => {
 					const split = withVisibility(program, requestVisibility, () =>
-						parameterSchemasOf(program, operation, registry, template.segments),
+						parameterSchemasOf(
+							program,
+							operation,
+							registry,
+							template.segments,
+							template.literalQuery.map(([name]) => name),
+						),
 					);
 					return {
 						pathSchema: split.path,
