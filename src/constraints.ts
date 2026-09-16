@@ -11,6 +11,8 @@ import {
 	type Program,
 	type Type,
 } from "@typespec/compiler";
+import { isSafePattern } from "redos-detector";
+import { reportDiagnostic } from "./lib.js";
 
 /**
  * Constraint decorators -> the Zod modifiers that enforce them.
@@ -50,9 +52,91 @@ export function applyConstraints(program: Program, expression: string, target: T
 	const maxExclusive = getMaxValueExclusive(program, target);
 	if (minExclusive !== undefined) result += `.gt(${minExclusive})`;
 	if (maxExclusive !== undefined) result += `.lt(${maxExclusive})`;
-	if (pattern !== undefined) result += `.regex(${patternToRegex(pattern)})`;
+	if (pattern !== undefined) {
+		reportUnsafePattern(program, pattern, target);
+		result += `.regex(${patternToRegex(pattern)})`;
+	}
 
 	return result;
+}
+
+/**
+ * How long one pattern may be analysed before the answer is "could not prove it".
+ *
+ * **Bounded, because the analysis is itself exponential in the bad case.** Measured: `^(a|a)+$`
+ * takes 1.6 seconds to decide, and a build should not stall on a pattern whose whole problem is that
+ * it does too much work. A pattern that cannot be decided inside this is one this emitter cannot
+ * certify, which is what the warning says.
+ */
+const ANALYSIS_TIMEOUT_MS = 500;
+
+/**
+ * Patterns already judged, because one scalar's pattern reaches here once per USE.
+ *
+ * **Not an optimisation, a necessity.** 153 of the 227 emitted `.regex()` calls in the reference
+ * service came from a single scalar, and the analysis costs up to {@link ANALYSIS_TIMEOUT_MS} each.
+ * Keyed on the pattern text, which is the only input the verdict depends on.
+ */
+const verdicts = new Map<string, boolean>();
+
+/**
+ * Which declarations have already been reported, per program.
+ *
+ * **Per PROGRAM, and that distinction is the whole reason this is a `WeakMap`.** One scalar carrying
+ * a pattern is reached once per USE - the reference service reaches a single scalar 153 times - and
+ * three identical warnings pointing at one declaration are noise a reader learns to skip. But a
+ * module-level "already said that" would also silence the second compile in a watch session, or the
+ * second service in one program, which is a warning lost rather than a warning tidied. Keyed on the
+ * program, it is emptied whenever the program is.
+ *
+ * The verdict cache above is different and is deliberately global: it is a pure function of the
+ * pattern text, so it cannot be wrong for a later program.
+ */
+const reported = new WeakMap<Program, WeakSet<Type>>();
+
+/**
+ * Warn when a `@pattern` is one a backtracking engine can be made to spend unbounded time on.
+ *
+ * **The emitted regex is NOT changed, and that is deliberate.** `@typespec/openapi3` publishes the
+ * pattern verbatim, so anchoring it, bounding it or rewriting it here would make the validator
+ * enforce something the document does not state - the one trade this package never makes. What can
+ * be done is to say so at build time, while the author can still change the spec.
+ *
+ * **The engine is the one Zod runs on.** `unicode: false` because {@link patternToRegex} emits a bare
+ * `/.../` with no flags, so the analysis has to be of the expression as it will actually run.
+ *
+ * **`safe === false` means "not proven safe", not "proven dangerous"**, and the wording follows that.
+ * `redos-detector` proves safety rather than guessing at danger, so a pattern it cannot decide inside
+ * the timeout is reported the same way as one it decides against. Measured over a realistic spread of
+ * 14 patterns an API would carry: 2 conservative warnings, both on a quantifier nested over an
+ * overlapping class, and nothing dangerous missed - including `^\w+([.-]?\w+)*$`, which reads as
+ * ordinary and takes **11 seconds** on a 29-character input.
+ */
+function reportUnsafePattern(program: Program, pattern: string, target: Type): void {
+	let safe = verdicts.get(pattern);
+	if (safe === undefined) {
+		try {
+			safe = isSafePattern(pattern, { unicode: false, timeout: ANALYSIS_TIMEOUT_MS }).safe;
+		} catch {
+			// A pattern the analyser cannot even parse is not one to make a claim about.
+			safe = true;
+		}
+		verdicts.set(pattern, safe);
+	}
+	if (safe) return;
+	let already = reported.get(program);
+	if (already === undefined) {
+		already = new WeakSet();
+		reported.set(program, already);
+	}
+	// A declaration carries at most one `@pattern`, so the declaration alone identifies the report.
+	if (already.has(target)) return;
+	already.add(target);
+	reportDiagnostic(program, {
+		code: "redos-prone-pattern",
+		format: { pattern },
+		target,
+	});
 }
 
 /**

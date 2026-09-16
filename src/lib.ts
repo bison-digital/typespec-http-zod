@@ -394,6 +394,35 @@ const diagnostics = {
 	 * **This is the one collision worth refusing.** The derived case is representable and is emitted.
 	 * This one cannot be resolved without contradicting what the author explicitly wrote.
 	 */
+	/**
+	 * A `@pattern` a backtracking engine can be made to spend unbounded time on.
+	 *
+	 * **The emitted regex is not changed, and cannot be.** `@typespec/openapi3` publishes the pattern
+	 * verbatim, so anchoring it or bounding it here would make the validator enforce something the
+	 * document does not state - the trade this package exists to refuse. What is left is to say so
+	 * while the author can still change the spec.
+	 *
+	 * **This is a server-side denial of service, not a style note.** Measured on a generated server
+	 * under `workerd`: `@pattern("^(\w+\s?)*$")`, which reads as "words", answers a 31-byte query
+	 * parameter in 7.8 seconds against 2.9 milliseconds for a conformant one, and the cost doubles per
+	 * added byte. The caller needs no credential and the parameter is validated before any handler
+	 * runs, so every route carrying the pattern is reachable.
+	 *
+	 * **A warning rather than an error**, on this package's own rule: the spec is valid, the document
+	 * is correct, and openapi3 publishes the same pattern without complaint. What is wrong is a cost no
+	 * artefact states. `warn-as-error: true` is the escalation for a project that wants the build to
+	 * fail.
+	 *
+	 * **The remedy named is honest about what it buys.** A `@maxLength` bounds the input and therefore
+	 * the work, and the document publishes it too, so validator and document still agree - but the
+	 * growth is exponential, so only a small bound helps. Removing the ambiguity is the real fix.
+	 */
+	"redos-prone-pattern": {
+		severity: "warning",
+		messages: {
+			default: paramMessage`'${"pattern"}' cannot be proven safe against catastrophic backtracking: one input can match it more than one way, so a caller can choose a value that takes exponentially long to reject. The emitted validator runs it on every request, before any handler, and the pattern is published verbatim so it cannot be rewritten for you. Remove the ambiguity, usually by taking out a quantifier nested inside another or an optional separator between repeated groups, or add a SMALL '@maxLength' to bound the work.`,
+		},
+	},
 	"duplicate-operation-id": {
 		severity: "error",
 		messages: {

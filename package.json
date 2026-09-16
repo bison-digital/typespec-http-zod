@@ -50,6 +50,9 @@
 		"format": "oxfmt",
 		"format:check": "oxfmt --check"
 	},
+	"dependencies": {
+		"redos-detector": "^6.1.4"
+	},
 	"devDependencies": {
 		"@types/node": "^26.5.1",
 		"@typespec/compiler": "1.16.0",

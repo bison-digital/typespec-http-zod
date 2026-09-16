@@ -32,6 +32,7 @@ does not mean what they almost certainly intended.
 | code                            | why                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `duplicate-declaration`         | Two different types claim one TypeScript name. The document tells them apart by namespace and a module cannot. A REPEAT of the same declaration is not this: visibility projection hands the registry a distinct type object for one model, and those are collapsed silently.                                                                                                                                                                                                                                                                                     |
+| `redos-prone-pattern`           | A `@pattern` that cannot be proven safe against catastrophic backtracking: one input can match it more than one way, so a caller can pick a value that takes exponentially long to reject. Nothing is refused and the regex is emitted verbatim, because the document publishes it verbatim. Rewrite the pattern so no input matches two ways, or add a small `@maxLength` to bound the work. See [Patterns and the cost of running them](#patterns-and-the-cost-of-running-them).                                                                                |
 | `duplicate-operation-id`        | An explicit `@operationId` another operation already answers to. OpenAPI requires the id to be unique, and an explicit one is never renamed to make room, so it cannot be resolved for you. Ids DERIVED from a parent container are deduplicated silently, exactly as `@typespec/openapi3` deduplicates them, and raise nothing.                                                                                                                                                                                                                                  |
 | `unsupported-type`              | A construct with no runtime representation. `never` in a body or a union variant is the reachable case. A `never` property is dropped instead, matching the document.                                                                                                                                                                                                                                                                                                                                                                                             |
 | `unsupported-default`           | A default with no literal form, such as the scalar constructor `utcDateTime.fromISO(...)`. Scalars, arrays and objects nested to any depth are emitted as literals. The property keeps its declared shape and loses only the fallback.                                                                                                                                                                                                                                                                                                                            |
@@ -42,6 +43,47 @@ does not mean what they almost certainly intended.
 | `unsupported-status-code-range` | OpenAPI keys a range as `1XX` to `5XX`, so `@minValue(494) @maxValue(499)` has nowhere to go. `@typespec/openapi3` refuses the same spec and writes no document, so the same rule is copied from its source. A range covering a bucket exactly, `@minValue(400) @maxValue(499)`, is supported.                                                                                                                                                                                                                                                                    |
 | `unmirrorable-seal`             | Two services resolve `seal-object-schemas` differently. `@typespec/openapi3` has no per-service options and applies one value to the whole program, so one of them would publish a document that disagrees with the validator emitted beside it - sealed here and silent there refuses a payload the document permits, and the reverse publishes a strictness the runtime does not enforce. Give every service the same value, or split the surfaces into separate compiles.                                                                                      |
 | `undeclared-discriminator`      | Upstream, and not fixable with an emitter option. `@discriminated(#{envelope: "none"})` puts the discriminator inside each variant on the wire, and openapi3 emits `oneOf` with a `discriminator` keyword while never adding that property to the variant schema, which OpenAPI 3.1 forbids. Tracked as [microsoft/typespec#7141](https://github.com/microsoft/typespec/issues/7141). Avoidable in your spec by declaring the discriminator on the variant, as `model Cat { kind: "cat" }`.                                                                       |
+
+## Patterns and the cost of running them
+
+A `@pattern` is not a description. It is a regular expression the server runs on caller-supplied
+input, on every request, before any handler sees it - and a backtracking engine can be made to spend
+exponential time on the wrong one.
+
+Measured on a generated server under `workerd`, with `@pattern("^(\w+\s?)*$")` on a query
+parameter, which is what an author writes to mean "words":
+
+| input         | answer | time    |
+| ------------- | ------ | ------- |
+| `hello world` | 200    | 0.003 s |
+| 21 bytes      | 400    | 0.010 s |
+| 25 bytes      | 400    | 0.127 s |
+| 29 bytes      | 400    | 2.743 s |
+| 31 bytes      | 400    | 7.799 s |
+
+Roughly twice the work per added byte, from a caller with no credential and a 31-byte payload. The
+shape is not always obvious: `^\w+([.-]?\w+)*$` reads as an ordinary identifier rule and takes 11
+seconds on a 29-character input, while `^[a-z]+(-[a-z]+)*$` has the same nesting and is perfectly
+safe, because its separator is required and so the split is forced.
+
+So the emitter checks, with
+[`redos-detector`](https://github.com/tjenkinson/redos-detector), and raises
+`redos-prone-pattern` for a pattern it cannot prove safe.
+
+**The emitted regex is never changed.** `@typespec/openapi3` publishes the pattern verbatim; anchoring
+or bounding it here would make the validator enforce something the document does not state, which is
+the one trade this package refuses. The remedy belongs in the spec:
+
+- **rewrite the pattern** so no input matches it two ways, usually by removing a quantifier nested
+  inside another, or an optional separator between repeated groups;
+- **or add a `@maxLength`**, which the document publishes too, so the two artefacts still agree. Bound
+  the work rather than remove it, so only a small bound helps.
+
+**It proves safety rather than guessing at danger**, so "not proven safe" is what the warning says.
+Measured over a realistic spread of 14 patterns an API would carry: two conservative warnings, both on
+a quantifier nested over an overlapping class, and nothing dangerous missed. The analysis is itself
+exponential in the bad case, so it is capped at 500 ms per distinct pattern and cached, `^(a|a)+$`
+alone takes 1.6 seconds to decide.
 
 ## Known limits
 
