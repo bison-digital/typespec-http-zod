@@ -8,7 +8,12 @@ published types; a patch will not. The **emitted output is part of the API** - a
 validator's shape, to a declared identifier, or to the `EmittedRoute` a wrapping emitter reads is a
 change a consumer feels, and is treated as such here rather than as an implementation detail.
 
-## [Unreleased]
+## [0.26.0] - 2026-09-16
+
+A minor carrying four things, three of them breaking: **one complete response record per status**,
+**a route's RFC 6570 form and the values it decodes**, **`authentication` in place of `noAuth`**, and
+**a request body that is not a model is named rather than merged** - which had been dropping such a
+body silently.
 
 **Breaking: one complete response record per status.** A server emitter can now type a handler's
 return as the union of every response the document declares, because each arm carries its own body,
