@@ -357,6 +357,15 @@ export interface EmittedResponseHeader {
 	readonly name: string;
 	/** The TypeScript type of the value, so a server emitter can put it in a signature. */
 	readonly type: string;
+	/**
+	 * The Zod expression for the value, so a server can check what it is about to send.
+	 *
+	 * The TYPE above constrains what a handler may return at compile time; this constrains what
+	 * actually goes on the wire, which is the same split `schema` and the contract types already make
+	 * for a body. A value that crossed a boundary the type system cannot see into - a service binding,
+	 * a cast - is exactly what it catches.
+	 */
+	readonly schema: string;
 	/** The document's `required: false`. */
 	readonly optional: boolean;
 }
@@ -465,6 +474,14 @@ function responsesOf(
 					entry.headers.push({
 						name,
 						type: typeToTs(program, property.type),
+						/**
+						 * **The Zod expression, which used to be discarded here.** Every REQUEST parameter
+						 * goes through `expressionForProperty` a few hundred lines below; a response header
+						 * went through `typeToTs` and nothing else, so the emitted arm carried a name and an
+						 * optionality and no way to check a value. A response body that breaks its schema
+						 * throws `ResponseContractError`; a header that breaks its own was served.
+						 */
+						schema: registry.expressionForProperty(property),
 						optional: property.optional,
 					});
 				}
@@ -2115,7 +2132,15 @@ export interface RouteSchemaNames {
 	 * failure's inline body stayed an expression inside the arm list, so a server emitter could not
 	 * write `z.infer<typeof ...>` for the one response it most needs a handler to be able to return.
 	 */
-	readonly arms: readonly { readonly status: StatusKey; readonly schema: string | undefined }[];
+	readonly arms: readonly {
+		readonly status: StatusKey;
+		readonly schema: string | undefined;
+		/**
+		 * The identifier holding this status's declared response headers, where it declares any.
+		 * **Optional on the interface**, so a server emitter that does not check them yet still builds.
+		 */
+		readonly headers?: string | undefined;
+	}[];
 	/**
 	 * The `readonly ResponseArm[]` const - what the operation may answer with, and with which body.
 	 *
@@ -2212,12 +2237,32 @@ function nameRouteSchemas(
 		 */
 		const declaredBodies = new Map<string, string | undefined>();
 		const arms = route.responses.map((response) => {
-			if (response.schema === undefined) return { status: response.status, schema: undefined };
+			const suffix = response.status === "default" ? "Default" : String(response.status);
+			/**
+			 * The headers this status declares, as one object schema, so a server can check what it is
+			 * about to send the way it already checks the body.
+			 *
+			 * **A plain `z.object`, which strips.** A response carries headers the document does not
+			 * declare - `Content-Type` among them, which the server sets itself - and those are not a
+			 * contract violation. What is checked is that every header the document DOES declare carries
+			 * a value the document permits.
+			 */
+			const headers =
+				response.headers.length === 0
+					? undefined
+					: declare(
+							`Response${suffix}Headers`,
+							`z.object({\n${response.headers
+								.map((header) => `\t${objectKey(header.name)}: ${header.schema},`)
+								.join("\n")}\n})`,
+						);
+			if (response.schema === undefined) {
+				return { status: response.status, schema: undefined, headers };
+			}
 			if (!declaredBodies.has(response.schema)) {
-				const suffix = response.status === "default" ? "Default" : String(response.status);
 				declaredBodies.set(response.schema, declare(`Response${suffix}`, response.schema));
 			}
-			return { status: response.status, schema: declaredBodies.get(response.schema) };
+			return { status: response.status, schema: declaredBodies.get(response.schema), headers };
 		});
 		const responses = schemaConst(route.operationId, "Responses");
 		declarations.push(

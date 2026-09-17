@@ -89,9 +89,22 @@ describe("a failure arm is as complete as a success arm", () => {
 		expect(armOf("guarded", "default").contentTypes).toEqual(["application/json"]);
 	});
 
-	it("publishes each header's TypeScript type on the route, so a signature can carry it", () => {
+	it("publishes each header's type AND its schema, so both artefacts can carry it", () => {
+		/**
+		 * **The schema is the half that used to be missing.** A response header went through `typeToTs`
+		 * and nothing else, so a server could put it in a handler's signature and had no way to check
+		 * the value that actually went on the wire - while the body beside it was checked on every
+		 * response. The type constrains the handler; the schema constrains the response.
+		 */
 		const tooMany = routeOf("guarded").responses.find((response) => response.status === 429);
-		expect(tooMany?.headers).toEqual([{ name: "retry-after", type: "number", optional: false }]);
+		expect(tooMany?.headers).toEqual([
+			{
+				name: "retry-after",
+				type: "number",
+				schema: "z.number().int()",
+				optional: false,
+			},
+		]);
 	});
 
 	it("orders arms the way OpenAPI resolves them: exact, then range, then default", () => {
