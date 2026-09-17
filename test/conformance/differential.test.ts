@@ -125,11 +125,12 @@ interface OpenApiDocument {
 	};
 }
 
-/** The three parameter locations this emitter mounts a validator for. `cookie` is not one. */
+/** The parameter locations this emitter mounts a validator for, each named as the document names it. */
 const PARAMETER_TARGETS = [
 	{ in: "path", suffix: "Path" },
 	{ in: "query", suffix: "Query" },
 	{ in: "header", suffix: "Header" },
+	{ in: "cookie", suffix: "Cookie" },
 ] as const;
 
 /**

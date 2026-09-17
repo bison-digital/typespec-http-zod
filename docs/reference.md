@@ -44,6 +44,22 @@ does not mean what they almost certainly intended.
 | `unmirrorable-seal`             | Two services resolve `seal-object-schemas` differently. `@typespec/openapi3` has no per-service options and applies one value to the whole program, so one of them would publish a document that disagrees with the validator emitted beside it - sealed here and silent there refuses a payload the document permits, and the reverse publishes a strictness the runtime does not enforce. Give every service the same value, or split the surfaces into separate compiles.                                                                                      |
 | `undeclared-discriminator`      | Upstream, and not fixable with an emitter option. `@discriminated(#{envelope: "none"})` puts the discriminator inside each variant on the wire, and openapi3 emits `oneOf` with a `discriminator` keyword while never adding that property to the variant schema, which OpenAPI 3.1 forbids. Tracked as [microsoft/typespec#7141](https://github.com/microsoft/typespec/issues/7141). Avoidable in your spec by declaring the discriminator on the variant, as `model Cat { kind: "cat" }`.                                                                       |
 
+## Cookie parameters
+
+`@cookie` is emitted as its own validator group, `<OperationId>Cookie`, beside `Path`, `Query` and
+`Header`. Its values arrive as text and are decoded and constrained exactly as a header's are, and
+its optionality is the document's `required`.
+
+It is a separate group rather than part of the header one because the document states the two
+separately and a server mounts one validator per location - merged, a cookie would be read from a
+header of the same name. `CookieOptions` carries only a name, so there is no collection encoding to
+undo.
+
+**This did nothing at all before 0.27.** A `@cookie` reached no validator, no contract type and no
+diagnostic, while `@typespec/openapi3` published it as `in: cookie, required: true`. It survived
+every conformance oracle because `@typespec/http-specs` contains no `@cookie`: the differential
+compared every location the corpus exercises and agreed with the document about all of them.
+
 ## Patterns and the cost of running them
 
 A `@pattern` is not a description. It is a regular expression the server runs on caller-supplied

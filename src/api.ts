@@ -1111,6 +1111,8 @@ export interface EmittedRoute {
 	 * request. It read as "the parameters" and was the field an adopter reached for first.
 	 */
 	readonly pathSchema: string | undefined;
+	/** Cookie parameters, as one object schema, or `undefined` where the operation declares none. */
+	readonly cookieSchema: string | undefined;
 	readonly querySchema: string | undefined;
 	/**
 	 * The query OBJECT itself, which differs from `querySchema` only where a form-exploded record or
@@ -1398,6 +1400,8 @@ function parameterSchemasOf(
 	/** The names of a query string written into the route itself, which no parameter may gather. */
 	literalQueryNames: readonly string[],
 ): {
+	/** Cookie parameters. No collection encoding: `CookieOptions` carries only a name. */
+	cookie: string | undefined;
 	path: string | undefined;
 	query: string | undefined;
 	/** The query OBJECT, before any exploded record or model is gathered into it. */
@@ -1416,7 +1420,24 @@ function parameterSchemasOf(
 		.filter((parameter) => parameter.type === "query")
 		.map((parameter) => parameter.name);
 	for (const parameter of operation.parameters.parameters) {
-		if (parameter.type !== "path" && parameter.type !== "query" && parameter.type !== "header") {
+		/**
+		 * **`cookie` is here because `@typespec/http` puts it here**, and excluding it was silent.
+		 * `HttpOperationParameter` discriminates on `"header" | "cookie" | "query" | "path"`, and this
+		 * filter named three of the four, so a `@cookie` reached no validator, no handler input and no
+		 * diagnostic while `@typespec/openapi3` published it as `in: cookie, required: true`. A
+		 * requirement the document states and the server cannot see is the defect class this package
+		 * exists to remove, and a cookie is where a session and a CSRF token normally live.
+		 *
+		 * The exclusion was by omission rather than by a `never` check, which is why TypeScript never
+		 * objected; every other place that reads `parameter.type` handles an encoding question a cookie
+		 * does not have, since `CookieOptions` carries only a name.
+		 */
+		if (
+			parameter.type !== "path" &&
+			parameter.type !== "query" &&
+			parameter.type !== "header" &&
+			parameter.type !== "cookie"
+		) {
 			continue;
 		}
 		/**
@@ -1544,6 +1565,7 @@ function parameterSchemasOf(
 	};
 	const query = shape("query");
 	return {
+		cookie: shape("cookie"),
 		path: shape("path"),
 		query:
 			query === undefined
@@ -1768,6 +1790,7 @@ export function collectRoutes(
 						),
 					);
 					return {
+						cookieSchema: split.cookie,
 						pathSchema: split.path,
 						querySchema: split.query,
 						queryFieldsSchema: split.queryFields,
@@ -2078,6 +2101,11 @@ export interface RouteSchemaNames {
 	 */
 	readonly queryFields: string | undefined;
 	readonly header: string | undefined;
+	/**
+	 * Cookie parameters. **Optional on the interface, so a server emitter that does not read it yet
+	 * still compiles** - this arrived after the other four and two emitters consume this type.
+	 */
+	readonly cookie?: string | undefined;
 	readonly body: string | undefined;
 	/**
 	 * The identifier each response's body is declared under, parallel to `EmittedRoute.responses` and
@@ -2169,6 +2197,7 @@ function nameRouteSchemas(
 				? route.querySchema?.replace(route.queryFieldsSchema, queryFields)
 				: route.querySchema,
 		);
+		const cookie = declare("Cookie", route.cookieSchema);
 		const negotiating = shared.has(`${route.verb} ${route.path}`);
 		const header = declare(
 			"Header",
@@ -2200,6 +2229,7 @@ function nameRouteSchemas(
 			query,
 			queryFields: gathers ? queryFields : query,
 			header,
+			cookie,
 			body,
 			arms,
 			responses,
@@ -2312,7 +2342,9 @@ function collectRequestTypes(
 							(parameter) =>
 								parameter.type === "path" ||
 								parameter.type === "query" ||
-								parameter.type === "header",
+								parameter.type === "header" ||
+								// The second half of the same omission: a validator with no matching type.
+								parameter.type === "cookie",
 						)
 						/**
 						 * Named as the WIRE names it, which is what the emitted validator keys on.
