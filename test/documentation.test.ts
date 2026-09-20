@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { $lib, EmitterOptionsSchema } from "../src/index.js";
+import { $lib, $linter, EmitterOptionsSchema } from "../src/index.js";
 
 /**
  * **A user who hits a refusal should find it documented, not discover it.**
@@ -53,6 +53,55 @@ describe("the README documents everything this package can do to you", () => {
 			"docs/reference.md",
 			"docs/releasing.md",
 		]);
+	});
+
+	/**
+	 * **A reader takes an unmarked row for an error, and two warnings were unmarked.**
+	 *
+	 * The table says `**A warning.**` on a row whose diagnostic is declared `severity: "warning"`.
+	 * `redos-prone-pattern` and `unenforceable-encoded-bound` said nothing, so the two diagnostics
+	 * that let a build through read exactly like the thirteen that stop it. Graded against
+	 * `$lib.diagnostics` rather than against a list here, so a new diagnostic joins the rule by
+	 * existing.
+	 */
+	/**
+	 * **A linter rule is invisible until a project enables it, so its documentation is the only way
+	 * anyone learns it exists.** A diagnostic announces itself the first time it fires; an opt-in rule
+	 * never fires for a project that has not heard of it. So every rule the linter ships must appear
+	 * in the reference's own table, and the reference must say how to turn the ruleset on.
+	 */
+	it("documents every linter rule it ships, and how to enable them", () => {
+		const reference = readFileSync(join(packageRoot, "docs", "reference.md"), "utf8");
+		const section = reference.slice(reference.indexOf("## Linter rules"));
+		expect(section.length, "docs/reference.md has no '## Linter rules' section").toBeGreaterThan(
+			20,
+		);
+		const rules = $linter.rules.map((rule) => rule.name);
+		expect(rules.length).toBeGreaterThanOrEqual(1);
+		const undocumented = rules.filter(
+			(name) => !section.split("\n").some((line) => line.startsWith(`| \`${name}\``)),
+		);
+		expect(undocumented, `rules missing from the table: ${undocumented.join(", ")}`).toEqual([]);
+		for (const ruleSet of Object.keys($linter.ruleSets ?? {})) {
+			expect(reference).toContain(`"typespec-http-zod/${ruleSet}"`);
+		}
+	});
+
+	it("marks as a warning exactly the diagnostics declared as one", () => {
+		const reference = readFileSync(join(packageRoot, "docs", "reference.md"), "utf8");
+		const rowFor = (code: string): string =>
+			reference.split("\n").find((line) => line.startsWith(`| \`${code}\``)) ?? "";
+		const codes = Object.keys($lib.diagnostics);
+		expect(codes.length).toBeGreaterThanOrEqual(6);
+		const wrong = codes.filter((code) => {
+			const row = rowFor(code);
+			if (row === "") return false; // absence is the arm above's job, not this one's.
+			const declared = $lib.diagnostics[code as keyof typeof $lib.diagnostics].severity;
+			return row.includes("**A warning.**") !== (declared === "warning");
+		});
+		expect(wrong, `rows disagreeing with their declared severity: ${wrong.join(", ")}`).toEqual([]);
+		// Non-vacuity: the rule has to have something to say about.
+		expect(codes.filter((code) => rowFor(code) !== "").length).toBeGreaterThanOrEqual(6);
 	});
 
 	it("names every diagnostic it can raise", () => {

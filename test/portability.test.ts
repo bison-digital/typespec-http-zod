@@ -103,6 +103,42 @@ describe("nothing this package ships names one machine's filesystem", () => {
 		expect(offenders.toSorted()).toEqual([]);
 	});
 
+	/**
+	 * **A tracked file can be pure ASCII and still EMIT a glyph, and three did.**
+	 *
+	 * The arm above reads source, and source can spell a character as an escape. `src/api.ts` carried
+	 * `src/api.ts` spelled a warning glyph as an escape twice, and an em-dash once, inside docblock
+	 * text that is written verbatim into `wire-contract.gen.ts`. The arm above passed, while every
+	 * consumer's generated file received both - the em-dash being a character this project forbids
+	 * outright.
+	 *
+	 * Found by the equivalent arm in `typespec-hono`, which reads emitted output; this one did not.
+	 * The emitted half is the half that ships, so it is the half that has to be checked.
+	 */
+	it("carries no non-ASCII character in anything the emitter GENERATES", () => {
+		expect(emitted.length).toBeGreaterThanOrEqual(20);
+		const offenders: string[] = [];
+		for (const file of emitted) {
+			readFileSync(file, "utf8")
+				.split("\n")
+				.forEach((line, index) => {
+					for (const character of line) {
+						const code = character.codePointAt(0) ?? 0;
+						if (code > 127) {
+							offenders.push(
+								`${file.slice(packageRoot.length)}:${index + 1} U+${code
+									.toString(16)
+									.toUpperCase()
+									.padStart(4, "0")}`,
+							);
+							return;
+						}
+					}
+				});
+		}
+		expect(offenders.toSorted(), offenders.join("\n")).toEqual([]);
+	});
+
 	it("carries no machine path in anything the emitter GENERATES", () => {
 		/**
 		 * **The arm the review asked for, and the one with a real way to fail.** Tracked files are

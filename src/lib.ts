@@ -72,8 +72,10 @@ export interface EmitterOptions {
 	 * `import "zod/compile"` does not: it compiles on first PARSE, which happens inside a request,
 	 * where the runtime refuses. Only the emitter owns the module scope these schemas are built in.
 	 *
-	 * A recursive model emits `z.lazy()`, which cannot be compiled. Zod returns it uncompiled and it
-	 * goes on parsing normally, so the option is safe to set on any spec.
+	 * No member of a reference CYCLE is compiled. Compiling one that a `z.lazy()` body names throws
+	 * `Cannot read properties of undefined (reading '_zod')` on the first parse from zod 4.6 onwards, so
+	 * the whole cycle is left uncompiled and goes on parsing normally. The option stays safe to set on
+	 * any spec.
 	 */
 	"compile-schemas"?: boolean;
 	/**
@@ -395,32 +397,33 @@ const diagnostics = {
 	 * This one cannot be resolved without contradicting what the author explicitly wrote.
 	 */
 	/**
-	 * A `@pattern` a backtracking engine can be made to spend unbounded time on.
+	 * **A pattern the document's own readers cannot compile.**
 	 *
-	 * **The emitted regex is not changed, and cannot be.** `@typespec/openapi3` publishes the pattern
-	 * verbatim, so anchoring it or bounding it here would make the validator enforce something the
-	 * document does not state - the trade this package exists to refuse. What is left is to say so
-	 * while the author can still change the spec.
+	 * A JSON Schema `pattern` is an ECMA-262 expression, and a reader compiles it with the Unicode
+	 * flag - Ajv does by default. Several ordinary spellings are an error under that flag: a redundant
+	 * `\-` outside a character class, a lone `]` or `{`, an identity escape such as `\a`.
+	 * Measured: Ajv throws `Invalid regular expression: /^\-?\d+$/u` on a pattern the emitted
+	 * validator runs perfectly well, so the server enforces a rule nothing reading the document can.
 	 *
-	 * **This is a server-side denial of service, not a style note.** Measured on a generated server
-	 * under `workerd`: `@pattern("^(\w+\s?)*$")`, which reads as "words", answers a 31-byte query
-	 * parameter in 7.8 seconds against 2.9 milliseconds for a conformant one, and the cost doubles per
-	 * added byte. The caller needs no credential and the parameter is validated before any handler
-	 * runs, so every route carrying the pattern is reachable.
-	 *
-	 * **A warning rather than an error**, on this package's own rule: the spec is valid, the document
-	 * is correct, and openapi3 publishes the same pattern without complaint. What is wrong is a cost no
-	 * artefact states. `warn-as-error: true` is the escalation for a project that wants the build to
-	 * fail.
-	 *
-	 * **The remedy named is honest about what it buys.** A `@maxLength` bounds the input and therefore
-	 * the work, and the document publishes it too, so validator and document still agree - but the
-	 * growth is exponential, so only a small bound helps. Removing the ambiguity is the real fix.
+	 * Reported rather than rewritten, for the same reason as every other pattern diagnostic: openapi3
+	 * publishes the expression verbatim and this package does not edit a published contract. The
+	 * remedy is a character the flag accepts, and it is almost always a `\` that was never needed.
 	 */
-	"redos-prone-pattern": {
+	"non-unicode-pattern": {
 		severity: "warning",
 		messages: {
-			default: paramMessage`'${"pattern"}' cannot be proven safe against catastrophic backtracking: one input can match it more than one way, so a caller can choose a value that takes exponentially long to reject. The emitted validator runs it on every request, before any handler, and the pattern is published verbatim so it cannot be rewritten for you. Remove the ambiguity, usually by taking out a quantifier nested inside another or an optional separator between repeated groups, or add a SMALL '@maxLength' to bound the work.`,
+			default: paramMessage`'${"pattern"}' is not a valid regular expression under the Unicode flag, which is how a JSON Schema reader compiles a published pattern: Ajv throws on it rather than evaluating it. The emitted validator falls back to running it without the flag, so this server enforces a rule no reader of its own document can. Remove the character the flag rejects: it is almost always a backslash that was never needed, such as a '\\-' outside a character class or an escape like '\\a', and otherwise a lone ']' or '{' that should be escaped.`,
+		},
+	},
+	/**
+	 * **A diagnostic, not a linter rule**, because here the emitter cannot do what the spec asks: it
+	 * drops a bound the author wrote. That is the case TypeSpec reserves for `$onValidate`-style
+	 * diagnostics, where a linter is for a program that is correct but could be better.
+	 */
+	"unenforceable-encoded-bound": {
+		severity: "warning",
+		messages: {
+			default: paramMessage`The bound on '${"name"}' cannot be enforced, and is not emitted. '@encode(string)' makes the wire value text, so '@minValue'/'@maxValue' would become a check on how many CHARACTERS it has - '@minValue(10)' would refuse '"42"' - and the exclusive form has no string equivalent at all. The document is no help either: it publishes 'minimum' on a 'type: string' schema, which JSON Schema ignores, so a validator enforcing the bound would refuse what the published contract accepts. Declare the bound as a '@pattern', which the document publishes and every caller can read, or remove '@encode(string)' and let the value be a number.`,
 		},
 	},
 	"duplicate-operation-id": {
@@ -441,6 +444,29 @@ const diagnostics = {
 	 * namespace and a TypeScript module cannot, so keeping the first would publish a contract for a
 	 * type nothing checks, and picking either is a guess about which the author meant.
 	 */
+	/**
+	 * **A cycle that never passes through a declaration has nothing to reference itself by.**
+	 *
+	 * A recursive MODEL is fine: it earns a declaration, and the back edge becomes a getter or a
+	 * `z.lazy()` naming that declaration. A cycle closing through a type this emitter INLINES has no
+	 * such name. A template instantiation is the reachable case - `declaredNameOf` returns undefined
+	 * for one, matching how `@typespec/openapi3` inlines it - so `model Box<T> { next?: Box<T> }` used
+	 * as `Box<string>` walked into itself forever. Measured before this existed:
+	 * `RangeError: Maximum call stack size exceeded`, reported by the compiler as "Emitter crashed!
+	 * This is a bug."
+	 *
+	 * **An error, and the same error openapi3 raises.** It answers the identical spec with
+	 * `@typespec/openapi3/inline-cycle` at severity error and writes no document, so there is no
+	 * contract for a validator to agree with even if one could be emitted. The remedy it names works
+	 * here for the same reason: `@friendlyName` gives the instantiation a name, which makes it a
+	 * declaration, which gives the back edge something to point at.
+	 */
+	"inline-cycle": {
+		severity: "error",
+		messages: {
+			default: paramMessage`'${"type"}' closes a reference cycle without passing through anything this emitter can declare, so the cycle has no name to reference itself by. A template instantiation is inlined rather than declared, exactly as '@typespec/openapi3' inlines it, and that emitter refuses the same spec with its own 'inline-cycle' error. Give the type a name with '@friendlyName' so it becomes a declaration, or break the cycle.`,
+		},
+	},
 	"duplicate-declaration": {
 		severity: "error",
 		messages: {

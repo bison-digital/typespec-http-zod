@@ -101,7 +101,7 @@ describe("a failure arm is as complete as a success arm", () => {
 			{
 				name: "retry-after",
 				type: "number",
-				schema: "z.number().int()",
+				schema: "z.int32()",
 				optional: false,
 			},
 		]);

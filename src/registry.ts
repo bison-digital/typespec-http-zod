@@ -1,4 +1,10 @@
-import type { Model, ModelProperty, Program, Type } from "@typespec/compiler";
+import {
+	getFriendlyName,
+	type Model,
+	type ModelProperty,
+	type Program,
+	type Type,
+} from "@typespec/compiler";
 import { getVisibilitySuffix, Visibility } from "@typespec/http";
 import { reportDiagnostic } from "./lib.js";
 import { propertyToTs, propertyTypeToTs, typeToTsBody, withTsRefResolver } from "./types.js";
@@ -9,6 +15,7 @@ import {
 	isTransformedBy,
 	noteBackEdge,
 	propertyToZod,
+	UNREPRESENTABLE,
 	typeToZodBody,
 	withDeferredAnnotator,
 	withRefResolver,
@@ -218,7 +225,7 @@ function safeDeclarationName(name: string): string {
 }
 
 /** A type earns a name when the spec gave it one - anonymous shapes stay inline where they are used. */
-function declaredNameOf(type: Type): string | undefined {
+function declaredNameOf(program: Program, type: Type): string | undefined {
 	if (type.kind === "Enum") return safeDeclarationName(type.name);
 	/**
 	 * A named union earns a declaration too.
@@ -238,17 +245,29 @@ function declaredNameOf(type: Type): string | undefined {
 		return spread === undefined ? undefined : safeDeclarationName(spread);
 	}
 	/**
-	 * **A template INSTANTIATION carries the template's name, and it is not a declaration.**
+	 * **A template INSTANTIATION carries the template's name, and it is not a declaration - unless
+	 * `@friendlyName` gives it one of its own.**
 	 *
 	 * `PublicSuccess<PublicCompanyDetail>` and `PublicSuccess<PublicOfficers>` are both called
 	 * `PublicSuccess`, so naming them would export eleven consts called `publicSuccessSchema` - the
-	 * file does not compile, and if it did, one shape would validate every response. `@typespec/openapi3`
-	 * inlines instantiations for the same reason (the public document has no `PublicSuccess*`
-	 * component), so both artefacts agree about what has a name and what does not.
+	 * file does not compile, and if it did, one shape would validate every response.
+	 * `@typespec/openapi3` inlines instantiations for the same reason.
+	 *
+	 * **But it stops inlining one that has been named, and this used to keep inlining it.** Its rule
+	 * is `shouldInline` in `@typespec/openapi`, and the first thing that function does is
+	 * `if (getFriendlyName(program, type)) return false`. Measured on
+	 * `@friendlyName("{name}Box", T) model Box<T>` used as `Box<string>`: openapi3 publishes a
+	 * component `stringBox` and refers to it with `$ref`, while this emitter wrote the object out
+	 * inline. So the two artefacts disagreed about what has a name, which is the opposite of what
+	 * this docblock used to claim, and `@friendlyName` - the remedy openapi3 names for an inline
+	 * cycle, and the one {@link "inline-cycle"} names here - did nothing.
 	 *
 	 * Invisible until a spec uses a template; a paged-response envelope is the usual first one.
 	 */
-	if (type.templateMapper !== undefined) return undefined;
+	if (type.templateMapper !== undefined) {
+		const friendly = getFriendlyName(program, type);
+		return friendly === undefined || friendly === "" ? undefined : safeDeclarationName(friendly);
+	}
 	return safeDeclarationName(type.name);
 }
 
@@ -343,6 +362,19 @@ export class SchemaRegistry {
 	readonly #inProgress = new Map<string, string>();
 	/** Keys on a cycle - every one needs a structural type rather than a `z.infer` alias. */
 	readonly #cyclic = new Set<string>();
+	/**
+	 * Inlined types currently being walked, by identity, against the number of declarations that were
+	 * in flight when each was entered.
+	 *
+	 * **The count is what tells a real inline cycle from an ordinary recursive model.** `#inProgress`
+	 * cannot serve on its own: it is keyed by declaration name and these types have none, which is
+	 * the whole reason the cycle has nothing to point at. But `InnerModel[]` re-enters `Array<InnerModel>`
+	 * on a perfectly ordinary recursion - array, then the model, then the model's own `children` - and
+	 * that cycle closes through `InnerModel`, which IS a declaration and terminates it. Comparing the
+	 * count is how this asks openapi3's question, `cycle.containsDeclaration`: if a declaration was
+	 * entered since, the cycle has a name to close on and the walk may continue.
+	 */
+	readonly #inlineInProgress = new Map<Type, number>();
 
 	constructor(program: Program) {
 		this.#program = program;
@@ -354,8 +386,29 @@ export class SchemaRegistry {
 	 * what lets the generated file be plain `const` declarations with no forward references.
 	 */
 	expressionFor(type: Type): string {
-		const bare = declaredNameOf(type);
-		if (bare === undefined) return this.#inline(type);
+		const bare = declaredNameOf(this.#program, type);
+		if (bare === undefined) {
+			/**
+			 * **A back edge to an INLINED type is a cycle with no name to close it**, and following it
+			 * is a stack overflow rather than a wrong answer: the compiler reports "Emitter crashed!
+			 * This is a bug." Tracked by identity because there is no key to track it by.
+			 */
+			const entered = this.#inlineInProgress.get(type);
+			if (entered !== undefined && this.#inProgress.size <= entered) {
+				reportDiagnostic(this.#program, {
+					code: "inline-cycle",
+					format: { type: "name" in type && type.name !== undefined ? String(type.name) : "" },
+					target: type,
+				});
+				return UNREPRESENTABLE;
+			}
+			this.#inlineInProgress.set(type, this.#inProgress.size);
+			try {
+				return this.#inline(type);
+			} finally {
+				this.#inlineInProgress.delete(type);
+			}
+		}
 		/**
 		 * **A type not reshaped at this visibility IS the canonical declaration - not a copy of it.**
 		 *
@@ -411,6 +464,33 @@ export class SchemaRegistry {
 			...(this.#cyclic.has(key) ? { structural: this.#structuralBodyOf(type) } : {}),
 			...(rendered.deferred ? { annotated: true } : {}),
 		};
+		/**
+		 * **Two different types can resolve to one identifier, and the module then does not parse.**
+		 *
+		 * The key is `(visibility, name, identity)`, so two models genuinely named the same in
+		 * different namespaces are two entries - and both then emit `export const thingSchema`.
+		 * Measured on one service declaring `Alpha.Thing` and `Beta.Thing`: the document published
+		 * both components under their full names, the emitted module declared `thingSchema` twice,
+		 * and `tsc` answered `TS2451: Cannot redeclare block-scoped variable` while `tsp compile`
+		 * reported success.
+		 *
+		 * `duplicate-declaration` already existed for exactly this and already said exactly this, but
+		 * only {@link TypeRegistry} raised it - so the contracts files were covered and
+		 * `schemas.gen.ts`, which every consumer imports, was not. `@typespec/openapi3` reports the
+		 * same class through `checkDuplicateTypeName`, and `@typespec/json-schema` through
+		 * `duplicate-id`; neither resolves it for you, because only the author knows which name to
+		 * change.
+		 */
+		const collision = this.#order.find(
+			(candidate) => candidate.identifier === identifier && candidate.source !== declaration.source,
+		);
+		if (collision !== undefined) {
+			reportDiagnostic(this.#program, {
+				code: "duplicate-declaration",
+				format: { name },
+				target: type,
+			});
+		}
 		this.#declarations.set(key, declaration);
 		this.#order.push(declaration);
 		this.#declareRelatives(type);
@@ -450,10 +530,17 @@ export class SchemaRegistry {
 	 */
 	expressionForProperty(property: ModelProperty): string {
 		return withRefResolver(
-			(candidate) => {
-				if (declaredNameOf(candidate) === undefined) return undefined;
-				return this.expressionFor(candidate);
-			},
+			/**
+			 * **Every candidate goes through {@link expressionFor}, including the ones with no name.**
+			 *
+			 * This used to return `undefined` for an undeclared type, which sent it straight to
+			 * `typeToZodBody` and past the only place a cycle is detected. A template instantiation is
+			 * undeclared - `declaredNameOf` returns undefined for one, matching openapi3's inlining -
+			 * so `model Box<T> { next?: Box<T> }` walked into itself until the stack ran out.
+			 * `expressionFor` renders an undeclared type through `#inline` exactly as before, and now
+			 * also notices when it is already doing so.
+			 */
+			(candidate) => this.expressionFor(candidate),
 			() => propertyToZod(this.#program, property),
 		);
 	}
@@ -505,7 +592,7 @@ export class SchemaRegistry {
 	 */
 	#structuralBodyOf(type: Type): string {
 		return withTsRefResolver(
-			(candidate) => declaredNameOf(candidate),
+			(candidate) => declaredNameOf(this.#program, candidate),
 			() => typeToTsBody(this.#program, type),
 		);
 	}
@@ -522,10 +609,17 @@ export class SchemaRegistry {
 	 */
 	#inline(type: Type): string {
 		return withRefResolver(
-			(candidate) => {
-				if (declaredNameOf(candidate) === undefined) return undefined;
-				return this.expressionFor(candidate);
-			},
+			/**
+			 * **Every candidate goes through {@link expressionFor}, including the ones with no name.**
+			 *
+			 * This used to return `undefined` for an undeclared type, which sent it straight to
+			 * `typeToZodBody` and past the only place a cycle is detected. A template instantiation is
+			 * undeclared - `declaredNameOf` returns undefined for one, matching openapi3's inlining -
+			 * so `model Box<T> { next?: Box<T> }` walked into itself until the stack ran out.
+			 * `expressionFor` renders an undeclared type through `#inline` exactly as before, and now
+			 * also notices when it is already doing so.
+			 */
+			(candidate) => this.expressionFor(candidate),
 			() =>
 				withDeferredAnnotator(
 					(property) => this.#deferredAnnotationOf(property),
@@ -556,7 +650,7 @@ export class SchemaRegistry {
 	#deferredAnnotationOf(property: ModelProperty): string | undefined {
 		if (property.defaultValue !== undefined) return undefined;
 		const declared = withTsRefResolver(
-			(candidate) => declaredNameOf(candidate),
+			(candidate) => declaredNameOf(this.#program, candidate),
 			() => propertyTypeToTs(this.#program, property),
 		);
 		const core = `z.ZodType<${declared}, ${declared}>`;
@@ -641,14 +735,31 @@ export class TypeRegistry {
 	readonly #declarations = new Map<string, TsDeclaration>();
 	readonly #order: TsDeclaration[] = [];
 	readonly #inProgress = new Map<string, string>();
+	/**
+	 * The same in-flight tracking {@link SchemaRegistry} keeps, for the same cycle and by the same
+	 * rule. Guarding one walk and not the other left the Zod side reporting `inline-cycle` correctly
+	 * and the TypeScript side still running off the stack immediately afterwards, which reads to a
+	 * consumer as "Emitter crashed! This is a bug." rather than as the error that was raised.
+	 * Reported only by the schema walk, so one spec does not produce the same complaint twice.
+	 */
+	readonly #inlineInProgress = new Map<Type, number>();
 
 	constructor(program: Program) {
 		this.#program = program;
 	}
 
 	expressionFor(type: Type): string {
-		const bare = declaredNameOf(type);
-		if (bare === undefined) return this.#inline(type);
+		const bare = declaredNameOf(this.#program, type);
+		if (bare === undefined) {
+			const entered = this.#inlineInProgress.get(type);
+			if (entered !== undefined && this.#inProgress.size <= entered) return "never";
+			this.#inlineInProgress.set(type, this.#inProgress.size);
+			try {
+				return this.#inline(type);
+			} finally {
+				this.#inlineInProgress.delete(type);
+			}
+		}
 		const at = visibilityFor(this.#program, type, currentVisibility());
 		const key = keyFor(type, at);
 		const name = nameAt(bare, at);
@@ -732,20 +843,16 @@ export class TypeRegistry {
 	/** `wireName` names an HTTP parameter as the wire does - see {@link propertyToTs}. */
 	expressionForProperty(property: ModelProperty, wireName?: string): string {
 		return withTsRefResolver(
-			(candidate) => {
-				if (declaredNameOf(candidate) === undefined) return undefined;
-				return this.expressionFor(candidate);
-			},
+			// Through expressionFor even when undeclared, so the cycle guard above is reachable.
+			(candidate) => this.expressionFor(candidate),
 			() => propertyToTs(this.#program, property, wireName),
 		);
 	}
 
 	#inline(type: Type): string {
 		return withTsRefResolver(
-			(candidate) => {
-				if (declaredNameOf(candidate) === undefined) return undefined;
-				return this.expressionFor(candidate);
-			},
+			// Through expressionFor even when undeclared, so the cycle guard above is reachable.
+			(candidate) => this.expressionFor(candidate),
 			() => typeToTsBody(this.#program, type),
 		);
 	}

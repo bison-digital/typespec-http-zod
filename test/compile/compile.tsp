@@ -37,3 +37,19 @@ union Branch {
 @route("/nodes")
 @post
 op create(@body body: Node, @query depth?: int32): Node;
+
+/**
+ * A model with NO cycle: the ordinary case, and the one that must still be wrapped. Without it
+ * every model in this fixture sits on the cycle, so "models are compiled" could not be asserted at
+ * all and the arm would be satisfied by an emitter that compiled parameter groups alone.
+ */
+model Plain {
+  @minLength(1)
+  label: string;
+
+  count: int32;
+}
+
+@route("/plain")
+@post
+op plain(@body body: Plain): Plain;

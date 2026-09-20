@@ -859,10 +859,33 @@ function normaliseJsonSchema(value: unknown, ctx: NormaliseContext): unknown {
 		out["<openness>"] = extra?.sealed === true ? "sealed" : "open";
 		if (extra?.values !== undefined) out["<values>"] = normaliseJsonSchema(extra.values, ctx);
 	}
-	for (const key of Object.keys(source).sort()) {
+	/**
+	 * **A width the document names is expanded into the bounds that express it, on the way in.**
+	 *
+	 * OpenAPI spells an integer width with `format`; Zod has no way to spell one, so `z.uint32()`
+	 * lowers to `minimum`/`maximum`. Expanding here canonicalises BOTH artefacts to the same shape,
+	 * rather than discarding the bounds on the validator's side - which also means a validator that
+	 * forgot a width's bounds now diverges, where discarding them would have hidden it.
+	 */
+	const width = typeof source["format"] === "string" ? WIDTH_BOUNDS[source["format"]] : undefined;
+	const widened: Record<string, unknown> =
+		source["type"] === "integer" && width !== undefined
+			? {
+					...source,
+					...(width.minimum !== undefined && source["minimum"] === undefined
+						? { minimum: width.minimum }
+						: {}),
+					...(width.maximum !== undefined && source["maximum"] === undefined
+						? { maximum: width.maximum }
+						: {}),
+				}
+			: source;
+	// Through the SAME sorted loop as everything else: the comparison is a `JSON.stringify`, so a key
+	// written outside it lands in insertion order and two identical schemas compare unequal.
+	for (const key of Object.keys(widened).sort()) {
 		if (ANNOTATION_KEYWORDS.has(key)) continue;
 		if (key === "unevaluatedProperties" || key === "additionalProperties") continue;
-		const entry = source[key];
+		const entry = widened[key];
 		// An empty `required` asserts nothing; openapi3 writes it, Zod omits it.
 		if (key === "required" && Array.isArray(entry) && entry.length === 0) continue;
 		if (source["type"] === "integer" && key === "maximum" && entry === SAFE_INTEGER) continue;
@@ -1710,6 +1733,52 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 	};
 }
 
+/**
+ * **A declared integer WIDTH and the bounds that express it are the same claim.**
+ *
+ * `@typespec/openapi3` publishes a width as `{type: integer, format: uint8}` and stops there,
+ * because OpenAPI says a width is spelled with `format`. Zod has no way to spell one: its named
+ * integer formats lower to `minimum` and `maximum`, so `z.uint32()` reaches `toJSONSchema` as
+ * `{minimum: 0, maximum: 4294967295}`. Compared keyword by keyword the two artefacts look as though
+ * they disagree, and they do not: one writes the width by name and the other writes it out.
+ *
+ * **This is a translation, not an allowance, and it stays sharp.** It fires only when the DOCUMENT
+ * names the width and the validator's bound is EXACTLY that width's limit. A bound the document also
+ * carries is compared as before, and a bound that is not the width's own still diverges - which is
+ * what stops it laundering an arbitrary constraint. The sibling rule two hundred lines up does the
+ * same job for the safe-integer bounds `z.int()` contributes to every integer.
+ *
+ * Without it the emitter would have to keep one unbounded check for all ten widths, which is what it
+ * used to do: measured at the wire, a declared `uint8` accepted `-5` and `100000` and a declared
+ * `int32` accepted `3000000000`.
+ */
+export const WIDTH_BOUNDS: Readonly<
+	Record<string, { readonly minimum?: number; readonly maximum?: number }>
+> = {
+	int8: { minimum: -128, maximum: 127 },
+	int16: { minimum: -32768, maximum: 32767 },
+	int32: { minimum: -2147483648, maximum: 2147483647 },
+	uint8: { minimum: 0, maximum: 255 },
+	uint16: { minimum: 0, maximum: 65535 },
+	uint32: { minimum: 0, maximum: 4294967295 },
+	/** `int64` and `uint64` exceed what a JSON number holds; only the floor is expressible. */
+	uint64: { minimum: 0 },
+};
+
+function widthExpresses(
+	expected: { readonly format?: string | undefined; readonly constraints: Record<string, unknown> },
+	actual: { readonly constraints: Record<string, unknown> },
+	keyword: string,
+): boolean {
+	if (keyword !== "minimum" && keyword !== "maximum") return false;
+	// Only where the document is SILENT: a bound it states is still compared.
+	if (expected.constraints[keyword] !== undefined) return false;
+	const bounds = expected.format === undefined ? undefined : WIDTH_BOUNDS[expected.format];
+	const bound = bounds?.[keyword];
+	if (bound === undefined) return false;
+	return Number(actual.constraints[keyword]) === bound;
+}
+
 /** Returns how many properties had constraints that could not be read at all. */
 function compareShapes(
 	scenarioName: string,
@@ -1813,6 +1882,7 @@ function compareShapes(
 			...Object.keys(expected.constraints),
 			...Object.keys(actual.constraints),
 		])) {
+			if (widthExpresses(expected, actual, keyword)) continue;
 			if (String(expected.constraints[keyword]) !== String(actual.constraints[keyword])) {
 				add(
 					`constraint:${keyword}`,

@@ -1,6 +1,6 @@
 {
 	"name": "typespec-http-zod",
-	"version": "0.26.0",
+	"version": "0.27.0",
 	"description": "TypeSpec emitter and library: turn an HTTP service definition into Zod validators and framework-free contract types that agree, keyword for keyword, with the OpenAPI document @typespec/openapi3 publishes from the same source.",
 	"keywords": [
 		"codegen",
@@ -73,7 +73,7 @@
 		"typespec-http-zod": "link:.",
 		"vitest": "^5.0.0",
 		"yaml": "^2.9.1",
-		"zod": "^4.5.2"
+		"zod": "^4.6.5"
 	},
 	"peerDependencies": {
 		"@typespec/compiler": "^1.15.0",

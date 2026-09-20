@@ -8,3 +8,6 @@
  */
 export * from "./api.js";
 export { $onEmit } from "./emitter.js";
+export { $linter } from "./linter.js";
+export { redosPronePatternRule } from "./rules/redos-prone-pattern.rule.js";
+export { routeTemplateOf } from "./uri-template.js";

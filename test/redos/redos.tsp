@@ -38,6 +38,24 @@ model Thing {
   /** The dangerous one on a property rather than a scalar, so both report sites are exercised. */
   @pattern("^(a|a)+$")
   doubled: string;
+
+  /**
+   * **Safe WITHOUT the `u` flag and dangerous WITH it**, which is the only shape that can prove
+   * the analysis carries the flag the emitter actually emits. Without the flag `\\p` is the
+   * identity escape for the letter `p`, so `(p{L}+)+` is not the ambiguity it looks like and
+   * `redos-detector` returns SAFE. With the flag it is a quantifier nested over a Unicode
+   * property class, and it returns UNSAFE. Measured both ways before this was added.
+   */
+  @pattern("^(\\p{L}+)+$")
+  unicodeOnlyDanger: string;
+
+  /**
+   * Both at once: a quantifier nested over an overlapping class, AND a redundant `\-` the `u`
+   * flag refuses. One declaration, two independent things wrong with it, so the author should
+   * hear about both in one compile rather than one per compile.
+   */
+  @pattern("^(\\w+\\s?)*\\-$")
+  doubleTrouble: string;
 }
 
 @route("/things")

@@ -10,8 +10,10 @@ using Http;
  * declaration has no properties, so `const branchSchema = z.union([nodeSchema])` would read
  * `nodeSchema` while it is still initialising.
  *
- * This fixture exists to prove that case is *named* rather than crashed. It is expected to produce
- * `typespec-http-zod/circular-model`, and the assertion is that the compile reports it and survives.
+ * This fixture exists to prove that case is *handled* rather than crashed. It used to be expected to
+ * produce `typespec-http-zod/circular-model`; that diagnostic has been retired, because the emitter
+ * now expresses the cycle instead of refusing it. `recursion.test.ts` asserts the compile reports
+ * NOTHING and that the emitted `z.lazy()` declaration parses.
  */
 @service(#{ title: "union cycle" })
 namespace UnionCycle;

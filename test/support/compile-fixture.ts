@@ -1,7 +1,7 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { CONTRACTS_BARREL_SPECIFIER, writeContractsBarrel } from "./contracts-barrel.js";
-import { compile, NodeHost, type Program } from "@typespec/compiler";
+import { compile, type LinterRuleSet, NodeHost, type Program } from "@typespec/compiler";
 
 /**
  * Compile one `.tsp` fixture with this emitter, and hand back where it landed.
@@ -52,6 +52,12 @@ export interface FixtureOptions {
 	 * passed. Both measured. A suite whose input is produced by other suites has to produce its own.
 	 */
 	readonly outDir?: string;
+	/**
+	 * A linter ruleset to enable, exactly as a consumer's `tspconfig.yaml` would. Absent by default,
+	 * because a linter is opt-in: a suite that never names one grades what a consumer who never
+	 * enabled it gets, which is the default everyone starts from.
+	 */
+	readonly linter?: LinterRuleSet;
 }
 
 export async function compileFixture(
@@ -73,6 +79,7 @@ export async function compileFixture(
 	const program = await compile(NodeHost, join(dir, `${name}.tsp`), {
 		outputDir: outDir,
 		emit: ["typespec-http-zod"],
+		...(options.linter === undefined ? {} : { linterRuleSet: options.linter }),
 		options: {
 			"typespec-http-zod": {
 				"emitter-output-dir": outDir,

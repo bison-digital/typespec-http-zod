@@ -10,4 +10,5 @@ minimumReleaseAgeExclude:
   - "@typespec/streams@0.85.0"
   - "@typespec/versioning@0.85.0"
   - "@typespec/xml@0.85.0"
-  - zod@4.5.2
+  - redos-detector@6.1.4
+  - zod@4.6.5

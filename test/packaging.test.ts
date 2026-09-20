@@ -298,10 +298,10 @@ describe("the package is publishable", () => {
 	it("declares no dependency by path", () => {
 		/**
 		 * **A `link:` or `file:` range is a local checkout, and publishing one breaks every
-		 * installer.** This package has no runtime dependencies today; the arm exists because the
-		 * arrangement that develops it - two sibling repositories linked together - is exactly the one
-		 * that invites the mistake, and it costs nothing to hold the line before there is something to
-		 * hold it on.
+		 * installer.** The arm exists because the arrangement that develops this package - sibling
+		 * repositories linked together - is exactly the one that invites the mistake. It has had
+		 * something to hold since `redos-detector` became the first runtime dependency; before that it
+		 * held the line on an empty set.
 		 */
 		for (const [name, range] of Object.entries(manifest.dependencies ?? {})) {
 			expect(range, `${name} is declared by path`).not.toMatch(/^(link|file|workspace):/);

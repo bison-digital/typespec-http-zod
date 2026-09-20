@@ -71,7 +71,7 @@ describe("compile-schemas", () => {
 			...compiledSource.matchAll(/export const (\w+)(?::[^=]+)? = z\.compile\(/g),
 		].map((match) => match[1]);
 		// Named rather than counted: an implementation that wrapped only the model would pass a floor.
-		expect(wrapped).toContain("nodeSchema");
+		expect(wrapped).toContain("plainSchema");
 		expect(wrapped).toContain("createQuery");
 	});
 
@@ -87,6 +87,17 @@ describe("compile-schemas", () => {
 	it("leaves a deferred declaration uncompiled, because compiling one breaks at request time", () => {
 		expect(compiledSource).toMatch(/export const branchSchema[^=]*= z\.lazy\(/);
 		expect(compiledSource).not.toMatch(/export const branchSchema[^=]*= z\.compile\(/);
+	});
+
+	/**
+	 * **Every member of the cycle, not only the deferred one.** Keyed on deferral this passed on zod
+	 * 4.5.2 and threw on 4.6.5, which made the recursive parse state weak: naming a COMPILED schema
+	 * from inside a `z.lazy()` body throws `Cannot read properties of undefined (reading '_zod')` on
+	 * the first parse. The peer range admits 4.6, so it reached a running server.
+	 */
+	it("leaves every member of a cycle uncompiled, not only the one carrying the z.lazy()", () => {
+		expect(compiledSource).toMatch(/export const nodeSchema = z\.strictObject\(/);
+		expect(compiledSource).not.toMatch(/export const nodeSchema[^=]*= z\.compile\(/);
 	});
 
 	it("loads at all, which for a cycle is most of the assertion", () => {

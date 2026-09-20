@@ -27,7 +27,7 @@ import { reportDiagnostic } from "./lib.js";
  * Zod, rejects everything, and unreachable in practice because the error diagnostic has already
  * failed the compile that would have written it.
  */
-const UNREPRESENTABLE = "z.never()";
+export const UNREPRESENTABLE = "z.never()";
 
 /**
  * **Installed by the registry, which is the only place that knows what a declared type is CALLED.**
@@ -394,16 +394,36 @@ const SCALARS: Readonly<Record<string, string>> = {
 	string: "z.string()",
 	boolean: "z.boolean()",
 	bytes: "z.string()",
-	int8: "z.number().int()",
-	int16: "z.number().int()",
-	int32: "z.number().int()",
-	int64: "z.number().int()",
-	safeint: "z.number().int()",
-	uint8: "z.number().int()",
-	uint16: "z.number().int()",
-	uint32: "z.number().int()",
-	uint64: "z.number().int()",
-	integer: "z.number().int()",
+	/**
+	 * **A declared WIDTH is a claim about the value too, and ten of them used to share one check.**
+	 *
+	 * Every integer scalar emitted `z.number().int()`, which is "an integer within the safe range" and
+	 * nothing more. Measured at the wire on `workerd`, against a document publishing the widths below:
+	 * a `uint8` accepted `-5` and `100000`, an `int32` accepted `3000000000` and `-3000000000`.
+	 *
+	 * The differential oracle cannot see it. JSON Schema 2020-12 treats `format` as an annotation, so
+	 * Ajv on the published document answers VALID for all of those and agrees with the server while
+	 * both are wrong. Ajv says so out loud: `unknown format "uint8" ignored`.
+	 *
+	 * Zod 4 has the named formats for the two widths that have them, and they emit better JSON Schema
+	 * than a bare bound would. The rest take explicit bounds.
+	 *
+	 * **`int64` and `uint64` keep the safe-integer ceiling, and that is a limit rather than a
+	 * choice.** `JSON.parse` has already lost a value above 2^53 before any validator runs, so the
+	 * alternatives are to refuse it or to accept a number that is not the one the caller sent.
+	 * Refusing is the honest one. `z.int64()` exists but is a `bigint`, which a JSON body cannot
+	 * carry. What changes here is only that `uint64` stops accepting negatives.
+	 */
+	int8: "z.int().min(-128).max(127)",
+	int16: "z.int().min(-32768).max(32767)",
+	int32: "z.int32()",
+	int64: "z.int()",
+	safeint: "z.int()",
+	uint8: "z.int().min(0).max(255)",
+	uint16: "z.int().min(0).max(65535)",
+	uint32: "z.uint32()",
+	uint64: "z.int().min(0)",
+	integer: "z.int()",
 	float: "z.number()",
 	float32: "z.number()",
 	float64: "z.number()",
@@ -951,8 +971,26 @@ function modelToZod(program: Program, model: Model): string {
  * is a number - the disagreement is with the wire.
  *
  * Reading the TYPE answers the question the emitted text was standing in for. `SCALARS` remains the
- * single list of what becomes a number, so this cannot drift from what `scalarToZod` emits.
+ * single list of what becomes a number.
+ *
+ * **It still inspects the emitted expression to decide WHICH kind, and that did drift once more.**
+ * The test was `startsWith("z.number()")`, and giving each integer width its declared bounds spelled
+ * nine of them `z.int(`, `z.int32(` and `z.uint32(` instead. Every one silently lost its wire
+ * decoder: 22 arms went red at once, which is the only reason it was not shipped. The prefixes live
+ * in one named constant now.
+ *
+ * **That claim named a `scalars.test.ts` which did not exist, and nothing graded the list.**
+ * Measured: dropping `z.uint32(` from it, and separately `z.int(`, left all 468 arms in this
+ * package green, because no fixture had ever declared an integer width as a PARAMETER - the only
+ * place the decoder is attached. `test/widths/` now declares all ten as query parameters and sends
+ * each as text, so a spelling this list forgets fails here rather than at a consumer.
  */
+/**
+ * Every emitted expression that denotes a JSON number. Named once, because `SCALARS` and this list
+ * have to agree and nothing about the two being in the same file makes them.
+ */
+const NUMERIC_EXPRESSIONS = ["z.number()", "z.int(", "z.int32(", "z.uint32("] as const;
+
 export function wireKindOf(program: Program, type: Type): "number" | "boolean" | undefined {
 	if (type.kind === "Scalar") {
 		const encoded = encodedTypeOf(program, type);
@@ -964,7 +1002,7 @@ export function wireKindOf(program: Program, type: Type): "number" | "boolean" |
 		) {
 			const mapped = SCALARS[current.name];
 			if (mapped === undefined) continue;
-			if (mapped.startsWith("z.number()")) return "number";
+			if (NUMERIC_EXPRESSIONS.some((prefix) => mapped.startsWith(prefix))) return "number";
 			if (mapped === "z.boolean()") return "boolean";
 			return undefined;
 		}

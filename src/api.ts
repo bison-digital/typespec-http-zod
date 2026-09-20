@@ -1404,9 +1404,39 @@ function mediaTypeDecoded(declared: string): string {
 			?.split(",")
 			.map((entry) => entry.trim().replace(/^"|"$/g, ""));
 	if (values === undefined || values.length === 0) return declared;
+	/**
+	 * **A declared media RANGE admits the types inside it, and a literal admits only itself.**
+	 *
+	 * \`@header contentType: "text/*"\` published \`z.literal("text/*")\`, so the only request that
+	 * satisfied it was one sending the range itself as its \`Content-Type\`, which no client does.
+	 * Measured before this existed: \`text/plain\` and \`text/html\` both answered 400 on a route whose
+	 * document declares the whole \`text\` group.
+	 *
+	 * A template literal is the Zod counterpart of the TypeScript type the contract already uses for
+	 * a range, so the validator and the handler's own type say the same thing.
+	 */
+	const admitted = values.map((value) => {
+		/**
+		 * **The full wildcard admits every media type, so there is nothing left to match on.**
+		 *
+		 * Spelled as a template literal it becomes the prefix `*` + `/`, which matches only a
+		 * Content-Type whose text begins with the range's own first two characters. Measured on the
+		 * emitted schema: `application/json`, `text/plain` and `image/png` were all REFUSED and the
+		 * literal `*` + `/*` was the one value accepted, which is the defect the range branch exists
+		 * to remove rather than to respell. A consumer declares this on a file upload that takes
+		 * whatever the caller sends.
+		 */
+		if (value === "*/*") return "z.string()";
+		return value.endsWith("/*")
+			? `z.templateLiteral([${JSON.stringify(value.slice(0, -1))}, z.string()])`
+			: `z.literal(${JSON.stringify(value)})`;
+	});
+	const schema =
+		admitted.length === 1 ? (admitted[0] ?? declared) : `z.union([${admitted.join(", ")}])`;
+	const ranged = values.some((value) => value.endsWith("/*")) ? schema : declared;
 	// Lowercased only when every declared value already is, so an oddly-cased one keeps matching.
 	const normalise = values.every((value) => value === value.toLowerCase()) ? ".toLowerCase()" : "";
-	return `z.preprocess((raw) => (typeof raw === "string" ? (raw.split(";")[0] ?? "").trim()${normalise} : raw), ${declared})`;
+	return `z.preprocess((raw) => (typeof raw === "string" ? (raw.split(";")[0] ?? "").trim()${normalise} : raw), ${ranged})`;
 }
 
 function parameterSchemasOf(
@@ -1975,13 +2005,30 @@ function renderSchemas(
 		 * parse - the walk captures the reference while it is still in the temporal dead zone, so the
 		 * failure surfaces at request time rather than at import.
 		 *
-		 * **Keyed on `annotated`, the fact the registry already holds** - it is set exactly when the
-		 * declaration is deferred, which is exactly when `z.lazy()` is written - rather than on the
-		 * shape of the emitted text. A model on a cycle whose back edge sits on a GETTER is a different
-		 * case and is compiled like any other: measured, it parses, because a getter is not resolved
-		 * until something reads it.
+		 * **CYCLE MEMBERSHIP decides this, not deferral, and that took a zod upgrade to learn.**
+		 *
+		 * It was keyed on `annotated` - set exactly when the declaration is deferred, which is exactly
+		 * when `z.lazy()` is written - on the measurement that a model whose back edge sits on a GETTER
+		 * compiled and parsed fine. That was true on zod 4.5.2 and is false on 4.6.5, which made the
+		 * recursive parse state weak. The failure moved from the deferred declaration to the one that
+		 * REFERENCES it, which was still being compiled:
+		 *
+		 * ```
+		 * const branchSchema = z.lazy(() => z.union([nodeSchema, z.string()]));
+		 * const nodeSchema = z.compile(z.strictObject({ ..., branch: branchSchema.exactOptional() }));
+		 * nodeSchema.safeParse({ label: "a", attributes: {} });
+		 * zod 4.5.2: true
+		 * zod 4.6.5: TypeError: Cannot read properties of undefined (reading '_zod')
+		 * ```
+		 *
+		 * Bisected: naming a compiled schema from inside a `z.lazy()` body is the whole trigger, and
+		 * the self-referencing getter is not needed for it. So the same rule the registry already
+		 * applies to structural types applies here - every member of the cycle, not only the deferred
+		 * one - and `structural` is the fact it already holds for exactly that set.
+		 *
+		 * The peer range admits 4.6, so this reached a running server on the first parse.
 		 */
-		return `\n${declared}\nexport const ${d.identifier}${annotation} = ${compiled(d.source, compileSchemas && d.annotated !== true)};\n`;
+		return `\n${declared}\nexport const ${d.identifier}${annotation} = ${compiled(d.source, compileSchemas && d.structural === undefined)};\n`;
 	});
 	/**
 	 * **Written only when something in the file names it**, like the `ResponseArm` import below and for
@@ -2734,7 +2781,7 @@ type Identical<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends
  * that does not.
  */
 /**
- * \u26a0\ufe0f **An optional property is \`?: T\` here and \`?: T | undefined\` in the contract type, and that is
+ * **An optional property is \`?: T\` here and \`?: T | undefined\` in the contract type, and that is
  * deliberate on both sides.**
  *
  * The validator emits \`.exactOptional()\`, so what ARRIVES is absent or a value - JSON cannot carry an
@@ -2797,8 +2844,8 @@ type Declared<T> = T extends (...args: never[]) => unknown
 			: T;
 
 /**
- * \u26a0\ufe0f **The constraint is what fails the build.** \`Identical<A, B> & true\` merely produces an odd
- * type when the two disagree, and a type alias to an odd type compiles fine \u2014 66 assertions that
+ * **The constraint is what fails the build.** \`Identical<A, B> & true\` merely produces an odd
+ * type when the two disagree, and a type alias to an odd type compiles fine - 66 assertions that
  * assert nothing. Only a constraint violation is an error.
  */
 type MustHold<T extends true> = T;

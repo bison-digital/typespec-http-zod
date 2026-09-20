@@ -8,6 +8,144 @@ published types; a patch will not. The **emitted output is part of the API** - a
 validator's shape, to a declared identifier, or to the `EmittedRoute` a wrapping emitter reads is a
 change a consumer feels, and is treated as such here rather than as an implementation detail.
 
+## [0.27.0] - 2026-09-20
+
+Upgrading: [what to check before you take this](docs/guides.md#to-0270).
+
+A minor carrying thirteen things, three of them breaking: **a pattern that can be made to backtrack is
+named**, **cookie parameters reach the server at all**, **a response header keeps its Zod
+expression**, **a declared integer width is enforced**, **a published pattern is compiled the way its
+readers compile it**, and **a declared media range admits the types inside it**.
+
+**A pattern that can be made to backtrack is named.** `@pattern` was passed through to
+`z.string().regex()` with no analysis, so a spec author could write an ordinary-looking rule whose
+cost is exponential in the length of the input, and nothing said so. Every emitted validator runs it
+on every request, before any handler, against input a caller chooses.
+
+The package now ships a TypeSpec linter, and its `redos-prone-pattern` rule analyses each pattern
+with [`redos-detector`](https://github.com/tjenkinson/redos-detector) and flags one it cannot prove
+safe. The regex itself is unchanged: `@typespec/openapi3` publishes it verbatim,
+and rewriting it here would enforce something the document does not state. The remedy belongs in the
+spec, and the diagnostic names both forms it can take.
+
+**It is a linter rule, so it is off until a project enables it**, with
+`linter: { extends: ["typespec-http-zod/recommended"] }` in `tspconfig.yaml`, and the documentation
+says to. TypeSpec draws the line in its own docs: a diagnostic says the program is not valid for the
+library, a linter is for a program that "could be correct, but there might be room for improvements".
+The spec is valid and the emitted regex is the published one, so what is wrong is a cost no artefact
+states. Raised instead as an automatic warning, the same check would fail the build of every project
+that sets `warn-as-error: true` whether or not it asked for the advice. A pattern that has been looked
+at and kept is acknowledged with `#suppress` where it is declared.
+
+The analysis is conservative: it proves that one input can match a pattern two ways, which is
+necessary for the failure but not sufficient for it to be reachable.
+
+The rule and `routeTemplateOf` are exported, so `typespec-hono` can offer the rule through its own
+ruleset and compute the route set a router is given the same way this package does.
+
+`redos-detector` is this package's first runtime dependency. MIT, one transitive chain, pure
+JavaScript, no platform-gated optional dependencies.
+
+**Cookie parameters reach the server at all.** Two filters named three of `@typespec/http`'s four
+parameter locations and excluded `cookie` by omission rather than by a `never` check, so nothing
+objected. A `@cookie` reached no schema and no handler input while `@typespec/openapi3` published it
+as required, and the compile was clean. It now emits a cookie group like any other location.
+
+**Breaking: a response header keeps its Zod expression.** Response headers went through the
+TypeScript projection only, and the `ModelProperty` was in hand and discarded. Each status carrying
+headers now gets a `<OperationId>Response<Status>Headers` schema, and `EmittedResponseHeader` gains
+`schema` beside `type`. Both are optional, so a wrapping emitter that does not read them still
+builds, but one that generates from the arm list will see the new declaration.
+
+**Breaking: a declared integer width is enforced.** All ten integer scalars emitted
+`z.number().int()`, which is an integer within the safe range and nothing more, so a declared `uint8`
+accepted `-5` and `100000` and a declared `int32` accepted `3000000000`. Each width now carries its
+own bounds, through Zod 4's named formats where they exist (`z.int32()`, `z.uint32()`) and explicit
+bounds where they do not.
+
+A caller sending a value outside a width the document declares now gets a 400 where it used to get a 200. `int64` and `uint64` keep the safe-integer ceiling, because `JSON.parse` has already lost a
+value above 2^53 before any validator runs; what changes for `uint64` is that it stops accepting
+negatives.
+
+The differential oracle could not see any of this, and now can. JSON Schema 2020-12 treats `format`
+as an annotation, so Ajv on the published document agreed with the permissive validator while both
+were wrong. The comparison translates a declared width into the bounds that express it, on both
+sides, so a validator that FORGETS a width's bounds diverges where discarding them would have hidden
+it.
+
+**Breaking: a published pattern is compiled the way its readers compile it.** A JSON Schema
+`pattern` is an ECMA-262 expression and a reader applies the Unicode flag; Ajv does by default. The
+emitter wrote a bare `/.../`, which makes `\p{L}` an identity escape for the letter `p` rather than a
+Unicode property, so the server ran a different expression from the one the spec author wrote and
+the one the document publishes. Measured against Ajv, every verdict was inverted: `"abc"` valid in
+the document and refused here, the literal text `"p{L}"` the reverse.
+
+The flag is now carried whenever the pattern compiles under it. It cannot be carried
+unconditionally - it makes a redundant `\-`, a lone `]` or `{`, and an escape like `\a` into errors,
+and 5 of 15 realistic patterns tested fail on it. Those keep the bare form and are named by the new
+`non-unicode-pattern` warning, because a reader of the document cannot compile them either: Ajv
+throws rather than evaluating them, so the server was enforcing a rule nothing reading its own
+document could.
+
+A caller sending a value that only matched under the old, wrong reading of such a pattern now gets a
+400, and one sending a value the document always accepted stops getting one.
+
+**A reference cycle with no declaration on it is named rather than crashed.** A recursive model is
+fine: it earns a declaration, and the back edge becomes a getter or a `z.lazy()` naming it. A cycle
+closing through a type this emitter INLINES has no such name, and a template instantiation is the
+reachable case. `model Box<T> { next?: Box<T> }` used as `Box<string>` walked into itself until the
+stack ran out, and the compiler reported it as "Emitter crashed! This is a bug." It now raises
+`inline-cycle`, an error, matching the `inline-cycle` `@typespec/openapi3` raises on the same spec.
+
+**`@friendlyName` on a template instantiation now makes it a declaration.** That is the remedy both
+emitters name for the cycle above, and it did nothing here. `@typespec/openapi3` stops inlining an
+instantiation that has been named - the first thing its `shouldInline` does is check
+`getFriendlyName` - and publishes a component for it. This emitter went on inlining, so the two
+artefacts disagreed about what has a name. Measured on `@friendlyName("{name}Box", T)`: openapi3
+publishes a component `stringBox` and refers to it with `$ref`, and this now declares
+`stringBoxSchema` beside it.
+
+**Non-ASCII characters no longer reach generated files.** `src/api.ts` spelled a warning glyph as an
+escape twice and an em-dash once, inside docblock text written verbatim into `wire-contract.gen.ts`.
+The portability arm read source, where the escape is plain ASCII, so it passed while every
+consumer's generated file received the characters. It now checks emitted output as well.
+
+**Two types with one name are refused rather than emitted into a module that cannot parse.** A
+declaration is keyed on `(visibility, name, identity)`, so `Alpha.Thing` and `Beta.Thing` were two
+entries that both emitted `export const thingSchema`. The document published them as separate
+components, `tsc` answered `TS2451: Cannot redeclare block-scoped variable`, and `tsp compile`
+reported success. `duplicate-declaration` already existed and already said the right thing, but only
+the contract-type walk raised it, so `schemas.gen.ts` - the module every consumer imports - was not
+covered. Both walks raise it now.
+
+**A declared media range admits the types inside it.** A `@header contentType` declaring a range -
+`"text/*"`, or the full wildcard `"*/*"` - emitted a literal, so the only request that satisfied it
+was one sending the range itself as its `Content-Type`, which no client does. Measured at the wire
+on a route declaring the full wildcard: `application/json`, `text/plain` and `image/png` all
+answered 400, and the literal `*/*` was the one value accepted.
+
+A subtype range now emits a template literal, which is the Zod counterpart of the TypeScript type
+the contract already uses for one. The full wildcard admits every media type, because that is the
+whole of what it means.
+
+**A `@pattern` containing a forward slash emits a module that parses.** The emitted regex literal
+escaped every slash unconditionally, so a pattern that already spelled one as an escape had its
+backslash doubled: `^\/api\/v[0-9]+$` became a literal ending at the third slash, with the rest
+read as flags. `tsp compile` reported success and the generated module then failed to parse at all,
+which a path regex makes an ordinary thing to hit.
+
+**Two faults in one `@pattern` are both reported.** `redos-prone-pattern` and `non-unicode-pattern`
+shared one record of what they had already said about a declaration, so whichever ran first silenced
+the other and the author learned of the second fault only after fixing the first and compiling
+again.
+
+**A numeric bound on a value `@encode(string)` carries as text is dropped, and named.** The bound is
+on the number, while the emitted expression is a string, so `@minValue(10)` landed as a length check
+that `"42"` satisfied and `"9"` did not. The exclusive form was worse: it emitted a call that does
+not exist on a string schema, so the module threw on import. The bound is now dropped rather than
+mistranslated, and `unenforceable-encoded-bound` names it and points at `@pattern`. A value the old
+length check refused is now accepted.
+
 ## [0.26.0] - 2026-09-16
 
 A minor carrying four things, three of them breaking: **one complete response record per status**,
