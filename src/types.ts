@@ -15,6 +15,7 @@ import { reportDiagnostic } from "./lib.js";
 import {
 	discriminatedSubtypes,
 	effectiveIndexer,
+	emitsDefault,
 	inheritedAndOwnProperties,
 	isOptionalAt,
 	isPayloadProperty,
@@ -34,9 +35,10 @@ import {
  * importing the other.
  *
  * **It must agree with `zod.ts` exactly**, because the emitted assertion compares them. Every rule
- * here has a counterpart there: `utcDateTime` is a string on both sides, `?` becomes
- * `?: T | undefined` because `exactOptionalPropertyTypes` is on, and a property the document leaves
- * out of `required` is optional here whether its absence is spelled `?` or covered by a default.
+ * here has a counterpart there: `utcDateTime` is a string on both sides, `?` is `?: T` because
+ * `.exactOptional()` refuses an explicit `undefined` and `?: T | undefined` only where `.default()`
+ * accepts one, and a property the document leaves out of `required` is optional here whether its
+ * absence is spelled `?` or covered by a default.
  *
  * **The assertion pairs this walk against `z.input`, the type the validator ACCEPTS**, and not
  * against `z.infer`, which is what it produces. These types are the floor a producer supplies, and
@@ -328,21 +330,28 @@ export function propertyToTs(program: Program, property: ModelProperty, wireName
 	 * `.default(...)` for it - so the two walks agree without either one restating the rule.
 	 */
 	/**
-	 * **`?: T | undefined`, and dropping the `| undefined` was tried in `0.19.0` and reverted.**
+	 * **`?: T`, and `?: T | undefined` only where the validator emits `.default(...)`. The contract
+	 * type is the validator's INPUT, `z.input`, at every property.**
 	 *
-	 * It looks wrong - JSON has no `undefined`, so a wire type saying `?: T` reads more honest, and
-	 * it would make this walk agree with `z.infer<...>` on the schemas side. **Measured, it
-	 * breaks the most ordinary handler there is.** `createWidget: (ctx, input) => ok(input)` - return
-	 * what you were given - stopped compiling, because what a handler RECEIVES carries
-	 * `?: T | undefined` and what it would then have to SUPPLY did not.
+	 * `.exactOptional()` refuses `{ note: undefined }` and `.default(v)` accepts it, so those are the
+	 * two answers; {@link emitsDefault} says which one this property got. `wire-contract.gen.ts`
+	 * compares the two walks with nothing widened, so a disagreement here does not compile.
 	 *
-	 * That is the difference from the index signature and from `readonly`, which look like the same
-	 * class and are not: removing those two makes MORE values assignable, and removing this one makes
-	 * fewer. `{ retiredOn: undefined }` serialises to `{}`, identical to omitting the key, so
-	 * permitting it costs the wire nothing and refusing it costs every producer a conditional spread.
+	 * **This was `?: T | undefined` for every optional, kept deliberately on three reasons that were
+	 * each measured false** once `0.24.0` moved the validator to `.exactOptional()`:
 	 *
-	 * The two emitted surfaces differ here on purpose, exactly as they do on openness:
-	 * `schemas.gen.ts` exports the narrow received view, this walk emits the permissive floor.
+	 * - the echo handler `(ctx, input) => ok(input)` broke without it, because what a handler
+	 *   received carried `| undefined`. What it receives is `z.infer` of `.exactOptional()` now,
+	 *   `?: T`, and the echo compiles;
+	 * - `{ note: undefined }` serialises identically to omitting the key. A server checks a body
+	 *   before it serialises it: a value typed by `WireOutputs` reached `servedBody` and answered
+	 *   500 for a body whose bytes were valid, and across a service binding it is never serialised;
+	 * - refusing it costs a producer a conditional spread. That spread infers `{ note?: string }` on
+	 *   TypeScript 5.9 and 7.0 and assigns to the exact type, and it is what a producer under
+	 *   `exactOptionalPropertyTypes` writes for the handler's own return type anyway.
+	 *
+	 * Two consumers reported the disagreement independently - one carried a `Loosen<T>` to compare the
+	 * two surfaces - and openapi-typescript, `hc` and `z.infer` all spell an optional `?: T`.
 	 */
 	/**
 	 * **Optional AT THIS POSITION, not merely optional in the declaration.** A PATCH body's properties
@@ -350,9 +359,8 @@ export function propertyToTs(program: Program, property: ModelProperty, wireName
 	 * what `propertyToZod` has always consulted. This walk read `property.optional` alone, so an
 	 * update contract demanded every field while the validator beside it accepted any subset.
 	 */
-	return property.optional || isOptionalAt(program, property)
-		? `${key}?: ${value} | undefined;`
-		: `${key}: ${value};`;
+	if (!(property.optional || isOptionalAt(program, property))) return `${key}: ${value};`;
+	return emitsDefault(program, property) ? `${key}?: ${value} | undefined;` : `${key}?: ${value};`;
 }
 
 /** Installed by the registry so a named model is declared once and referenced everywhere else. */

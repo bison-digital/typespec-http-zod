@@ -228,8 +228,10 @@ no conformant request can contain. `z.infer` of `.exactOptional()` is `p?: T` na
 depth, which is why the `Exact<>` helper that used to strip `| undefined` back off the inferred type
 is no longer emitted. `.exactOptional()` requires zod 4.3.0, which the `^4.5.0` floor covers.
 
-The contract types in `requests.gen.ts` still publish `?: T | undefined`, deliberately: they are the
-floor a PRODUCER supplies, and `{ p: undefined }` serialises identically to omitting `p`.
+The contract types in `requests.gen.ts` state the validator's input, `z.input`, so an optional
+property is `?: T` there too. The one exception is a property with a default: `.default(v)` accepts an
+explicit `undefined` and fills `v`, so its contract type is `?: T | undefined`. `wire-contract.gen.ts`
+compares the two with nothing widened.
 
 Nothing in the emitted output opts into 4.5's `z.compile()`, and none of its new constructs
 (`z.creditCard()`, `z.properties()`, `z.deepPartial()`, `z.validate()`) is emitted: a validator says

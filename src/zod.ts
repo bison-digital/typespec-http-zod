@@ -1299,6 +1299,27 @@ function renderValue(value: Value): string | undefined {
 	return undefined;
 }
 
+/**
+ * **Whether `propertyToZod` emits `.default(...)` for this property, which is exactly whether its
+ * INPUT admits an explicit `undefined`.**
+ *
+ * `.exactOptional()` refuses `{ p: undefined }`; `.default(v)` accepts it and fills `v`. The contract
+ * types in `requests.gen.ts` state the input, so they have to know which of the two this emitted -
+ * and asking this function rather than restating its rule is what keeps the two walks agreeing.
+ * A default on a REQUIRED property emits neither (`default-on-required-property`), and one whose
+ * value cannot be rendered emits no `.default()` (`unsupported-default`); both fall out here.
+ *
+ * Pure: it reports nothing, so the type walk can ask it without duplicating a diagnostic.
+ */
+export function emitsDefault(program: Program, property: ModelProperty): boolean {
+	const optional = property.optional || isOptionalAt(program, property);
+	return (
+		optional &&
+		property.defaultValue !== undefined &&
+		renderValue(property.defaultValue) !== undefined
+	);
+}
+
 /** A property's declared default, as a JS literal, or `undefined` when it has none. */
 function defaultOf(program: Program, property: ModelProperty): string | undefined {
 	const value = property.defaultValue;

@@ -8,6 +8,46 @@ published types; a patch will not. The **emitted output is part of the API** - a
 validator's shape, to a declared identifier, or to the `EmittedRoute` a wrapping emitter reads is a
 change a consumer feels, and is treated as such here rather than as an implementation detail.
 
+## [Unreleased]
+
+### Changed, breaking
+
+- **An optional property is `?: T` in `requests.gen.ts`, and `?: T | undefined` only where it has a
+  default.** The contract types now state the validator's input, `z.input`, exactly. A value typed by
+  `WireOutputs` could carry `{ note: undefined }`, which `.exactOptional()` refuses, so a handler
+  returning it failed to compile against its own result type (`TS2375`) and, passed through a cast or
+  a service binding, answered **500 `ResponseContractError`** for a body whose bytes were valid.
+
+  Kept everywhere since `0.19.0` on three reasons, each measured false since `0.24.0` moved the
+  validator to `.exactOptional()`:
+
+  - the echo handler `(ctx, input) => ok(input)` needed it, because what arrived carried
+    `| undefined`. What arrives is `?: T` now, and the echo compiles;
+  - `{ p: undefined }` serialises identically to omitting `p`. A server checks a body before it
+    serialises it, and a service binding never serialises it;
+  - refusing it costs a producer a conditional spread. That spread infers `{ p?: T }` on TypeScript
+    5.9 and 7.0 and assigns to the exact type.
+
+  A defaulted property keeps `| undefined` because `.default(v)` really does accept it and fills `v`.
+  `Supplied<>` is gone from `wire-contract.gen.ts`: the two walks are compared with nothing widened.
+  The cyclic declarations in `schemas.gen.ts`, written by the same walk, change the same way.
+
+### Changed
+
+- **Built and graded against TypeSpec 1.17.** The optional `@typespec/streams` and
+  `@typespec/versioning` peers admit `^0.87.0`, so a consumer on the current compiler no longer gets
+  an unmet peer. The corpus is `@typespec/http-specs` `0.1.0-alpha.44`.
+
+### Fixed (graded, not shipped)
+
+- **The portability harness proves what it claimed.** It set `types: []` and no `lib`, and
+  TypeScript's default libraries include the DOM, so a `File` in emitted output compiled. It now
+  compiles under `lib: ["es2023"]`.
+- **The conformance suite reads `additionalProperties` as well as `unevaluatedProperties`** for
+  openness, as two of its three sites already did. `@typespec/openapi3` 1.17 publishes a leaf
+  dictionary under the first (microsoft/typespec#11954), and the third site reported every one as a
+  divergence.
+
 ## [0.27.0] - 2026-09-20
 
 Upgrading: [what to check before you take this](docs/guides.md#to-0270).

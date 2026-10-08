@@ -183,29 +183,41 @@ export const asParent: OpenParent = parent;
 	 * misreading instead of a 400 naming the part.
 	 */
 	/**
-	 * **An optional property may be omitted, supplied, or passed as an explicit `undefined`.**
+	 * **An optional property may be omitted or supplied, and an explicit `undefined` is refused -
+	 * exactly as the validator beside the type refuses it.**
 	 *
-	 * The third one looks wrong - JSON has no `undefined` - and removing it was tried and reverted.
-	 * `{ note: undefined }` serialises identically to omitting `note`, so permitting it costs the
-	 * wire nothing, while refusing it costs every producer a conditional spread and breaks the most
-	 * ordinary handler there is: `(ctx, input) => ok(input)`, return what you were given, because
-	 * what ARRIVES carries `?: T | undefined`.
+	 * This arm used to require the opposite, on three reasons that are each measured false now:
 	 *
-	 * **This is why it is not the same class as the index signature or `readonly`**, which it
-	 * resembles. Removing those makes MORE values assignable to a published shape; removing this one
-	 * makes fewer. `schemas.gen.ts` still exports the narrow received view via `Exact<>`, and the two
-	 * surfaces differ on this axis deliberately.
+	 * - "it breaks `(ctx, input) => ok(input)`, because what arrives carries `?: T | undefined`" -
+	 *   what arrives is `z.infer` of `.exactOptional()` since `0.24.0`, which is `?: T`;
+	 * - "`{ note: undefined }` serialises identically to omitting `note`" - a server checks a body
+	 *   BEFORE it serialises it, and `pageSchema` refuses that value, so the type promised a value the
+	 *   server answered 500 to; across a service binding nothing serialises at all;
+	 * - "refusing it costs every producer a conditional spread" - the spread below infers `{ note?:
+	 *   string }` on TypeScript 5.9 and 7.0 and assigns to the exact type, which is what
+	 *   `exactOptionalPropertyTypes` already asks a producer to write.
+	 *
+	 * So the type now says what the validator, `z.infer`, `hc`'s request type and openapi-typescript
+	 * all say. A DEFAULTED property is the one that keeps `| undefined`, because `.default()` really
+	 * does accept it - see `defaults.test.ts`.
 	 */
-	it("lets an optional property be omitted, supplied, or explicitly undefined", () => {
+	it("lets an optional property be omitted or supplied, and refuses an explicit undefined", () => {
 		const { output, failed } = withConsumer(`
 import type { Page } from "./requests.gen.js";
+import { pageSchema } from "./schemas.gen.js";
 
 export const absent: Page = { entries: [], tags: [] };
 export const present: Page = { entries: [], tags: [], note: "n" };
 
-// The echo case: what a handler received, handed straight back.
-const received: Page = { entries: [], tags: [], note: undefined };
-export const echoed: Page = received;
+// The conditional spread a producer writes under exactOptionalPropertyTypes.
+declare const maybe: string | undefined;
+export const spread: Page = { entries: [], tags: [], ...(maybe === undefined ? {} : { note: maybe }) };
+
+// What the validator hands back is the contract type, with no cast.
+export const parsed: Page = pageSchema.parse({ entries: [], tags: [] });
+
+// @ts-expect-error an explicit undefined is a value pageSchema refuses
+export const explicit: Page = { entries: [], tags: [], note: undefined };
 `);
 		expect(output.trim(), output).toBe("");
 		expect(failed).toBe(false);

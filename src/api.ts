@@ -2140,10 +2140,9 @@ function renderSchemas(
 	 * `p?: T` directly - at every depth, which a shallow mapped type never reached - so the narrowing
 	 * happens once, in the schema, and this helper has nothing left to do.
 	 *
-	 * The contract types in `requests.gen.ts` still keep `?: T | undefined` on purpose: they are the
-	 * floor a PRODUCER supplies, and `{ p: undefined }` serialises identically to omitting `p`, so
-	 * refusing it there would cost every producer a conditional spread and buy the wire nothing.
-	 * Narrowing THAT surface was tried in `0.19.0` and reverted - it broke `(ctx, input) => ok(input)`.
+	 * The contract types in `requests.gen.ts` say the same since `0.28.0`: `?: T`, and
+	 * `?: T | undefined` only where `.default()` accepts an explicit `undefined`. They had kept it
+	 * everywhere on reasons that stopped holding once this schema moved - see `propertyToTs`.
 	 */
 	const usesZod = new Set(
 		[...declarations, ...routeDeclarations].join("").match(/[A-Za-z_$][\w$]*/g) ?? [],
@@ -2860,26 +2859,6 @@ type Identical<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends
  * dropped from a shape that has other keys, and kept - with its value type still mapped - from one
  * that does not.
  */
-/**
- * **An optional property is \`?: T\` here and \`?: T | undefined\` in the contract type, and that is
- * deliberate on both sides.**
- *
- * The validator emits \`.exactOptional()\`, so what ARRIVES is absent or a value - JSON cannot carry an
- * \`undefined\` and the document says exactly that by leaving the property out of \`required\`. The
- * contract type is the floor a PRODUCER supplies, and \`{ p: undefined }\` serialises identically to
- * omitting \`p\`, so refusing it would cost every producer a conditional spread and buy the wire
- * nothing. Narrowing THAT surface was tried in \`0.19.0\` and reverted: it broke
- * \`(ctx, input) => ok(input)\`.
- *
- * So the two disagree on exactly one axis, on purpose, and this widens the inferred side to the
- * producer floor before comparing - the same job \`Declared\` does for openness, in the same pass
- * rather than a second deep one. Every other kind of drift still fails: a property that changes type,
- * appears, disappears or changes optionality is untouched by this.
- */
-type Supplied<T, K extends keyof T> = {} extends Pick<T, K>
-	? Declared<T[K]> | undefined
-	: Declared<T[K]>;
-
 type DeclaredKeyOf<T> = keyof {
 	[K in keyof T as string extends K
 		? never
@@ -2908,9 +2887,8 @@ type Declared<T> = T extends (...args: never[]) => unknown
 						// equate a real dictionary with an empty object: a dictionary whose values are
 						// \`never\` accepts nothing either.
 						{}
-					: // A shape with no declared keys is a dictionary: it has no optional property to
-						// widen, and an index signature satisfies \`{} extends Pick<T, K>\` for every
-						// value type.
+					: // A shape with no declared keys is a dictionary: its index signature is kept and
+						// its value type mapped.
 						{ [K in keyof T]: Declared<T[K]> }
 				: {
 						[K in keyof T as string extends K
@@ -2919,7 +2897,7 @@ type Declared<T> = T extends (...args: never[]) => unknown
 								? never
 								: symbol extends K
 									? never
-									: K]: Supplied<T, K>;
+									: K]: Declared<T[K]>;
 					}
 			: T;
 

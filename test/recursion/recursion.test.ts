@@ -282,6 +282,35 @@ describe("a default on a cycle", () => {
 		});
 	});
 
+	/**
+	 * **The defaulted property and the plain one beside it answer an explicit `undefined`
+	 * differently, and both artefacts have to say so.** `.default(0)` accepts `{ depth: undefined }`
+	 * and fills `0`; `.exactOptional()` refuses `{ branch: undefined }`. A walk spelling every optional
+	 * one way is wrong about one of the two, and the text arm below cannot tell which direction a
+	 * regression went. Compiled, and each value also put through the validator, so the type and the
+	 * runtime are graded against each other rather than against a pattern.
+	 */
+	it("admits an explicit undefined where the default accepts one, and refuses it where nothing does", () => {
+		writeFileSync(
+			join(compiled.outDir, "optionality.consumer.ts"),
+			`import type { Node as Contract } from "./requests.gen.js";
+import type { Node as Declared } from "./schemas.gen.js";
+
+export const defaultedContract: Contract = { label: "a", depth: undefined };
+export const defaultedDeclared: Declared = { label: "a", depth: undefined };
+// @ts-expect-error a plain optional refuses an explicit undefined, as .exactOptional() does
+export const plainContract: Contract = { label: "a", branch: undefined };
+// @ts-expect-error the cyclic declaration says the same as the contract
+export const plainDeclared: Declared = { label: "a", branch: undefined };
+`,
+		);
+		const { output, failed } = typecheckEmitted(compiled.outDir);
+		expect(output).toBe("");
+		expect(failed).toBe(false);
+		expect(schemas["nodeSchema"]?.safeParse({ label: "a", depth: undefined }).success).toBe(true);
+		expect(schemas["nodeSchema"]?.safeParse({ label: "a", branch: undefined }).success).toBe(false);
+	});
+
 	it("names the defaulted property optional in both artefacts, at every depth", () => {
 		const schemaSource = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
 		const requestSource = readFileSync(join(compiled.outDir, "requests.gen.ts"), "utf8");
