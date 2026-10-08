@@ -17,9 +17,15 @@ export function typecheckEmitted(outDir: string): { output: string; failed: bool
 	 * nothing of this package's own source. `strict` and `exactOptionalPropertyTypes` because an
 	 * emitter whose output only compiles under lenient settings has pushed its problem downstream.
 	 *
-	 * `types: []` is load-bearing rather than tidy: it is what proves the emitted output depends on
-	 * no ambient library. A type only reachable through `lib.dom` or `@types/node` - `File` is the
-	 * one this package nearly emitted - compiles here only if it is spelled structurally.
+	 * `types: []` and `lib: ["es2023"]` together are load-bearing rather than tidy: they are what
+	 * prove the emitted output depends on no ambient library. A type only reachable through `lib.dom`
+	 * or `@types/node` - `File` is the one this package nearly emitted - compiles here only if it is
+	 * spelled structurally.
+	 *
+	 * **`types: []` alone proved half of that.** With no `lib`, TypeScript injects its default
+	 * libraries, which include the DOM, so `File`, `ReadableStream` and `Response` all resolved here.
+	 * Measured: spelling the multipart file part as `File` left every arm green. A consumer compiling
+	 * its contracts under `lib: ["ES2024"]` and no `types`, which is a real one, got TS2304.
 	 */
 	const config = join(outDir, "tsconfig.emitted.json");
 	writeFileSync(
@@ -28,6 +34,7 @@ export function typecheckEmitted(outDir: string): { output: string; failed: bool
 			{
 				compilerOptions: {
 					target: "es2023",
+					lib: ["es2023"],
 					module: "nodenext",
 					moduleResolution: "nodenext",
 					strict: true,
