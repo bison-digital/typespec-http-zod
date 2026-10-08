@@ -89,7 +89,7 @@ export async function compileFixture(
 				...(options.keyVocabularies === undefined
 					? {}
 					: { "key-vocabularies": [...options.keyVocabularies] }),
-				...(options.extraOptions ?? {}),
+				...options.extraOptions,
 			},
 		},
 	});
