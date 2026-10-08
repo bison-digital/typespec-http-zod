@@ -216,11 +216,15 @@ describe("the emitted validator answers as the document does", () => {
 	 * number that may only SHRINK: a change making the generator worse raises it and fails, and one
 	 * making it better fails too, which is the prompt to lower the pin and bank the coverage.
 	 *
-	 * Measured at 75 of 286 components. The keywords those 75 carry are still compared structurally by
-	 * `differential.test.ts`; what they lack is a verdict on a value.
+	 * Measured at 75 on `@typespec/http-specs` `0.1.0-alpha.41`, and at 76 on `0.1.0-alpha.44`. The
+	 * one added is `Protocol.Data.DataEvents` in `streaming/sse`, a new scenario: an `anyOf` of event
+	 * variants, the same kind as the two event unions already counted (`Named.ResponseEvents`,
+	 * `Retrieve.RetrievalEvents`). The corpus grew; the generator did not get worse. The keywords
+	 * those components carry are still compared structurally by `differential.test.ts`; what they lack
+	 * is a verdict on a value.
 	 */
 	it("leaves no more components unprobed than it did when this was measured", () => {
-		expect(tally.componentsUnbuildable).toBeLessThanOrEqual(75);
+		expect(tally.componentsUnbuildable).toBeLessThanOrEqual(76);
 	});
 
 	const named = (d: Disagreement) => `${d.scenario} ${d.component}: ${d.why}`;

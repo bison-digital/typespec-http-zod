@@ -378,8 +378,28 @@ const CONSTRAINT_KEYWORDS = [
 	"pattern",
 ] as const;
 
+/**
+ * **The rule a schema declares for properties beyond its own, under whichever keyword it uses.**
+ *
+ * `@typespec/openapi3` writes `unevaluatedProperties` for a model's indexer, except a LEAF model's
+ * (no base) declared indexer, which it writes as `additionalProperties` since `1.17.0`
+ * (microsoft/typespec#11954). The two accept and reject identically there, because nothing composes
+ * beside a leaf - which is the whole argument that change was accepted on.
+ *
+ * **One reader, because three sites held this rule and one of them did not know it.** The element
+ * walk and `extraPropertyRule` already read both keywords; `opennessOfDocument` read only the first,
+ * so moving to `1.17.0` reported every leaf dictionary in the corpus as an "openness" divergence
+ * against a validator that agreed with the document.
+ */
+export function extraPropertyDeclaration(schema: JsonSchema): unknown {
+	return schema.unevaluatedProperties ?? schema["additionalProperties"];
+}
+
 function opennessOfOne(declared: unknown): Openness {
 	if (declared === undefined) return "silent";
+	// The boolean spellings, which `additionalProperties` permits and openapi3 has written for it.
+	if (declared === false) return "sealed";
+	if (declared === true) return "open";
 	if (typeof declared !== "object" || declared === null) return "typed";
 	if ("not" in declared) return "sealed";
 	return Object.keys(declared).length === 0 ? "open" : "typed";
@@ -405,7 +425,7 @@ function opennessOfOne(declared: unknown): Openness {
  * is still allowed.
  */
 function opennessOfDocument(schema: JsonSchema, resolve?: RefResolver): Openness {
-	const own = opennessOfOne(schema.unevaluatedProperties);
+	const own = opennessOfOne(extraPropertyDeclaration(schema));
 	// A permissive declaration anywhere in the chain wins: it evaluates the properties a seal would
 	// otherwise catch. The nearest one is the most specific, so the derived model is asked first.
 	if (own === "open" || own === "typed") return own;
@@ -417,7 +437,7 @@ function opennessOfDocument(schema: JsonSchema, resolve?: RefResolver): Openness
 			if (ref !== undefined) seen.add(ref);
 			const target = ref === undefined ? base : resolve?.(ref);
 			if (target === undefined) continue;
-			const openness = opennessOfOne(target.unevaluatedProperties);
+			const openness = opennessOfOne(extraPropertyDeclaration(target));
 			if (openness === "open" || openness === "typed") return openness;
 			const deeper = fromBases(target);
 			if (deeper !== undefined) return deeper;
@@ -645,8 +665,7 @@ function elementOfDocument(
 		documentKind(schema) === "array"
 			? (schema.items as JsonSchema | undefined)
 			: documentKind(schema) === "object"
-				? ((schema.unevaluatedProperties as JsonSchema | undefined) ??
-					(schema.additionalProperties as JsonSchema | undefined))
+				? (extraPropertyDeclaration(schema) as JsonSchema | undefined)
 				: undefined;
 	if (held === undefined || typeof held !== "object") return undefined;
 	const ref = held.$ref;

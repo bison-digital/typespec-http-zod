@@ -13,5 +13,12 @@ export default defineConfig({
 		environment: "node",
 		include: ["test/**/*.test.ts"],
 		testTimeout: 180_000,
+		/**
+		 * **The same headroom for hooks, which is where the compiling happens.** Only `testTimeout`
+		 * was set, so a `beforeAll` compiling several fixtures kept vitest's 10s default: measured,
+		 * `emit.test.ts`'s five compiles take 4.4s alone and timed out inside the full run once the
+		 * corpus grew, from contention rather than from anything the emitter does.
+		 */
+		hookTimeout: 180_000,
 	},
 });

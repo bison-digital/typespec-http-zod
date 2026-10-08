@@ -4,11 +4,11 @@
 	"negotiatedResponseBodies": 4,
 	"inlineResponseBodiesCompared": 24,
 	"unreadableResponseBodies": 4,
-	"responseBodyKindsCompared": 45,
+	"responseBodyKindsCompared": 52,
 	"requestBodiesCompared": 21,
 	"requestBodyKindsCompared": 36,
 	"unreadableRequestBodies": 0,
-	"emitterWarnings": [],
+	"emitterWarnings": ["payload/xml :: typespec-http-zod/truncated-doc-comment"],
 	"versionedSourcesNarrowed": [
 		"server/versions/versioned (2 documents)",
 		"versioning/added (2 documents)",
@@ -19,8 +19,8 @@
 		"versioning/typeChangedFrom (2 documents)"
 	],
 	"operations": {
-		"document": 641,
-		"emitted": 644
+		"document": 650,
+		"emitted": 653
 	},
 	"ourFailures": [
 		"response/status-code-range :: typespec-http-zod/unsupported-status-code-range",

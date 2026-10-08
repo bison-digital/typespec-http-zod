@@ -16,6 +16,7 @@ import {
 	describeDocumentObject,
 	describeZodDiscriminatedUnion,
 	describeZodObject,
+	extraPropertyDeclaration,
 	namesFromModule,
 	topLevelKindOfDocument,
 	topLevelKindOfZod,
@@ -591,18 +592,16 @@ const ANNOTATION_KEYWORDS = new Set([
 function extraPropertyRule(
 	source: Record<string, unknown>,
 ): { sealed: boolean; values?: unknown } | undefined {
-	for (const key of ["unevaluatedProperties", "additionalProperties"]) {
-		const rule = source[key];
-		if (rule === undefined) continue;
-		if (rule === false) return { sealed: true };
-		if (rule === true) return { sealed: false };
-		if (typeof rule !== "object" || rule === null) continue;
-		// `{"not": {}}` is openapi3's way of writing "nothing further is permitted".
-		if (JSON.stringify(rule) === '{"not":{}}') return { sealed: true };
-		// An empty schema permits anything and asserts nothing about it.
-		return Object.keys(rule).length === 0 ? { sealed: false } : { sealed: false, values: rule };
-	}
-	return undefined;
+	// The keyword is read by the one reader `shape.ts` exports, so the openness walk agrees with it.
+	const rule = extraPropertyDeclaration(source);
+	if (rule === undefined) return undefined;
+	if (rule === false) return { sealed: true };
+	if (rule === true) return { sealed: false };
+	if (typeof rule !== "object" || rule === null) return undefined;
+	// `{"not": {}}` is openapi3's way of writing "nothing further is permitted".
+	if (JSON.stringify(rule) === '{"not":{}}') return { sealed: true };
+	// An empty schema permits anything and asserts nothing about it.
+	return Object.keys(rule).length === 0 ? { sealed: false } : { sealed: false, values: rule };
 }
 
 /**
@@ -935,7 +934,8 @@ interface Comparison {
 	readonly inlineResponseBodiesCompared: number;
 	/** Bodies neither side reduces to an object shape - a scalar, a stream, a union. */
 	readonly unreadableResponseBodies: number;
-	readonly streamItemBodies: number;
+	/** Positions (`scenario:operation.status`) whose body the document describes as stream ITEMS. */
+	readonly streamItemBodies: readonly string[];
 	/** Non-object response bodies whose top-level KIND is compared. */
 	readonly responseBodyKindsCompared: number;
 	/** Arms whose media types were compared with the document's `content` keys for that status. */
@@ -1021,7 +1021,7 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 	let inlineResponseBodiesCompared = 0;
 	let unreadableResponseBodies = 0;
 	/** Responses whose body the document describes as stream ITEMS - a 3.2 shape, not a gap. */
-	let streamItemBodies = 0;
+	const streamItemBodies: string[] = [];
 	let responseBodyKindsCompared = 0;
 	let responseMediaTypesCompared = 0;
 	let responseHeadersCompared = 0;
@@ -1476,7 +1476,7 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 									if (documentKind === undefined || zodKind === undefined) {
 										// A streamed response is not unreadable - see `responseDescribesStreamItems`.
 										if (responseDescribesStreamItems(response)) {
-											streamItemBodies++;
+											streamItemBodies.push(`${scenario.name}:${operationId}.${status}`);
 											continue;
 										}
 										// Unreadable on one side. Counted, never silently passed.
@@ -2033,10 +2033,15 @@ describe("the same corpus, against the newer document version", () => {
 	/**
 	 * **The one measured difference, pinned in both directions.**
 	 *
-	 * A streamed response at 3.2 publishes `itemSchema` and no `schema`, so the three SSE bodies that
-	 * 3.1 compares as `{"type": "string"}` against `z.string()` have nothing for the kind walk to read
-	 * and are counted unreadable instead. Predicted before the change and confirmed: unreadable 4 -> 7,
-	 * kinds 44 -> 41, with the total across both buckets unchanged at 48.
+	 * A streamed response at 3.2 publishes `itemSchema` and no `schema`, so the SSE bodies that 3.1
+	 * compares as `{"type": "string"}` against `z.string()` have nothing for the kind walk to read,
+	 * and are classified as stream items instead. Predicted before the change and confirmed on the
+	 * three `streaming/sse` declared at `0.1.0-alpha.41`: kinds 44 -> 41, with the total across the
+	 * buckets unchanged.
+	 *
+	 * **`0.1.0-alpha.44` declares ten**, adding the seven `Protocol` operations (`@data` envelopes,
+	 * `id`, `retry`, reconnection). Counted from the scenario's own `SSEStream<` operations, not from
+	 * this emitter, and written out below so the set is a fact somebody read.
 	 *
 	 * **This is a gap, not a target.** The document at 3.2 says more about a stream than 3.1 does, and
 	 * this emitter validates the stream as a string either way. Pinned exactly so that closing it moves
@@ -2044,22 +2049,33 @@ describe("the same corpus, against the newer document version", () => {
 	 */
 	it("names the streamed bodies as stream items rather than as unreadable ones", () => {
 		// 3.1 cannot express a stream, so nothing is classified this way there.
-		expect(comparison.streamItemBodies).toBe(0);
-		// `streaming/sse` declares three, and naming them is the point: a bare count moving by three
-		// would also be satisfied by three unrelated bodies breaking while these three started working.
-		expect(comparisonAtLater.streamItemBodies).toBe(3);
+		expect(comparison.streamItemBodies).toEqual([]);
+		// Naming them is the point: a bare count moving by ten would also be satisfied by ten unrelated
+		// bodies breaking while these ten started working.
+		expect(comparisonAtLater.streamItemBodies.toSorted()).toEqual([
+			"streaming/sse:Data_withEnvelope.200",
+			"streaming/sse:Data_withoutEnvelope.200",
+			"streaming/sse:Named_receive.200",
+			"streaming/sse:Protocol_id.200",
+			"streaming/sse:Protocol_invalidId.200",
+			"streaming/sse:Protocol_invalidRetry.200",
+			"streaming/sse:Protocol_reconnect.200",
+			"streaming/sse:Protocol_retry.200",
+			"streaming/sse:Retrieve_stream.200",
+			"streaming/sse:Unnamed_receive.200",
+		]);
 		/**
-		 * **Unreadable does not move, which is the whole claim.** These three are not a hole in the
+		 * **Unreadable does not move, which is the whole claim.** These are not a hole in the
 		 * harness; the document is describing something this emitter validates as a string, and that
 		 * gap is `streamItemBodies` itself rather than a failure to read.
 		 */
 		expect(comparisonAtLater.unreadableResponseBodies).toBe(comparison.unreadableResponseBodies);
 		expect(comparisonAtLater.responseBodyKindsCompared).toBe(
-			comparison.responseBodyKindsCompared - comparisonAtLater.streamItemBodies,
+			comparison.responseBodyKindsCompared - comparisonAtLater.streamItemBodies.length,
 		);
 		// The three buckets partition one set of positions, so the total may not move.
 		const total = (c: Comparison): number =>
-			c.unreadableResponseBodies + c.responseBodyKindsCompared + c.streamItemBodies;
+			c.unreadableResponseBodies + c.responseBodyKindsCompared + c.streamItemBodies.length;
 		expect(total(comparisonAtLater)).toBe(total(comparison));
 	});
 });
