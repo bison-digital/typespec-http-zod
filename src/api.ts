@@ -47,6 +47,7 @@ import {
 } from "./uri-template.js";
 
 export type { EmittedPathSegment } from "./uri-template.js";
+export { CONTENTLESS_STATUS_CODES, STATUS_CODES } from "./statuses.js";
 import {
 	collectExternalImports,
 	noteDeclaredVocabularies,
@@ -421,7 +422,32 @@ export interface EmittedResponse {
 }
 
 /**
- * Every response the operation declares, one per status key, in OpenAPI's precedence order.
+ * One response the operation declares, RESOLVED and not yet rendered: its body as a TypeSpec type.
+ *
+ * **Two walks render the same responses, and they must read one resolution.** The Zod walk turns a
+ * body into a schema expression ({@link EmittedResponse}); the contract walk turns it into a
+ * TypeScript type for `requests.gen.ts`. The contract walk used to re-derive "the success body" for
+ * itself from the lowest success status, which is how `200 Thing | 201 Other` published only `Thing`
+ * there while the runtime carried both arms. Each walk now renders these records, so a status one
+ * walk can see is a status the other can see.
+ */
+export interface ResolvedResponse {
+	readonly status: StatusKey;
+	/** The body type, or `undefined` where the status declares none (`void` and `never` included). */
+	readonly body: Type | undefined;
+	readonly contentTypes: readonly string[];
+	/** Each header by WIRE name, with the property it is declared on. */
+	readonly headers: readonly { readonly name: string; readonly property: ModelProperty }[];
+	/** See {@link EmittedResponse.binary}. */
+	readonly binary: boolean;
+	/** See {@link EmittedResponse.streamed}. */
+	readonly streamed: boolean;
+	/** See {@link EmittedResponse.textual}. */
+	readonly textual: boolean;
+}
+
+/**
+ * Every response the operation declares, one per status key, in the order they were RESOLVED.
  *
  * **Each response's own body, headers and media types, and nothing borrowed from another.** The
  * failure arms used to be collected here separately from the success, and before that every failure
@@ -434,21 +460,20 @@ export interface EmittedResponse {
  * Where two responses resolve to the same status the first body wins, which is what the document
  * does, and media types and headers are the union across them.
  *
- * Call inside `withVisibility(program, Visibility.Read, ...)`: a response is read at `Read`, and
- * resolving it under a request visibility declares components under the wrong suffix.
+ * Resolution order, not precedence order, because a renderer that declares components has to
+ * declare them in the order they were always declared; {@link inPrecedenceOrder} sorts.
  */
-function responsesOf(
+export function resolvedResponsesOf(
 	program: Program,
 	operation: HttpOperation,
-	registry: SchemaRegistry,
-): EmittedResponse[] {
+): ResolvedResponse[] {
 	const byStatus = new Map<
 		string,
 		{
 			readonly status: StatusKey;
 			body: Type | undefined;
 			readonly contentTypes: Set<string>;
-			readonly headers: EmittedResponseHeader[];
+			readonly headers: { readonly name: string; readonly property: ModelProperty }[];
 			streamed: boolean;
 		}
 	>();
@@ -471,50 +496,85 @@ function responsesOf(
 				}
 				for (const [name, property] of Object.entries(content.headers ?? {})) {
 					if (entry.headers.some((existing) => existing.name === name)) continue;
-					entry.headers.push({
-						name,
-						type: typeToTs(program, property.type),
-						/**
-						 * **The Zod expression, which used to be discarded here.** Every REQUEST parameter
-						 * goes through `expressionForProperty` a few hundred lines below; a response header
-						 * went through `typeToTs` and nothing else, so the emitted arm carried a name and an
-						 * optionality and no way to check a value. A response body that breaks its schema
-						 * throws `ResponseContractError`; a header that breaks its own was served.
-						 */
-						schema: registry.expressionForProperty(property),
-						optional: property.optional,
-					});
+					entry.headers.push({ name, property });
 				}
 			}
 			if (streamedTypeOf(program, response.type) !== undefined) entry.streamed = true;
 			byStatus.set(key, entry);
 		}
 	}
-	return [...byStatus.values()]
-		.map((entry) => {
-			const contentTypes = [...entry.contentTypes];
-			const binary =
-				entry.body !== undefined && isBinaryPart(entry.body) && isRawBinaryMediaType(contentTypes);
-			return {
-				status: entry.status,
-				schema:
-					entry.body === undefined
-						? undefined
-						: binary
-							? "z.unknown()"
-							: registry.expressionFor(entry.body),
-				contentTypes,
-				headers: entry.headers,
-				binary,
-				streamed: entry.streamed,
-				textual: entry.body !== undefined && isStringType(entry.body),
-			};
-		})
-		.toSorted(
-			(a, b) =>
-				statusPrecedenceOf(a.status) - statusPrecedenceOf(b.status) ||
-				statusOrderOf(a.status) - statusOrderOf(b.status),
-		);
+	return [...byStatus.values()].map((entry) => {
+		const contentTypes = [...entry.contentTypes];
+		return {
+			status: entry.status,
+			body: entry.body,
+			contentTypes,
+			headers: entry.headers,
+			binary:
+				entry.body !== undefined && isBinaryPart(entry.body) && isRawBinaryMediaType(contentTypes),
+			streamed: entry.streamed,
+			textual: entry.body !== undefined && isStringType(entry.body),
+		};
+	});
+}
+
+/** Responses in OpenAPI's precedence order: exact codes, then ranges, then `default`. */
+export function inPrecedenceOrder<R extends { readonly status: StatusKey }>(
+	responses: readonly R[],
+): R[] {
+	return responses.toSorted(
+		(a, b) =>
+			statusPrecedenceOf(a.status) - statusPrecedenceOf(b.status) ||
+			statusOrderOf(a.status) - statusOrderOf(b.status),
+	);
+}
+
+/**
+ * Every response the operation declares, rendered as Zod, in OpenAPI's precedence order.
+ *
+ * Every header is rendered before any body, and bodies in precedence order, which is the order this
+ * has always declared components in: the emitted files do not move because the resolution moved.
+ *
+ * Call inside `withVisibility(program, Visibility.Read, ...)`: a response is read at `Read`, and
+ * resolving it under a request visibility declares components under the wrong suffix.
+ */
+function responsesOf(
+	program: Program,
+	operation: HttpOperation,
+	registry: SchemaRegistry,
+): EmittedResponse[] {
+	const withHeaders = resolvedResponsesOf(program, operation).map((response) => ({
+		response,
+		headers: response.headers.map(({ name, property }): EmittedResponseHeader => ({
+			name,
+			type: typeToTs(program, property.type),
+			/**
+			 * **The Zod expression, which used to be discarded here.** Every REQUEST parameter goes
+			 * through `expressionForProperty` a few hundred lines below; a response header went
+			 * through `typeToTs` and nothing else, so the emitted arm carried a name and an
+			 * optionality and no way to check a value. A response body that breaks its schema throws
+			 * `ResponseContractError`; a header that breaks its own was served.
+			 */
+			schema: registry.expressionForProperty(property),
+			optional: property.optional,
+		})),
+	}));
+	return inPrecedenceOrder(
+		withHeaders.map(({ response, headers }) => ({ status: response.status, response, headers })),
+	).map(({ response, headers }) => ({
+		status: response.status,
+		schema:
+			response.body === undefined
+				? undefined
+				: response.binary
+					? "z.unknown()"
+					: registry.expressionFor(response.body),
+		contentTypes: response.contentTypes,
+		headers,
+		binary: response.binary,
+		streamed: response.streamed,
+		textual: response.textual,
+	}));
 }
 
 /**
@@ -1646,6 +1706,95 @@ function modelPropertiesOf(model: Model): ModelProperty[] {
 	return chain.flatMap((current) => [...current.properties.values()]);
 }
 
+/**
+ * Where a request body reaches a handler's input: spread into it, named under a property, or handed
+ * over unread.
+ *
+ * **One decision, read by every artefact that states an operation's input.** The server emitters
+ * render a handler's input from {@link EmittedRoute.bodyProperty}; the contract types in
+ * `requests.gen.ts` re-derived the input for themselves and always merged, so for every body this
+ * names - an indexer, an optional body, a scalar, enum or union - `WireInputs` described an input no
+ * handler receives.
+ */
+function requestBodyPlacementOf(operation: HttpOperation): {
+	readonly rawBodyProperty: string | undefined;
+	readonly bodyProperty: string | undefined;
+	readonly optionalBody: boolean;
+} {
+	const requestType = requestBodyOf(operation);
+	/**
+	 * A `bytes` body means the BYTES are the contract.
+	 *
+	 * A webhook's MAC covers exactly what arrived, so a parsed-and-re-serialised object would
+	 * verify a different string and every delivery would fail authentication.
+	 */
+	const bodyParameter = operation.parameters.body;
+	const rawBodyProperty =
+		requestType?.kind === "Scalar" && requestType.name === "bytes"
+			? (bodyParameter?.property?.name ?? "body")
+			: undefined;
+	/**
+	 * A body with an indexer is named rather than spread - see `bodyProperty`. Read from the
+	 * resolved model's own indexer rather than from the emitted schema text, which would be a
+	 * decision made by pattern-matching generated output.
+	 */
+	/**
+	 * **An OPTIONAL body is named for the same reason an indexed one is**: the merge cannot
+	 * express "absent". See {@link EmittedRoute.optionalBody}.
+	 */
+	const optionalBody = bodyParameter?.property?.optional === true;
+	/**
+	 * **An optional MULTIPART body reaches the same rule by a second route, because
+	 * `requestType` cannot see it.** `requestBodyOf` resolves a type only for
+	 * `bodyKind === "single"`, so `requestType` is `undefined` for every multipart operation
+	 * and the `optionalBody` disjunct above was unreachable however the document declared it.
+	 *
+	 * The emitted server for such an operation did not compile. Measured, and the mechanism is
+	 * worth stating because it is not a union: spreading a value typed `Parts | undefined`
+	 * makes every part OPTIONAL, so `{ file?: ...; pages?: ... }` was passed where
+	 * `{ file: ...; pages: ... }` was required. `TS2345`, inside `app.gen.ts` itself.
+	 *
+	 * That is the failure {@link EmittedRoute.optionalBody} predicts in prose - a merge has no
+	 * way to say "these properties are here only sometimes" without making every one of them
+	 * optional, which is a weaker and different claim about the body that IS sent. So this is
+	 * the stated rule reaching the one body kind it had never been applied to, not a new rule.
+	 *
+	 * **The REQUIRED arm is deliberately excluded.** The indexed reason does not apply to a
+	 * parts model, so a required multipart body merges as safely as a required single one, and
+	 * `typespec-hono/test/filepart/` compiles a handler that reads `input.file` directly.
+	 * Widening this to "multipart is always named" would rewrite that directory for no defect.
+	 *
+	 * This is the third hole the `"single"` gate has produced, after `multipartSchemaOf` and
+	 * `multipartTsOf`, both recorded above.
+	 */
+	const optionalMultipartBody = bodyParameter?.bodyKind === "multipart" && optionalBody;
+	/**
+	 * **A body that is not a MODEL has no properties to merge, and merging it anyway lost it.**
+	 *
+	 * `@body body: string` emitted a handler input of `Record<string, never>` and a call site of
+	 * `{}`: the server validated the body and then never handed it to the handler, silently, from
+	 * a compile that reported success. `@body body: SomeEnum` was the same rule failing loudly,
+	 * `TS2698: Spread types may only be created from object types`, which is what
+	 * `payload/media-type`, `type/enum/*`, `type/scalar` and `versioning/returnTypeChangedFrom`
+	 * had been pinned on in the conformance corpus.
+	 *
+	 * A scalar, an enum, a union or a literal body is therefore NAMED, which is the treatment an
+	 * indexed or optional body already gets and for the same reason: the merge cannot express it.
+	 *
+	 * **Except a `bytes` body**, which {@link EmittedRoute.rawBodyProperty} already names, and
+	 * naming it twice would put the same value under two keys.
+	 */
+	const unmergeableBody =
+		requestType !== undefined && requestType.kind !== "Model" && rawBodyProperty === undefined;
+	const bodyProperty =
+		(requestType?.kind === "Model" && (requestType.indexer !== undefined || optionalBody)) ||
+		optionalMultipartBody ||
+		unmergeableBody
+			? (bodyParameter?.property?.name ?? "body")
+			: undefined;
+	return { rawBodyProperty, bodyProperty, optionalBody };
+}
+
 export function collectRoutes(
 	program: Program,
 	registry: SchemaRegistry,
@@ -1683,76 +1832,7 @@ export function collectRoutes(
 				operation.operation,
 				operation.verb,
 			);
-			/**
-			 * A `bytes` body means the BYTES are the contract.
-			 *
-			 * A webhook's MAC covers exactly what arrived, so a parsed-and-re-serialised object would
-			 * verify a different string and every delivery would fail authentication.
-			 */
-			const bodyParameter = operation.parameters.body;
-			const rawBodyProperty =
-				requestType?.kind === "Scalar" && requestType.name === "bytes"
-					? (bodyParameter?.property?.name ?? "body")
-					: undefined;
-			/**
-			 * A body with an indexer is named rather than spread - see `bodyProperty`. Read from the
-			 * resolved model's own indexer rather than from the emitted schema text, which would be a
-			 * decision made by pattern-matching generated output.
-			 */
-			/**
-			 * **An OPTIONAL body is named for the same reason an indexed one is**: the merge cannot
-			 * express "absent". See {@link EmittedRoute.optionalBody}.
-			 */
-			const optionalBody = bodyParameter?.property?.optional === true;
-			/**
-			 * **An optional MULTIPART body reaches the same rule by a second route, because
-			 * `requestType` cannot see it.** `requestBodyOf` resolves a type only for
-			 * `bodyKind === "single"`, so `requestType` is `undefined` for every multipart operation
-			 * and the `optionalBody` disjunct above was unreachable however the document declared it.
-			 *
-			 * The emitted server for such an operation did not compile. Measured, and the mechanism is
-			 * worth stating because it is not a union: spreading a value typed `Parts | undefined`
-			 * makes every part OPTIONAL, so `{ file?: ...; pages?: ... }` was passed where
-			 * `{ file: ...; pages: ... }` was required. `TS2345`, inside `app.gen.ts` itself.
-			 *
-			 * That is the failure {@link EmittedRoute.optionalBody} predicts in prose - a merge has no
-			 * way to say "these properties are here only sometimes" without making every one of them
-			 * optional, which is a weaker and different claim about the body that IS sent. So this is
-			 * the stated rule reaching the one body kind it had never been applied to, not a new rule.
-			 *
-			 * **The REQUIRED arm is deliberately excluded.** The indexed reason does not apply to a
-			 * parts model, so a required multipart body merges as safely as a required single one, and
-			 * `typespec-hono/test/filepart/` compiles a handler that reads `input.file` directly.
-			 * Widening this to "multipart is always named" would rewrite that directory for no defect.
-			 *
-			 * This is the third hole the `"single"` gate has produced, after `multipartSchemaOf` and
-			 * `multipartTsOf`, both recorded above.
-			 */
-			const optionalMultipartBody = bodyParameter?.bodyKind === "multipart" && optionalBody;
-			/**
-			 * **A body that is not a MODEL has no properties to merge, and merging it anyway lost it.**
-			 *
-			 * `@body body: string` emitted a handler input of `Record<string, never>` and a call site of
-			 * `{}`: the server validated the body and then never handed it to the handler, silently, from
-			 * a compile that reported success. `@body body: SomeEnum` was the same rule failing loudly,
-			 * `TS2698: Spread types may only be created from object types`, which is what
-			 * `payload/media-type`, `type/enum/*`, `type/scalar` and `versioning/returnTypeChangedFrom`
-			 * had been pinned on in the conformance corpus.
-			 *
-			 * A scalar, an enum, a union or a literal body is therefore NAMED, which is the treatment an
-			 * indexed or optional body already gets and for the same reason: the merge cannot express it.
-			 *
-			 * **Except a `bytes` body**, which {@link EmittedRoute.rawBodyProperty} already names, and
-			 * naming it twice would put the same value under two keys.
-			 */
-			const unmergeableBody =
-				requestType !== undefined && requestType.kind !== "Model" && rawBodyProperty === undefined;
-			const bodyProperty =
-				(requestType?.kind === "Model" && (requestType.indexer !== undefined || optionalBody)) ||
-				optionalMultipartBody ||
-				unmergeableBody
-					? (bodyParameter?.property?.name ?? "body")
-					: undefined;
+			const { rawBodyProperty, bodyProperty, optionalBody } = requestBodyPlacementOf(operation);
 			const authentication = authenticationFor(program, operation);
 			const template = routeTemplateOf(
 				operation.uriTemplate,
