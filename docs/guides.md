@@ -340,6 +340,7 @@ export async function $onEmit(context: EmitContext) {
 		for (const route of service.routes) {
 			const names = service.schemaNames.get(route.operationId);
 			// names.path, names.query, names.header, names.body, names.arms, names.responses
+			// names.selectedAccept: the `accept` literal a negotiated operation's handler receives
 			// route.responses: each declared status with its body, media types and headers
 		}
 	}

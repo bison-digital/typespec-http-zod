@@ -142,6 +142,11 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
   serving kind, and the status codes each answers with), exported for the server emitters. Both
   `typespec-hono` and `typespec-http-mcp` held a copy of these rules and of the status table.
 
+- **`RouteSchemaNames.selectedAccept`**: on a route several operations share, the `accept` header
+  `header` leaves out and the one literal that reaches this operation, which its handler receives.
+  `typespec-hono` derived it for itself, and `typespec-http-mcp` did not derive it at all, so a tool
+  on a negotiated route was not given the `accept` the server's handler is given.
+
 ### Fixed (graded, not shipped)
 
 - **`wire-contract.gen.ts` pairs every model a response names, not only request bodies.** A model

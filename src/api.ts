@@ -2334,6 +2334,14 @@ export interface RouteSchemaNames {
 	readonly queryFields: string | undefined;
 	readonly header: string | undefined;
 	/**
+	 * **The `accept` the negotiation selects this operation by**, on a route several operations
+	 * share. `header` leaves it out there, because it chooses the operation rather than constraining
+	 * one, and the operation's input still declares it: the one value that reaches this operation is
+	 * its own literal, so a handler receives exactly that. `undefined` wherever `header` validates
+	 * `accept` itself, or the operation declares no literal one.
+	 */
+	readonly selectedAccept: { readonly name: string; readonly value: string } | undefined;
+	/**
 	 * Cookie parameters. **Optional on the interface, so a server emitter that does not read it yet
 	 * still compiles** - this arrived after the other four and two emitters consume this type.
 	 */
@@ -2489,6 +2497,7 @@ function nameRouteSchemas(
 			query,
 			queryFields: gathers ? queryFields : query,
 			header,
+			selectedAccept: negotiating ? route.accept : undefined,
 			cookie,
 			body,
 			arms,
