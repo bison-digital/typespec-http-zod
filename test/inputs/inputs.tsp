@@ -108,3 +108,6 @@ enum Colour {
  * side already asks a handler for the text of a model served as XML.
  */
 @route("/xml") @put op putXml(@header contentType: "application/xml", @body body: Thing): void;
+
+/** A delimited query list: a style of flattening, not a type - the handler receives the list. */
+@route("/colours") @get op listColours(@query @encode(ArrayEncoding.pipeDelimited) colors: string[]): void;

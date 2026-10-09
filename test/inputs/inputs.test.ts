@@ -48,7 +48,7 @@ describe("every operation's input, as the handler receives it", () => {
 		const { output, failed } = withConsumer(`${PRELUDE}
 export type Keys = MustHold<Identical<keyof WireInputs,
 	| "readThing" | "createThing" | "cancelPending" | "createCharge" | "authorize" | "ingestEvents"
-	| "ingestEvent" | "setColour" | "setNote" | "upload" | "signed" | "submitForm" | "ranged" | "uploadFile" | "putXml">>;
+	| "ingestEvent" | "setColour" | "setNote" | "upload" | "signed" | "submitForm" | "ranged" | "uploadFile" | "putXml" | "listColours">>;
 export type Nothing = MustHold<Identical<WireInputs["cancelPending"], Record<string, never>>>;
 export type RangeOnly = MustHold<Identical<WireInputs["ranged"], { q: string }>>;
 `);
@@ -60,6 +60,8 @@ export type RangeOnly = MustHold<Identical<WireInputs["ranged"], { q: string }>>
 		const { output, failed } = withConsumer(`${PRELUDE}
 export type Params = MustHold<Identical<WireInputs["readThing"], { id: string }>>;
 export type Model = MustHold<Identical<WireInputs["createThing"], { id: string }>>;
+// An array encoding on a query parameter says how it was flattened; the validator splits it back.
+export type Delimited = MustHold<Identical<WireInputs["listColours"], { colors: string[] }>>;
 `);
 		expect(output).toBe("");
 		expect(failed).toBe(false);

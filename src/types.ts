@@ -1,6 +1,5 @@
 import {
 	getDiscriminatedUnion,
-	getEncode,
 	isNeverType,
 	resolveEncodedName,
 	type Enum,
@@ -16,6 +15,7 @@ import {
 	discriminatedSubtypes,
 	effectiveIndexer,
 	emitsDefault,
+	encodedTypeOf,
 	inheritedAndOwnProperties,
 	isOptionalAt,
 	isPayloadProperty,
@@ -100,7 +100,7 @@ function refuse(program: Program, type: Type, why: string, remedy = ""): string 
 
 function scalarToTs(program: Program, scalar: Scalar): string {
 	// A scalar declaration can carry the encoding itself - see `scalarToZod`.
-	const encoded = getEncode(program, scalar)?.type;
+	const encoded = encodedTypeOf(program, scalar);
 	if (encoded !== undefined && encoded !== scalar) return scalarToTs(program, encoded);
 	let current: Scalar | undefined = scalar;
 	// Walk `extends` so `scalar TrimmedString extends string` resolves to the primitive underneath.
@@ -293,9 +293,14 @@ function modelToTs(program: Program, model: Model): string {
  * annotation claims is by construction the type this walk renders for the same property.
  */
 export function propertyTypeToTs(program: Program, property: ModelProperty): string {
-	// `@encode` changes the wire TYPE, resolved exactly as `zod.ts` resolves it - a property encoded as
-	// a string on one side and an array on the other fails the emitted assertion, and deserves to.
-	const encoded = getEncode(program, property)?.type;
+	/**
+	 * **`@encode` changes the wire TYPE, and `encodedTypeOf` is the one rule for when it does.** This
+	 * read `getEncode(...).type` directly, so it missed the exception the Zod walk makes: an array
+	 * encoding on a QUERY parameter is a style of flattening, not a type, and the validator splits it
+	 * back into the declared list. So `WireInputs` said `colors: string` for a pipe-delimited query
+	 * whose handler is given `string[]` - two walks of one property, one of them knowing a rule.
+	 */
+	const encoded = encodedTypeOf(program, property);
 	return typeToTs(program, encoded ?? property.type);
 }
 

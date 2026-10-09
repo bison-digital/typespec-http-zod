@@ -1154,7 +1154,10 @@ const PARAMETER_STYLE_ENCODINGS = new Set([
 	"ArrayEncoding.newlineDelimited",
 ]);
 
-function encodedTypeOf(program: Program, target: ModelProperty | Scalar): Scalar | undefined {
+export function encodedTypeOf(
+	program: Program,
+	target: ModelProperty | Scalar,
+): Scalar | undefined {
 	const encoded = getEncode(program, target);
 	if (encoded === undefined) return undefined;
 	if (

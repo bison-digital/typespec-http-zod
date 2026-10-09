@@ -89,6 +89,12 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
   `WireInputs` states it as `{ body: string }`. That is what the response side already asks of a
   handler serving a model as XML. A string body is unchanged: it is text, and its schema still
   checks it.
+- **A delimited query parameter's contract type is the list, as its handler receives it.**
+  `@query @encode(ArrayEncoding.pipeDelimited) colors: string[]` was typed `colors: string` in
+  `WireInputs`, while the validator splits it back into the declared `string[]`. The contract walk
+  read `@encode` directly and missed the exception the Zod walk already made for a parameter's array
+  style. Both now ask `encodedTypeOf`. Found by `typespec-hono`'s new corpus agreement oracle on
+  `parameters/collection-format`.
 - **Each `@service` gets its own contract types.** `contracts-output-dir` was shared by every service
   in a spec, so the second service's `requests.gen.ts` replaced the first's, and a whole surface lost
   its contracts with no diagnostic. It is split per service now (`<dir>/<ServiceName>`), as
