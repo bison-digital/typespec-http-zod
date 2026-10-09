@@ -142,6 +142,12 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
   serving kind, and the status codes each answers with), exported for the server emitters. Both
   `typespec-hono` and `typespec-http-mcp` held a copy of these rules and of the status table.
 
+- **`EmittedService.operations`: the `HttpOperation` each route was collected from, keyed by
+  operation id.** Verb and path do not identify an operation, because `@sharedRoute` gives every
+  member the same ones, and both server emitters looked operations up by them: a diagnostic about
+  one member pointed at another, and the tool emitter read one member's doc comment and tags for
+  all of them.
+
 - **`RouteSchemaNames.selectedAccept`**: on a route several operations share, the `accept` header
   `header` leaves out and the one literal that reaches this operation, which its handler receives.
   `typespec-hono` derived it for itself, and `typespec-http-mcp` did not derive it at all, so a tool

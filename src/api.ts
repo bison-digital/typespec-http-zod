@@ -3202,6 +3202,13 @@ export interface EmittedService {
 	readonly routes: readonly EmittedRoute[];
 	/** The identifiers every per-operation validator was declared under, keyed by operation id. */
 	readonly schemaNames: ReadonlyMap<string, RouteSchemaNames>;
+	/**
+	 * **The operation each route was collected from, keyed by operation id**, so a wrapping emitter
+	 * reading its doc comment, tags or diagnostic target reads the right one. Verb and path do not
+	 * identify an operation: `@sharedRoute` puts several on one, and a lookup by them answers the
+	 * same operation for each - its description became every member's, and its tags selected them.
+	 */
+	readonly operations: ReadonlyMap<string, HttpOperation>;
 	/** Where this service's artefacts were written - a server emitter writes its own beside them. */
 	readonly outputDir: string;
 	/** Already resolved through the per-service overrides, so a caller re-reads nothing. */
@@ -3510,7 +3517,14 @@ export async function emitHttpZod(context: EmitContext): Promise<readonly Emitte
 			}
 		}
 
-		emitted.push({ service, routes, schemaNames: names, outputDir, options: resolved });
+		// Still inside this service's id scope, so each operation resolves to the id its route carries.
+		const operations = new Map(
+			service.operations.map((operation) => [
+				operationIdOf(context.program, operation.operation),
+				operation,
+			]),
+		);
+		emitted.push({ service, routes, schemaNames: names, operations, outputDir, options: resolved });
 	}
 	return emitted;
 }
