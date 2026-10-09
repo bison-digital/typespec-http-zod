@@ -78,9 +78,8 @@ model Entry {
  * An optional property and two arrays.
  *
  * **Both carry a TypeScript-only property into a wire type if the walk is careless.** `?` on the
- * contract side used to be written `?: T | undefined` to match what `z.infer` of `.optional()`
- * produces - shaping the contract to satisfy an assertion rather than to describe the wire, and JSON
- * has no `undefined`. Arrays are emitted mutable, and a codebase that hands back `readonly T[]`
+ * contract side was written `?: T | undefined` until `0.28.0`, long after the validator stopped
+ * accepting an explicit `undefined` - and JSON has no `undefined`. Arrays are emitted mutable, and a codebase that hands back `readonly T[]`
  * cannot satisfy that; `Produced<>` exists for exactly this and was reachable from nowhere.
  */
 model Page {

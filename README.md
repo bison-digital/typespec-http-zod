@@ -177,12 +177,12 @@ then a range such as `4XX`, then `default`.
 
 ## What it emits
 
-| file                   | contents                                                                                                  | emitted when                  |
-| ---------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `schemas.gen.ts`       | component schemas, per-operation path, query, header, body and response validators, and the response arms | always                        |
-| `requests.gen.ts`      | framework-free TypeScript types, with no imports                                                          | `contracts-output-dir` is set |
-| `vocabularies.gen.ts`  | each enum's members as a runtime tuple                                                                    | `contracts-output-dir` is set |
-| `wire-contract.gen.ts` | assertions pairing the emitted Zod against those types                                                    | that and `contracts-package`  |
+| file                   | contents                                                                                                                                                          | emitted when                  |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `schemas.gen.ts`       | component schemas, per-operation path, query, header, body and response validators, and the response arms                                                         | always                        |
+| `requests.gen.ts`      | framework-free TypeScript types, with no imports: the models, and every operation's input, success bodies and result (`WireInputs`, `WireOutputs`, `WireResults`) | `contracts-output-dir` is set |
+| `vocabularies.gen.ts`  | each enum's members as a runtime tuple                                                                                                                            | `contracts-output-dir` is set |
+| `wire-contract.gen.ts` | assertions pairing the emitted Zod against those types                                                                                                            | that and `contracts-package`  |
 
 `wire-contract.gen.ts` is not imported by any other file. The file contains type-level assertions
 pairing each generated validator with its contract type, so a mismatch between the two is a compile

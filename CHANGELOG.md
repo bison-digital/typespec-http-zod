@@ -10,6 +10,8 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ## [Unreleased]
 
+Upgrading: [what to check before you take this](docs/guides.md#to-0280).
+
 ### Changed, breaking
 
 - **An optional property is `?: T` in `requests.gen.ts`, and `?: T | undefined` only where it has a

@@ -108,6 +108,114 @@ optional. `@typespec/versioning` is an optional peer dependency, resolved behind
 
 ## Upgrading
 
+### To `0.28.0`
+
+**Every change here is to `requests.gen.ts`, the framework-free contract types**, except the file body
+and the TypeSpec range. A project that emits no contracts (`contracts-output-dir` unset) has nothing to
+change beyond the file body.
+
+#### An optional property is `?: T`
+
+The contract types now state the validator's input exactly. A plain optional property is `?: T`, and
+only a property with a default keeps `?: T | undefined`, because `.default(v)` accepts an explicit
+`undefined` and fills `v`:
+
+```ts
+// before
+interface Thing {
+	id: string;
+	note?: string | undefined;
+	count?: number | undefined;
+}
+// now (note is plain, count has a default)
+interface Thing {
+	id: string;
+	note?: string;
+	count?: number | undefined;
+}
+```
+
+Under `exactOptionalPropertyTypes`, code that assigns `{ note: maybe }` where `maybe` may be
+`undefined` now fails to compile. It was a value the validator refused: a handler returning it answered
+`500`. Write the conditional spread, which assigns to the exact type:
+
+```ts
+const thing: Thing = { id, ...(maybe === undefined ? {} : { note: maybe }) };
+```
+
+A helper that widened one side to compare the two surfaces, such as a `Loosen<T>`, can be deleted.
+
+#### `WireInputs["op"]` is the handler's input
+
+A body the merge cannot express is named, exactly as a server emitter names it. That is a union,
+array, indexed model, scalar, enum, optional or optional multipart body:
+
+```ts
+// op createCharge(@path id: string, @body body: Charge): Thing;
+// before
+type CreateChargeInput = Charge & { id: string };
+// now
+WireInputs["createCharge"]; // { id: string; body: Charge }
+```
+
+A model body is still merged. **Delete any code that flattened a handler's input to reach a backend
+typed by the old contract**: the two now agree, and the flattening is the bug.
+
+Every operation is keyed, so `keyof WireInputs` is every operation the service declares. One that takes
+no input is `Record<string, never>`. A hand-kept list of the operations it used to leave out can be
+deleted.
+
+A binary `bytes` body is a `ByteStream`, the stream the server hands over unread. It was an
+`ArrayBuffer`. A platform `ReadableStream<Uint8Array>` is assignable to it, so a handler's input can be
+forwarded to a backend as it is.
+
+**The per-operation aliases are gone.** `CreateChargeInput` and its kind collided with the request
+models specs give the same names. Use `WireInputs["createCharge"]`.
+
+#### `WireOutputs` and `WireResults`
+
+`WireOutputs["op"]` is every success body the operation declares: a union where it has several,
+`undefined` for one with no body, and `never` where nothing succeeds. It was the lowest status's body
+alone.
+
+`WireResults["op"]` is new: the operation's result, one member per declared response, each a
+`{ status, body, headers }` pairing a status with its own body. A backend typed by it can say whether
+it answered `200` or `201`, and a handler can return what it returns:
+
+```ts
+interface Backend {
+	scheduleDeletion(input: WireInputs["scheduleDeletion"]): Promise<WireResults["scheduleDeletion"]>;
+}
+```
+
+A hand-written result type such as `{ status: number; body: T }` can be deleted.
+
+A binary response body is `Uint8Array<ArrayBuffer>` among its alternatives, which needs TypeScript 5.7
+or later.
+
+#### A model named after an emitted helper gets a trailing `_`
+
+`ByteStream`, `Produced`, `ResponseArm`, `Simplify`, `WireInputs`, `WireOutputs` and `WireResults` are
+declared by the emitted files themselves. A model with one of those names is now declared with a
+trailing `_`, as a reserved word already was. Before, it failed to compile, or for the lookups merged
+silently into them.
+
+#### An `Http.File` body reaches the handler
+
+A file upload is a raw body under its parameter's name, with the media type it was sent as under
+`"Content-Type"`, and a download is a binary arm. Both were dropped: the handler was handed `{}`, and a
+download was served empty.
+
+#### A spec with more than one `@service` gets contracts per service
+
+A shared `contracts-output-dir` is split into `<dir>/<ServiceName>`, as `output-dir` already is. Point
+each service's imports at its own directory. A package specifier given as `contracts-package` has to
+be set per service, under `services`.
+
+#### TypeSpec 1.17
+
+The optional `@typespec/streams` and `@typespec/versioning` peers admit `^0.87.0`.
+
 ### To `0.27.0`
 
 **Nothing here reaches you until you ask for it.** A `^0.x` range pins the minor, so `^0.26.0` never
