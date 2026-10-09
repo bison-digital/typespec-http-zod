@@ -63,6 +63,14 @@ change a consumer feels, and is treated as such here rather than as an implement
   and one named `WireInputs` or `WireOutputs` silently MERGED into the lookup of that name. The guard
   reads the names off emitted output rather than off the list it grades.
 
+- **`WireOutputs[op]` is every success body the operation declares, for every operation.** It was
+  the lowest success status's body alone: `200 Thing | 201 Other` published `Thing`,
+  `200 Thing | 204` published `Thing`, and an operation answering only `204` was absent, while the
+  runtime beside it carried every arm. It is now the union of each `2xx`/`3xx` response's body,
+  `undefined` for one with no body, and `never` for an operation that declares no success. A binary
+  body is `ByteStream | Uint8Array<ArrayBuffer> | ArrayBuffer`, and a stream is `ByteStream`, as the
+  server emitters accept them.
+
 ### Changed
 
 - **Built and graded against TypeSpec 1.17.** The optional `@typespec/streams` and
@@ -79,6 +87,14 @@ change a consumer feels, and is treated as such here rather than as an implement
   from `propertyTypeToTs`, which request parameters already used.
 
 ### Added
+
+- **`WireResults[op]`: every operation's result, framework-free.** One member per declared
+  response and media type, each pairing a status with its own body and headers - the union
+  `typespec-hono`'s handlers return, stated with nothing to import. A `4XX` or `default` response is
+  the codes it stands for, written out, so a client can narrow on the status. A backend reached over
+  a service binding typed `(input: WireInputs[K]) => Promise<WireResults[K]>` can say whether it
+  answered `200` or `201` with the same model, which a body type cannot; one consumer typed its
+  backends' results `{ status: number }` for want of it.
 
 - **`resultMembersOf`, `statusCodesOf`, `mediaTypeTypeOf`, `isJsonMediaType`, `isMediaRange` and
   `STATUS_CODES`**: what a result is made of (one member per declared response and media type, its

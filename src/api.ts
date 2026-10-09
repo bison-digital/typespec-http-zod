@@ -32,7 +32,14 @@ import {
 import { getOperationId, resolveOperationId } from "@typespec/openapi";
 import { type EmitterOptions, reportDiagnostic } from "./lib.js";
 import { SchemaRegistry, TypeRegistry } from "./registry.js";
-import { isJsonMediaType, type StatusKey } from "./results.js";
+import {
+	isJsonMediaType,
+	mediaTypeTypeOf,
+	type ResultMember,
+	resultMembersOf,
+	type StatusKey,
+	statusCodesOf,
+} from "./results.js";
 import { propertyTypeToTs } from "./types.js";
 import { resolveStreamModule, streamedTypeOf, withStreamModule } from "./streams.js";
 import { resolveVersioningModule, serviceSnapshots } from "./versioning.js";
@@ -797,32 +804,6 @@ export function errorBodyOf(program: Program, service: HttpService): Type | unde
  */
 function bodyTypeOf(type: Type): Type | undefined {
 	return isVoidType(type) || isNeverType(type) ? undefined : type;
-}
-
-/**
- * The declared body type of the operation's success response, if it has one.
- *
- * **`void` and `never` ARE "no body", and reading them as types was a defect.** A response with
- * no content reaches this in two shapes: as no body at all, which `undefined` already covered, and
- * as a body whose type is `void` - which is what `tsp-openapi3` writes when it converts a `204`,
- * and what `op remove(): void` means. The second used to be returned as a type, walked, and refused
- * with `Cannot emit Zod for Intrinsic: 'void' has no runtime representation'`. That took out the
- * Swagger Petstore, the most widely implemented reference API there is, on the round-trip suite's
- * first run.
- *
- * One fact arriving by two roads. Answering it here rather than at each of the four call sites is
- * what keeps them from drifting - `collectRoutes`, the contract types, the dual-status
- * discriminator and the alternate-arm schema all want the same answer to the same question.
- */
-function successBodyOf(operation: HttpOperation, status: number): Type | undefined {
-	for (const response of operation.responses) {
-		if (response.statusCodes !== status) continue;
-		for (const content of response.responses) {
-			if (content.body?.bodyKind !== "single") continue;
-			return bodyTypeOf(content.body.type);
-		}
-	}
-	return undefined;
 }
 
 /**
@@ -2450,10 +2431,15 @@ function responseArmsOf(
 	return `[${rendered.join(", ")}]`;
 }
 
-/** One operation's success response - the shape a producer must contain, and may exceed. */
+/** One operation's responses, as the contract types state them. */
 interface ResponseTypeEntry {
 	readonly operationId: string;
-	readonly ref: string;
+	/** Every success body, as `WireOutputs` states it. */
+	readonly output: string;
+	/** Every member of the result, as `WireResults` states it. */
+	readonly result: readonly string[];
+	/** Whether either names `ByteStream`, so the file declares it. */
+	readonly streams: boolean;
 }
 
 /** One operation's input, as its handler receives it. */
@@ -2604,17 +2590,93 @@ function collectResponseTypes(
 	 */
 	withVisibility(program, Visibility.Read, () => {
 		for (const operation of service.operations) {
-			const status = successStatusOf(operation);
-			if (status === undefined) continue;
-			const body = successBodyOf(operation, status);
-			if (body === undefined) continue;
+			/**
+			 * **The same responses, and the same members, the server emitters render.** This walk used
+			 * to ask for the lowest success status and its body, so an operation answering `200 Thing`
+			 * or `201 Other` published `Thing`, one answering `200 Thing` or `204` published `Thing`,
+			 * and one answering only `204` was absent - while the runtime beside it carried every arm.
+			 */
+			const responses = inPrecedenceOrder(resolvedResponsesOf(program, operation));
+			const hasBody = (response: ResolvedResponse): boolean => response.body !== undefined;
+			let streams = false;
+			/**
+			 * **What a producer SUPPLIES for a body, which is what the server emitters accept for it.** A
+			 * stream or a raw binary body is handed over as bytes and never parsed, so it is spelled as
+			 * bytes - `ByteStream` rather than the platform stream, for the same reason as a request body.
+			 * A model under a media type that is not JSON is text the producer serialised. Everything else
+			 * is the producer's view of the contract type.
+			 */
+			const bodyOf = (member: ResultMember<ResolvedResponse>): string | undefined => {
+				switch (member.serving) {
+					case "none":
+						return undefined;
+					case "stream":
+						streams = true;
+						return "ByteStream";
+					case "binary":
+						streams = true;
+						return "ByteStream | Uint8Array<ArrayBuffer> | ArrayBuffer";
+					case "unvalidated":
+						return "string";
+					default:
+						return member.response.body === undefined
+							? undefined
+							: `Produced<${registry.expressionFor(member.response.body)}>`;
+				}
+			};
+			const members = resultMembersOf(responses, hasBody).map((member) => {
+				const body = bodyOf(member);
+				const codes = statusCodesOf(member.response, responses, hasBody);
+				const fields = [`readonly status: ${codes.length === 0 ? "never" : codes.join(" | ")}`];
+				if (member.choosesMediaType && member.mediaType !== undefined) {
+					fields.push(`readonly contentType: ${mediaTypeTypeOf(member.mediaType)}`);
+				}
+				fields.push(body === undefined ? "readonly body?: undefined" : `readonly body: ${body}`);
+				const headers = member.response.headers;
+				if (headers.length > 0) {
+					/**
+					 * Keyed by the WIRE name, as the document publishes it. `headers` is optional only when
+					 * every header in it is, and an optional header admits an explicit `undefined`, because
+					 * a server drops one before it checks and sends the rest.
+					 */
+					const every = headers.every(({ property }) => property.optional);
+					const rendered = headers
+						.map(({ name, property }) =>
+							property.optional
+								? `readonly ${objectKey(name)}?: ${propertyTypeToTs(program, property)} | undefined`
+								: `readonly ${objectKey(name)}: ${propertyTypeToTs(program, property)}`,
+						)
+						.join("; ");
+					fields.push(`readonly headers${every ? "?" : ""}: { ${rendered} }`);
+				}
+				return { member, body, text: `{ ${fields.join("; ")} }` };
+			});
+			/**
+			 * A success is a `2xx` or `3xx` outcome, exact or ranged, as {@link successStatusesOf} holds.
+			 * `default` is not one: it is every status nothing else declares, which is mostly failures.
+			 */
+			const outputs = [
+				...new Set(
+					members
+						.filter(({ member }) => isSuccessStatus(member.response.status))
+						.map(({ body }) => body ?? "undefined"),
+				),
+			];
 			entries.push({
 				operationId: operationIdOf(program, operation.operation),
-				ref: registry.expressionFor(body),
+				output: outputs.length === 0 ? "never" : outputs.join(" | "),
+				result: members.map(({ text }) => text),
+				streams,
 			});
 		}
 	});
 	return entries;
+}
+
+/** A `2xx` or `3xx` status, exact or as a range: an outcome a handler returns rather than a failure. */
+function isSuccessStatus(status: StatusKey): boolean {
+	if (typeof status === "number") return status >= 200 && status < 400;
+	return status === "2XX" || status === "3XX";
 }
 
 /**
@@ -2687,7 +2749,22 @@ function renderRequestTypes(
 	});
 
 	const responseLookup = responses
-		.map((entry) => `\t${entry.operationId}: Produced<${entry.ref}>;`)
+		.map(
+			(entry) =>
+				`\t/** Every success body \`${entry.operationId}\` declares. */\n\t${entry.operationId}: ${entry.output};`,
+		)
+		.join("\n");
+
+	/**
+	 * **One member per declared response and media type, each pairing a status with its own body.**
+	 * The union a server emitter's handlers return, stated with nothing to import: a backend reached
+	 * over a service binding returns `WireResults[op]`, and a handler can hand it straight on.
+	 */
+	const resultLookup = responses
+		.map(
+			(entry) =>
+				`\t/** Every response \`${entry.operationId}\` declares. */\n\t${entry.operationId}:${entry.result.length === 0 ? " never" : entry.result.map((member) => `\n\t\t| ${member}`).join("")};`,
+		)
 		.join("\n");
 
 	/**
@@ -2756,7 +2833,7 @@ export type Produced<T> = T extends readonly (infer Element)[]
 	: T extends object
 		? { readonly [K in keyof T]: Produced<T[K]> }
 		: T;
-${entries.some((entry) => entry.streamsBody) ? BYTE_STREAM : ""}${declarations.join("")}
+${entries.some((entry) => entry.streamsBody) || responses.some((entry) => entry.streams) ? BYTE_STREAM : ""}${declarations.join("")}
 /**
  * Every operation's input, keyed by operation id: what its handler receives, and what a caller of a
  * backend typed by it hands over. An operation that takes nothing is \`Record<string, never>\`.
@@ -2766,7 +2843,9 @@ ${lookup}
 }
 
 /**
- * Every operation's success response, keyed by operation id.
+ * Every operation's success bodies, keyed by operation id: the body of each \`2xx\` and \`3xx\` response it
+ * declares, \`undefined\` for one with no body, and \`never\` where it declares no success at all. Which
+ * status goes with which body is \`WireResults\`.
  *
  * **A floor, not an equality.** These shapes are permissive: a caller pins the fields it depends
  * on and lets a richer view through, so a producer's result must CONTAIN what the document promises
@@ -2775,6 +2854,15 @@ ${lookup}
  */
 export interface WireOutputs {
 ${responseLookup}
+}
+
+/**
+ * Every operation's result, keyed by operation id: one member per response it declares, each pairing
+ * a status with that status's body and headers. A status no response declares does not compile, and
+ * a \`4XX\` or \`default\` response is the codes it stands for, written out.
+ */
+export interface WireResults {
+${resultLookup}
 }
 `;
 }
@@ -3250,8 +3338,15 @@ export async function emitHttpZod(context: EmitContext): Promise<readonly Emitte
 
 		if (resolved.contractsOutputDir !== undefined) {
 			const types = new TypeRegistry(context.program);
-			const entries = collectRequestTypes(context.program, types, service);
-			const responses = collectResponseTypes(context.program, types, service);
+			/**
+			 * **Inside the same stream scope as the route walk**, because both read the same response
+			 * records: outside it `streamedTypeOf` cannot see `@typespec/streams`, so an SSE body was
+			 * stated as the string the document describes rather than the stream a server sends.
+			 */
+			const { entries, responses } = withStreamModule(streamModule, () => ({
+				entries: collectRequestTypes(context.program, types, service),
+				responses: collectResponseTypes(context.program, types, service),
+			}));
 			await emitFile(context.program, {
 				path: resolvePath(resolved.contractsOutputDir, "requests.gen.ts"),
 				content: renderRequestTypes(entries, responses, types),

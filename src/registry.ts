@@ -215,7 +215,7 @@ const RESERVED_DECLARATION_NAMES = new Set([
 /**
  * **The names the emitted files declare for THEMSELVES, beside the spec's own declarations.**
  *
- * `requests.gen.ts` declares `Produced`, `Simplify`, `ByteStream` and its lookups; `schemas.gen.ts`
+ * `requests.gen.ts` declares `Produced`, `Simplify`, `ByteStream` and its three lookups; `schemas.gen.ts`
  * declares `ResponseArm`. A model named after one of them was declared twice: `TS2300` for a type
  * alias, and for `WireInputs` or `WireOutputs` something worse, because two interfaces of one name
  * MERGE - the model's properties silently became members of the lookup. So a spec's model of that
@@ -231,6 +231,7 @@ const EMITTED_HELPER_NAMES = new Set([
 	"Simplify",
 	"WireInputs",
 	"WireOutputs",
+	"WireResults",
 ]);
 
 /**

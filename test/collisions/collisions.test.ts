@@ -77,7 +77,7 @@ describe("a model may be named after anything the emitter declares", () => {
 		expect(named.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
 		// The helper interfaces are untouched by the models: a merge would add their `value` field.
 		const requests = readFileSync(join(named.outDir, "requests.gen.ts"), "utf8");
-		for (const lookup of ["WireInputs", "WireOutputs"]) {
+		for (const lookup of ["WireInputs", "WireOutputs", "WireResults"]) {
 			const body = new RegExp(`export interface ${lookup} \\{([\\s\\S]*?)\\n\\}`).exec(
 				requests,
 			)?.[1];
