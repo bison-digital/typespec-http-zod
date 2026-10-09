@@ -60,10 +60,23 @@ describe("a request body that is not a model", () => {
 	it.each([
 		["a scalar", "s"],
 		["an enum", "e"],
-		["a union", "u"],
 		["a scalar a caller sends as JSON", "j"],
 	])("names %s body rather than spreading it", (_what, operationId) => {
 		expect(routeFor(operationId)?.bodyProperty).toBe("body");
+	});
+
+	/**
+	 * **A union of a string and a number, as `text/plain` - its default - is the text that arrived.**
+	 * No reader parses a non-string type from `text/plain`, so the body used to be named and then
+	 * never read: the handler was called without it. Any text satisfies the `string` branch, so
+	 * handing over the text unvalidated checks nothing less than the schema would.
+	 */
+	it("names a union body too, as the text that arrived when nothing can parse it", () => {
+		const u = routeFor("u");
+		expect(u?.requestContentTypes).toEqual(["text/plain"]);
+		expect(u?.rawBodyProperty).toBe("body");
+		expect(u?.rawBodyBinary).toBe(false);
+		expect(u?.bodyProperty).toBeUndefined();
 	});
 
 	it("leaves a bytes body to rawBodyProperty, so one value is not named twice", () => {

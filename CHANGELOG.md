@@ -81,6 +81,14 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
 
 ### Fixed
 
+- **A body declared only under media types nothing can parse into it is handed over as text.** A
+  model under `application/xml`, or a `string | int32` under its default `text/plain`, has no reader
+  this emitter can derive. The server checked the request's headers and called the handler with the
+  body never read, while `typespec-hono`'s `unvalidatable-media-type` warning said such requests
+  were refused. It is now a raw body, `rawBodyProperty` with `rawBodyBinary: false`, and
+  `WireInputs` states it as `{ body: string }`. That is what the response side already asks of a
+  handler serving a model as XML. A string body is unchanged: it is text, and its schema still
+  checks it.
 - **Each `@service` gets its own contract types.** `contracts-output-dir` was shared by every service
   in a spec, so the second service's `requests.gen.ts` replaced the first's, and a whole surface lost
   its contracts with no diagnostic. It is split per service now (`<dir>/<ServiceName>`), as

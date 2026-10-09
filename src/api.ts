@@ -1077,6 +1077,19 @@ export function isRawBinaryMediaType(contentTypes: readonly string[]): boolean {
 	return contentTypes.every((type) => !isJsonMediaType(type));
 }
 
+/**
+ * A media type a server can parse a request body from into a value its schema can check: JSON and
+ * the `+json` suffix RFC 6839 defines, a URL-encoded form, and multipart. Anything else - XML, a
+ * vendor type - has no reading this emitter can derive from the document.
+ */
+function isParseableMediaType(type: string): boolean {
+	return (
+		isJsonMediaType(type) ||
+		type === "application/x-www-form-urlencoded" ||
+		type.startsWith("multipart/")
+	);
+}
+
 /** The declared request body type, if the operation takes one. */
 function requestBodyOf(operation: HttpOperation): Type | undefined {
 	const body = operation.parameters.body;
@@ -1776,9 +1789,25 @@ function requestBodyPlacementOf(operation: HttpOperation): {
 	 * reached no placement at all: the handler was passed `{}` and the upload was dropped, from a
 	 * compile that reported success, on all four uploads in `type/file`.
 	 */
+	const contentTypes = [...(bodyParameter?.contentTypes ?? [])];
+	/**
+	 * **A body declared only under media types nothing can parse into it is the text that arrived.**
+	 * A model as `application/xml` has no serialisation this emitter can derive, and the server has
+	 * no reader for it; it used to get a header check and then call the handler with the body never
+	 * read, while the warning beside it said such requests were refused. Handed over as text, the
+	 * handler parses it - exactly what the response side already asks of a handler serving a model as
+	 * XML. A string body is not this: it IS text, and its schema still checks it (`requestTextual`).
+	 */
+	const bytes = requestType?.kind === "Scalar" && requestType.name === "bytes";
+	const unparseable =
+		bodyParameter?.bodyKind === "single" &&
+		requestType !== undefined &&
+		!bytes &&
+		!isStringType(requestType) &&
+		contentTypes.length > 0 &&
+		contentTypes.every((type) => !isParseableMediaType(type));
 	const rawBodyProperty =
-		(requestType?.kind === "Scalar" && requestType.name === "bytes") ||
-		bodyParameter?.bodyKind === "file"
+		bytes || bodyParameter?.bodyKind === "file" || unparseable
 			? (bodyParameter?.property?.name ?? "body")
 			: undefined;
 	/**
@@ -1848,8 +1877,8 @@ function requestBodyPlacementOf(operation: HttpOperation): {
 	 */
 	const rawBodyBinary =
 		rawBodyProperty !== undefined &&
-		(bodyParameter?.bodyKind === "file" ||
-			isRawBinaryMediaType([...(bodyParameter?.contentTypes ?? [])]));
+		!unparseable &&
+		(bodyParameter?.bodyKind === "file" || isRawBinaryMediaType(contentTypes));
 	return { rawBodyProperty, rawBodyBinary, bodyProperty, optionalBody };
 }
 

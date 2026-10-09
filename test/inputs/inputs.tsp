@@ -101,3 +101,10 @@ enum Colour {
 
 /** An `Http.File` body: handed over unread, with the media type it was sent as. */
 @route("/file") @post op uploadFile(@bodyRoot file: Http.File<"image/png" | "image/jpeg">): void;
+
+/**
+ * A model under a media type no server can parse it from: handed over as the text that arrived.
+ * Nothing derives an XML serialisation from the document, so the handler parses it - the response
+ * side already asks a handler for the text of a model served as XML.
+ */
+@route("/xml") @put op putXml(@header contentType: "application/xml", @body body: Thing): void;
