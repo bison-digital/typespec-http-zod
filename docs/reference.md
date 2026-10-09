@@ -150,6 +150,20 @@ a quantifier nested over an overlapping class, and nothing dangerous missed. The
 exponential in the bad case, so it is capped at 500 ms per distinct pattern and cached, `^(a|a)+$`
 alone takes 1.6 seconds to decide.
 
+## Declared names
+
+A model, enum or named union is declared under the name the spec gives it, in every emitted file
+alike. Two kinds of name are renamed with a trailing `_`, because the file could not declare them
+otherwise:
+
+- a TypeScript reserved word, such as `as` or `yield`;
+- a name an emitted file declares for itself: `ByteStream`, `Produced`, `ResponseArm`, `Simplify`,
+  `WireInputs` and `WireOutputs`. A model named `WireInputs` would otherwise have merged into the
+  lookup of that name rather than failed.
+
+No declared name is derived from an operation id. An operation's input is `WireInputs["createUser"]`,
+which nothing a spec declares can collide with.
+
 ## Known limits
 
 - **`format` is not enforced.** Under JSON Schema 2020-12 `format` is an annotation rather than a

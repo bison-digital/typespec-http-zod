@@ -57,6 +57,12 @@ change a consumer feels, and is treated as such here rather than as an implement
     is the name half the specs in existence give their own body model, so the two collided (`TS2300`)
     and the contracts did not compile. Use `WireInputs["createUser"]`.
 
+- **A model named after a helper the emitted files declare is renamed with a trailing `_`**, as a
+  reserved word already is: `ByteStream`, `Produced`, `ResponseArm`, `Simplify`, `WireInputs` and
+  `WireOutputs`. A model named `Produced`, `Simplify` or `ResponseArm` was declared twice (`TS2300`),
+  and one named `WireInputs` or `WireOutputs` silently MERGED into the lookup of that name. The guard
+  reads the names off emitted output rather than off the list it grades.
+
 ### Changed
 
 - **Built and graded against TypeSpec 1.17.** The optional `@typespec/streams` and

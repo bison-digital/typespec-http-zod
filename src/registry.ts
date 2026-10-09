@@ -213,15 +213,36 @@ const RESERVED_DECLARATION_NAMES = new Set([
 ]);
 
 /**
+ * **The names the emitted files declare for THEMSELVES, beside the spec's own declarations.**
+ *
+ * `requests.gen.ts` declares `Produced`, `Simplify`, `ByteStream` and its lookups; `schemas.gen.ts`
+ * declares `ResponseArm`. A model named after one of them was declared twice: `TS2300` for a type
+ * alias, and for `WireInputs` or `WireOutputs` something worse, because two interfaces of one name
+ * MERGE - the model's properties silently became members of the lookup. So a spec's model of that
+ * name is renamed exactly as a reserved word is.
+ *
+ * Graded by `test/collisions/`, which reads the names an emitted file declares off the OUTPUT rather
+ * than off this set, so a helper added later without a line here fails a test.
+ */
+const EMITTED_HELPER_NAMES = new Set([
+	"ByteStream",
+	"Produced",
+	"ResponseArm",
+	"Simplify",
+	"WireInputs",
+	"WireOutputs",
+]);
+
+/**
  * The name a declaration is emitted under.
  *
- * A trailing `_` is appended where the spec's own name cannot be a TypeScript declaration. It is
- * applied in ONE place so both walks agree: `wire-contract.gen.ts` pairs a validator against a
- * contract type by name, and a mangling applied to one side only would break that assertion rather
- * than the file.
+ * A trailing `_` is appended where the spec's own name cannot be a TypeScript declaration, or is one
+ * the emitted file already declares for itself. It is applied in ONE place so both walks agree:
+ * `wire-contract.gen.ts` pairs a validator against a contract type by name, and a mangling applied to
+ * one side only would break that assertion rather than the file.
  */
 function safeDeclarationName(name: string): string {
-	return RESERVED_DECLARATION_NAMES.has(name) ? `${name}_` : name;
+	return RESERVED_DECLARATION_NAMES.has(name) || EMITTED_HELPER_NAMES.has(name) ? `${name}_` : name;
 }
 
 /** A type earns a name when the spec gave it one - anonymous shapes stay inline where they are used. */
