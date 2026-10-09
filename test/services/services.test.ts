@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 import { compileFixture, type CompiledFixture } from "../support/compile-fixture.js";
+import { writeContractsBarrel } from "../support/contracts-barrel.js";
+import { typecheckEmitted } from "../support/typecheck-emitted.js";
 
 /**
  * **A spec may publish more than one `@service`, and every one of them has to survive.**
@@ -51,6 +53,37 @@ describe("every service in a spec gets its own artefacts", () => {
 		expect(internalSource).not.toContain("articleSchema");
 		expect(surfaceSource).toContain("articleSchema");
 		expect(surfaceSource).not.toContain("widgetSchema");
+	});
+
+	/**
+	 * **The contract types too, which a shared `contracts-output-dir` wrote once per service to the
+	 * same path**, so the second service's `requests.gen.ts` replaced the first's and one whole surface
+	 * lost its contracts with no diagnostic - the exact defect this suite was written for, one
+	 * artefact over. Split the same way as the validators, so each service's `wire-contract.gen.ts`
+	 * pairs with its own.
+	 */
+	it("writes a contracts file per service, each holding its own service", () => {
+		const internal = join(compiled.outDir, "InternalApi", "requests.gen.ts");
+		const surface = join(compiled.outDir, "PublicApi", "requests.gen.ts");
+		expect(existsSync(internal), internal).toBe(true);
+		expect(existsSync(surface), surface).toBe(true);
+		const internalSource = readFileSync(internal, "utf8");
+		const surfaceSource = readFileSync(surface, "utf8");
+		expect(internalSource).toContain("interface Widget");
+		expect(internalSource).not.toContain("interface Article");
+		expect(surfaceSource).toContain("interface Article");
+		expect(surfaceSource).not.toContain("interface Widget");
+	});
+
+	it("compiles each service's output beside its own contracts", () => {
+		for (const service of ["InternalApi", "PublicApi"]) {
+			const dir = join(compiled.outDir, service);
+			// A relative `contracts-package` is resolved from each service's own directory.
+			writeContractsBarrel(dir);
+			const { output, failed } = typecheckEmitted(dir);
+			expect(output, service).toBe("");
+			expect(failed, service).toBe(false);
+		}
 	});
 
 	it("names one service per emitted service record, with distinct output directories", () => {

@@ -3325,8 +3325,21 @@ export async function emitHttpZod(context: EmitContext): Promise<readonly Emitte
 			(distinctServices.size > 1
 				? resolvePath(context.emitterOutputDir, serviceName)
 				: context.emitterOutputDir);
+		/**
+		 * **Split the same way as `output-dir`, and for the same reason.** A shared contracts directory
+		 * was written once per service to one path, so the second service's `requests.gen.ts` replaced
+		 * the first's and a whole surface lost its contracts with no diagnostic - the defect the
+		 * per-service validators were split to fix, one artefact over. A relative `contracts-package`
+		 * is resolved from each service's own `wire-contract.gen.ts`, so it names that service's
+		 * contracts; a package specifier has to be set per service.
+		 */
+		const sharedContractsDir = options["contracts-output-dir"];
 		const resolved: ResolvedServiceOptions = {
-			contractsOutputDir: perService?.["contracts-output-dir"] ?? options["contracts-output-dir"],
+			contractsOutputDir:
+				perService?.["contracts-output-dir"] ??
+				(sharedContractsDir !== undefined && distinctServices.size > 1
+					? resolvePath(sharedContractsDir, serviceName)
+					: sharedContractsDir),
 			contractsPackage: perService?.["contracts-package"] ?? options["contracts-package"],
 			sealObjectSchemas:
 				perService?.["seal-object-schemas"] ?? options["seal-object-schemas"] ?? false,

@@ -79,6 +79,12 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ### Fixed
 
+- **Each `@service` gets its own contract types.** `contracts-output-dir` was shared by every service
+  in a spec, so the second service's `requests.gen.ts` replaced the first's, and a whole surface lost
+  its contracts with no diagnostic. It is split per service now (`<dir>/<ServiceName>`), as
+  `output-dir` already was for the validators, and each service's `wire-contract.gen.ts` compiles
+  beside its own.
+
 - **An `Http.File` body reaches the route, as an upload and as a download.** `requestBodyOf` and
   the response walk read only `bodyKind === "single"`, so a file body was dropped silently: every
   upload in the corpus's `type/file` handed its handler `{}`, and every download was served with no
