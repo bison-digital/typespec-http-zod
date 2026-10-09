@@ -29,8 +29,12 @@ options:
 ```
 
 `requests.gen.ts` holds plain TypeScript with no imports, so the types can cross layers that must not
-see a validation library. `wire-contract.gen.ts` asserts the emitted Zod infers exactly those types,
-and needs `contracts-package` as well, naming the specifier the types are imported from.
+see a validation library. `WireInputs["op"]` is each operation's input exactly as its handler receives
+it: a model body merged with the parameters, any other body under its parameter's name, a binary
+`bytes` body as a `ByteStream`, and `Record<string, never>` for an operation that takes nothing.
+`keyof WireInputs` is every operation the service declares. `wire-contract.gen.ts` asserts the emitted
+Zod accepts exactly those types, and needs `contracts-package` as well, naming the specifier the types
+are imported from.
 
 ## Validating a request
 

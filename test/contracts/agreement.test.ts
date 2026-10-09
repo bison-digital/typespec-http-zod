@@ -1,8 +1,9 @@
-import { readFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
 import { compileFixture, type CompiledFixture } from "../support/compile-fixture.js";
+import { typecheckEmitted } from "../support/typecheck-emitted.js";
 
 /**
  * **The two artefacts describing one operation's input have to name its parameters identically.**
@@ -31,77 +32,82 @@ import { compileFixture, type CompiledFixture } from "../support/compile-fixture
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 
-/** The keys of an emitted `z.object({ ... })` const, which is how a validator names a parameter. */
-function validatorKeys(source: string, identifier: string): string[] {
-	const declaration = new RegExp(
-		`export const ${identifier} = z\\.object\\(\\{([\\s\\S]*?)\\n\\}\\)`,
-		"m",
-	).exec(source);
-	if (declaration === null) return [];
-	return [...(declaration[1] ?? "").matchAll(/^\t(?:"([^"]+)"|([A-Za-z_$][\w$]*)):/gm)].map(
-		(match) => match[1] ?? match[2] ?? "",
-	);
-}
-
-/** The keys of an emitted `export type XInput = Simplify<...>`, which is how the contract names one. */
-function inputKeys(source: string, operationId: string): string[] {
-	const name = `${operationId.charAt(0).toUpperCase()}${operationId.slice(1)}Input`;
-	const declaration = new RegExp(`export type ${name} = Simplify<([\\s\\S]*?)>;`, "m").exec(source);
-	if (declaration === null) return [];
-	return [...(declaration[1] ?? "").matchAll(/^\t(?:"([^"]+)"|([A-Za-z_$][\w$]*))\??:/gm)].map(
-		(match) => match[1] ?? match[2] ?? "",
-	);
-}
+const PARAMETER_SUFFIXES = ["Path", "Query", "Header", "Cookie"] as const;
 
 describe("the validators and the contract types name one operation's input the same way", () => {
 	let compiled: CompiledFixture;
-	let schemas = "";
-	let requests = "";
+	let parameterValidators: string[] = [];
 
 	beforeAll(async () => {
 		compiled = await compileFixture(here, "agreement");
-		schemas = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
-		requests = readFileSync(join(compiled.outDir, "requests.gen.ts"), "utf8");
+		/**
+		 * **The validators an operation's parameters go through, read off the module itself.** The
+		 * names are the module's exports, which is the interface a server imports, rather than a
+		 * pattern matched against its text: the regexes this replaced keyed on a per-operation alias
+		 * that no longer exists, and a pattern that stops matching reports agreement about nothing.
+		 */
+		const module = (await import(join(compiled.outDir, "schemas.gen.ts"))) as Record<
+			string,
+			unknown
+		>;
+		parameterValidators = Object.keys(module).filter((name) =>
+			PARAMETER_SUFFIXES.some((suffix) => name.endsWith(suffix)),
+		);
 	}, 120_000);
+
+	function compiles(source: string): { output: string; failed: boolean } {
+		const file = join(compiled.outDir, "agreement.consumer.ts");
+		writeFileSync(file, source);
+		try {
+			return typecheckEmitted(compiled.outDir);
+		} finally {
+			rmSync(file, { force: true });
+		}
+	}
 
 	it("emits both artefacts, without which the arms below compare nothing", () => {
 		expect(compiled.diagnostics).toEqual([]);
-		// Non-vacuity: an unset `contracts-output-dir` is exactly how this gap survived.
-		expect(requests).toContain("Input = Simplify<");
-		expect(schemas).toContain("z.object({");
+		// Non-vacuity: an unset `contracts-output-dir` is exactly how this gap survived, and three
+		// validators is what the fixture's renamed path, header and query parameters produce.
+		expect(parameterValidators.length).toBeGreaterThanOrEqual(3);
 	});
 
 	it("names every parameter the same way in both", () => {
-		const operations = [...requests.matchAll(/export type (\w+)Input = Simplify</g)].map(
-			(match) => `${(match[1] ?? "").charAt(0).toLowerCase()}${(match[1] ?? "").slice(1)}`,
-		);
-		// Non-vacuity: a regex that stops matching reports perfect agreement about nothing.
-		expect(operations.length).toBeGreaterThanOrEqual(3);
+		const assertions = parameterValidators.map((name) => {
+			const suffix = PARAMETER_SUFFIXES.find((candidate) => name.endsWith(candidate)) ?? "";
+			const operationId = name.slice(0, name.length - suffix.length);
+			return `export type ${name}Agrees = MustHold<Covers<z.input<typeof ${name}>, WireInputs["${operationId}"]>>;`;
+		});
+		const { output, failed } = compiles(`import type { z } from "zod";
+import type { WireInputs } from "./requests.gen.js";
+import type { ${parameterValidators.join(", ")} } from "./schemas.gen.js";
 
-		const disagreements: string[] = [];
-		for (const operationId of operations) {
-			const declared = new Set(inputKeys(requests, operationId));
-			for (const suffix of ["Path", "Query", "Header"]) {
-				for (const key of validatorKeys(schemas, `${operationId}${suffix}`)) {
-					if (!declared.has(key)) {
-						disagreements.push(`${operationId}.${suffix}: validator has "${key}", type does not`);
-					}
-				}
-			}
-		}
-		expect(disagreements.toSorted()).toEqual([]);
+/** Every key the validator declares is a key of the contract input, by the same wire name. */
+type Covers<V, I> = [Exclude<keyof V, keyof I>] extends [never] ? true : ["missing from the type", Exclude<keyof V, keyof I>];
+type MustHold<T extends true> = T;
+
+${assertions.join("\n")}
+`);
+		expect(output).toBe("");
+		expect(failed).toBe(false);
 	});
 
-	it("types a raw binary body as bytes, not as text", () => {
+	it("types a raw binary body as a stream, not as text", () => {
 		/**
 		 * The document publishes `application/octet-stream` with `format: binary` for a `bytes` body,
-		 * and the server hands the handler the bytes. Typing them `string` is the request half of the
-		 * corruption already fixed on the reader: decoding raw bytes as text replaces every byte
-		 * outside ASCII.
+		 * and the server hands the handler the unread stream. Typing it `string` is the request half of
+		 * the corruption already fixed on the reader - decoding raw bytes as text replaces every byte
+		 * outside ASCII - and typing it `ArrayBuffer` made a gateway read the whole body to satisfy it.
 		 */
-		const raw = /export type RawBytesInput = Simplify<([\s\S]*?)>;/m.exec(requests)?.[1] ?? "";
-		expect(raw).not.toBe("");
-		expect(raw).toContain("ArrayBuffer");
-		expect(raw).not.toMatch(/body\??: string/);
+		const { output, failed } =
+			compiles(`import type { ByteStream, WireInputs } from "./requests.gen.js";
+
+type Identical<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+type MustHold<T extends true> = T;
+
+export type RawIsAStream = MustHold<Identical<WireInputs["rawBytes"]["body"], ByteStream | null>>;
+`);
+		expect(output).toBe("");
+		expect(failed).toBe(false);
 	});
 });

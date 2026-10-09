@@ -38,16 +38,24 @@ function withConsumer(source: string): { output: string; failed: boolean } {
 
 describe("the request type and its validator describe one shape", () => {
 	it("emits the request types this suite reads", () => {
-		for (const name of ["UploadInput", "OpenRequest", "ClosedRequest", "OpenParent", "OpenChild"]) {
+		for (const name of ["WireInputs", "OpenRequest", "ClosedRequest", "OpenParent", "OpenChild"]) {
 			expect(requests, `${name} is missing`).toContain(name);
 		}
 	});
 
 	it("carries a multipart body's PARTS, not just its headers", () => {
-		const input = /export type UploadInput = Simplify<([\s\S]*?)>;/.exec(requests)?.[1] ?? "";
-		expect(input, "no UploadInput found").not.toBe("");
-		expect(input).toContain("file:");
-		expect(input).toContain("alt?:");
+		const { output, failed } = withConsumer(`
+import type { WireInputs } from "./requests.gen.js";
+
+type Upload = WireInputs["upload"];
+type MustHold<T extends true> = T;
+// The parts, required and optional, beside the content-type header the operation also declares.
+export type Parts = MustHold<[Exclude<"file" | "alt" | "Content-Type", keyof Upload>] extends [never] ? true : false>;
+export type AltIsOptional = MustHold<{} extends Pick<Upload, "alt"> ? true : false>;
+export type FileIsRequired = MustHold<{} extends Pick<Upload, "file"> ? false : true>;
+`);
+		expect(output.trim(), output).toBe("");
+		expect(failed).toBe(false);
 	});
 
 	it("unwraps HttpPart, matching what the validator walks", () => {

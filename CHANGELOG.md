@@ -32,6 +32,31 @@ change a consumer feels, and is treated as such here rather than as an implement
   `Supplied<>` is gone from `wire-contract.gen.ts`: the two walks are compared with nothing widened.
   The cyclic declarations in `schemas.gen.ts`, written by the same walk, change the same way.
 
+- **`WireInputs[op]` is the input the operation's handler receives, for every operation.** The
+  contract walk re-derived each input for itself and always merged the body into the parameters,
+  while the server emitters name every body the merge cannot express. So for a union, array, indexed
+  model, scalar, enum, optional or optional-multipart body, `WireInputs` described an input no handler
+  is given (typespec-hono #2), and a backend typed by it could not be handed the handler's input. One
+  consumer carried a shim re-flattening the handler's input after the divergence cost it 171 failing
+  tests. Both walks now read one placement rule, the one `EmittedRoute.bodyProperty`,
+  `optionalBody` and `rawBodyProperty` publish.
+
+  Measured on the corpus: 72 operations name their body.
+
+  - **Every operation is keyed.** One taking no input is `Record<string, never>`, which is what its
+    handler is passed, and one whose only success is a range is included. Both were skipped, so
+    `keyof WireInputs` could not enumerate a document's operations: 283 of the corpus's 789 were
+    missing, and a consumer named them by hand.
+  - **A binary `bytes` body is a `ByteStream`, a new export**, because the server hands it over
+    unread. `ArrayBuffer` made a gateway read the whole body to satisfy a backend typed by it.
+    `ByteStream` is the reader every platform stream has, spelled structurally so a contracts
+    package compiled with no DOM or runtime library can name it. A platform
+    `ReadableStream<Uint8Array>` is assignable to it under lib.dom, lib.webworker,
+    `@cloudflare/workers-types` and `@types/node`, on TypeScript 5.9 and 7.0.
+  - **The per-operation aliases are gone.** `CreateUserInput` was declared for `createUser`, and that
+    is the name half the specs in existence give their own body model, so the two collided (`TS2300`)
+    and the contracts did not compile. Use `WireInputs["createUser"]`.
+
 ### Changed
 
 - **Built and graded against TypeSpec 1.17.** The optional `@typespec/streams` and

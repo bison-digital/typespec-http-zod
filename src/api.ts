@@ -2446,28 +2446,39 @@ interface ResponseTypeEntry {
 	readonly ref: string;
 }
 
-/** One operation's effective input: its body, plus the path and query parameters merged over it. */
+/** One operation's input, as its handler receives it. */
 interface RequestTypeEntry {
 	readonly operationId: string;
+	/** The body's type expression where it has one walked type, so the assertions can pair a model. */
 	readonly bodyRef: string | undefined;
-	readonly extraProperties: readonly string[];
+	/** The input's type, as `WireInputs` states it. */
+	readonly input: string;
+	/** Whether `input` names `ByteStream`, so the file declares it. */
+	readonly streamsBody: boolean;
 }
 
-const upperFirst = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1);
-
 /**
- * The effective input of every operation, as TypeScript: its body, with the path, query and header
- * parameters merged over it.
+ * Every operation's input, as TypeScript, exactly as a handler receives it.
+ *
+ * **One placement rule, the one the server emitters render from.** A model body is merged with the
+ * path, query, header and cookie parameters; a body the merge cannot express is named under its
+ * parameter's name, optional where the document lets it be absent; a `bytes` body is handed over
+ * unread. {@link requestBodyPlacementOf} decides all three, for this walk and for
+ * {@link EmittedRoute} alike. This walk used to merge every body, so for a union, an array, an
+ * indexed model, an optional body, a scalar or an enum, `WireInputs` described an input no handler is
+ * given - and one consumer carried a shim re-flattening the handler's input to reach a backend typed
+ * by it, after the divergence cost it 171 failing tests.
+ *
+ * **Every operation, whatever it takes and whatever it answers.** An operation with no input is
+ * `Record<string, never>`, which is what a handler for it is passed; one whose only success is a
+ * range is as much an operation as any other. Both used to be skipped, so `keyof WireInputs` could
+ * not enumerate a document's operations, and a consumer named the missing ones by hand.
  *
  * **This used to drop any parameter literally named `companyId`.** One application carried its
  * tenant identifier in a context object rather than in the payload, and the emitter was taught to
  * match - so for every consumer, a path parameter with that name vanished from the generated input
  * type while the Zod validator went on requiring it. Two artefacts describing different shapes, from
  * a rule no document states.
- *
- * It is the same defect class this emitter exists to delete, and it hid better than most: the
- * emitted assertions pair the validator against the contract types for MODELS, so a disagreement
- * about a merged input type is not among the things they compare.
  */
 function collectRequestTypes(
 	program: Program,
@@ -2475,112 +2486,98 @@ function collectRequestTypes(
 	service: HttpService,
 ): RequestTypeEntry[] {
 	const entries: RequestTypeEntry[] = [];
-	{
-		for (const operation of service.operations) {
-			if (successStatusOf(operation) === undefined) continue;
-			/**
-			 * **Walked at the operation's REQUEST visibility, which is the whole point of this file.**
-			 *
-			 * `resolveRequestVisibility` is `@typespec/http`'s own answer - POST is Create, PATCH is
-			 * Update, PUT is CreateOrUpdate - and it is what the Zod walk already uses at the route
-			 * level. Without it this walk ran at the default `Read`, so a POST body's contract type
-			 * carried the canonical property set while the validator beside it accepted the create
-			 * projection. A caller satisfying the published type sent read-only fields and a strict
-			 * validator answered 400.
-			 *
-			 * It is also what keeps `metadataInfo` scoped: the predicates `propertyToTs` consults live
-			 * behind `withVisibility`, and calling them outside one leaves a module-level singleton
-			 * built for the wrong program.
-			 */
-			withVisibility(
-				program,
-				resolveRequestVisibility(program, operation.operation, operation.verb),
-				() => {
-					const body = requestBodyOf(operation);
-					/** The parts of a multipart body, which `requestBodyOf` deliberately does not return. */
-					const multipartBody = operation.parameters.body;
-					const multipart =
-						multipartBody?.bodyKind === "multipart" ? { parts: multipartBody.parts } : undefined;
+	for (const operation of service.operations) {
+		/**
+		 * **Walked at the operation's REQUEST visibility, which is the whole point of this file.**
+		 *
+		 * `resolveRequestVisibility` is `@typespec/http`'s own answer - POST is Create, PATCH is
+		 * Update, PUT is CreateOrUpdate - and it is what the Zod walk already uses at the route level.
+		 * Without it this walk ran at the default `Read`, so a POST body's contract type carried the
+		 * canonical property set while the validator beside it accepted the create projection. A
+		 * caller satisfying the published type sent read-only fields and a strict validator answered
+		 * 400.
+		 *
+		 * It is also what keeps `metadataInfo` scoped: the predicates `propertyToTs` consults live
+		 * behind `withVisibility`, and calling them outside one leaves a module-level singleton built
+		 * for the wrong program.
+		 */
+		withVisibility(
+			program,
+			resolveRequestVisibility(program, operation.operation, operation.verb),
+			() => {
+				const body = requestBodyOf(operation);
+				const placement = requestBodyPlacementOf(operation);
+				/** The parts of a multipart body, which `requestBodyOf` deliberately does not return. */
+				const parameterBody = operation.parameters.body;
+				/**
+				 * Headers are part of the input too.
+				 *
+				 * The webhook's three Standard-Webhooks headers are inside the MAC - they are not metadata
+				 * beside the payload, they are arguments to the verification. Leaving them out of the wire
+				 * type would describe an input the application cannot act on.
+				 */
+				const extraProperties = operation.parameters.parameters
+					.filter(
+						(parameter) =>
+							parameter.type === "path" ||
+							parameter.type === "query" ||
+							parameter.type === "header" ||
+							// The second half of the same omission: a validator with no matching type.
+							parameter.type === "cookie",
+					)
 					/**
-					 * Headers are part of the input too.
-					 *
-					 * The webhook's three Standard-Webhooks headers are inside the MAC - they are not metadata
-					 * beside the payload, they are arguments to the verification. Leaving them out of the wire
-					 * type would describe an input the application cannot act on.
+					 * Named as the WIRE names it, which is what the emitted validator keys on.
+					 * `@header("x-thing") thing: string` is `"x-thing"` in `schemas.gen.ts`, so it has to be
+					 * `"x-thing"` here too: a consumer checking its handlers against these types otherwise
+					 * fails to typecheck against a server that is correct.
 					 */
-					const extraProperties = operation.parameters.parameters
-						.filter(
-							(parameter) =>
-								parameter.type === "path" ||
-								parameter.type === "query" ||
-								parameter.type === "header" ||
-								// The second half of the same omission: a validator with no matching type.
-								parameter.type === "cookie",
-						)
-						/**
-						 * Named as the WIRE names it, which is what the emitted validator keys on.
-						 * `@header("x-thing") thing: string` is `"x-thing"` in `schemas.gen.ts`, so it has to be
-						 * `"x-thing"` here too: a consumer checking its handlers against these types otherwise
-						 * fails to typecheck against a server that is correct.
-						 */
-						.map((parameter) => registry.expressionForProperty(parameter.param, parameter.name));
-					// `return` rather than `continue`: this body is a callback now, and returning from it
-					// skips the operation exactly as the `continue` did.
-					if (body === undefined && extraProperties.length === 0) return;
+					.map((parameter) => registry.expressionForProperty(parameter.param, parameter.name));
+				const parts: string[] = [];
+				let streamsBody = false;
+				let bodyRef: string | undefined;
+				if (placement.rawBodyProperty !== undefined) {
 					/**
-					 * A `bytes` body reaches the use-case as a NAMED property holding the unparsed body, not as
-					 * a bare value, so the wire type is `{ rawBody: ... }`, matching what a server actually
-					 * builds. Referencing the scalar directly would type the whole input as that value and
-					 * quietly drop the headers beside it.
+					 * **A binary body is the unread stream, and is spelled as one without naming
+					 * `ReadableStream`.** The server hands it over unread, so a backend it is forwarded to
+					 * receives a stream; a contract saying `ArrayBuffer` made a gateway read a 25 MiB upload
+					 * into an isolate to satisfy it. See `BYTE_STREAM`. A `bytes` body under a JSON type is
+					 * the text a signature covers, and arrives as a string.
 					 */
-					const rawBody =
-						body?.kind === "Scalar" && body.name === "bytes"
-							? (operation.parameters.body?.property?.name ?? "body")
-							: undefined;
-					/**
-					 * **Raw binary is `ArrayBuffer`; base64 inside a JSON payload is `string`.** The same
-					 * `isRawBinaryMediaType` rule the response side and the multipart parts already follow,
-					 * applied here for the first time.
-					 *
-					 * This type said `string` for every `bytes` body whatever it was served as. A server reading
-					 * an `application/octet-stream` body hands the handler bytes, so a consumer checking its
-					 * handlers against these types could not typecheck against a correct server. It is the
-					 * request half of the corruption already fixed on the reader: decoding raw bytes as text
-					 * replaces every byte outside ASCII, and typing them as text is what invites it.
-					 */
-					const rawBodyType = isRawBinaryMediaType([
-						...(operation.parameters.body?.contentTypes ?? []),
-					])
-						? "ArrayBuffer"
-						: "string";
-					entries.push({
-						operationId: operationIdOf(program, operation.operation),
-						bodyRef:
-							rawBody !== undefined
-								? `{\n\t${rawBody}: ${rawBodyType};\n}`
-								: multipart !== undefined
-									? multipartTsOf(multipart, registry)
-									: body === undefined
-										? undefined
-										: registry.expressionFor(body),
-						extraProperties,
-					});
-				},
-			);
-		}
+					streamsBody = isRawBinaryMediaType([...(parameterBody?.contentTypes ?? [])]);
+					parts.push(
+						`{\n\t${objectKey(placement.rawBodyProperty)}: ${streamsBody ? "ByteStream | null" : "string"};\n}`,
+					);
+				} else {
+					const expression =
+						parameterBody?.bodyKind === "multipart"
+							? multipartTsOf({ parts: parameterBody.parts }, registry)
+							: body === undefined
+								? undefined
+								: registry.expressionFor(body);
+					if (parameterBody?.bodyKind !== "multipart") bodyRef = expression;
+					if (expression !== undefined) {
+						parts.push(
+							placement.bodyProperty === undefined
+								? expression
+								: `{\n\t${objectKey(placement.bodyProperty)}${placement.optionalBody ? "?" : ""}: ${expression.replaceAll("\n", "\n\t")};\n}`,
+						);
+					}
+				}
+				if (extraProperties.length > 0) {
+					parts.push(`{\n${extraProperties.map((line) => `\t${line}`).join("\n")}\n}`);
+				}
+				entries.push({
+					operationId: operationIdOf(program, operation.operation),
+					bodyRef,
+					input: parts.length === 0 ? "Record<string, never>" : `Simplify<${parts.join(" & ")}>`,
+					streamsBody,
+				});
+			},
+		);
 	}
 	return entries;
 }
 
-/**
- * The success response every operation declares, so a producer can be held to producing it.
- *
- * **Pinned fields only - these are PERMISSIVE shapes.** The gateway names the fields it depends on
- * and lets a richer view through untouched, so this is a floor and not an equality: the
- * domain's result must CONTAIN what the document promises, and may contain more. Asserting equality
- * would turn every field a producer legitimately adds into a build failure, which is the same mistake
- * as making a response schema strict.
- */
 function collectResponseTypes(
 	program: Program,
 	registry: TypeRegistry,
@@ -2619,6 +2616,38 @@ function collectResponseTypes(
  * imports the other, and a disagreement that would otherwise answer 400 on every request becomes a
  * typecheck failure.
  */
+/**
+ * **A stream of bytes, spelled as the reader every stream has rather than as `ReadableStream`.**
+ *
+ * The server hands a binary request body over unread, so the contract has to say "stream" - a
+ * contract saying `ArrayBuffer` made a gateway read a 25 MiB upload into an isolate just to satisfy
+ * a backend's type. But `requests.gen.ts` is framework-free, and a contracts package compiled under
+ * `lib: ["ES2024"]` and no `types` cannot name `ReadableStream` at all (`TS2304`); only lib.dom,
+ * lib.webworker, `@cloudflare/workers-types` and `@types/node` declare it.
+ *
+ * **This is the part of a stream every one of those declares, and nothing else.** Measured: a platform
+ * `ReadableStream<Uint8Array> | null` is assignable to it under the default libs, lib.dom,
+ * lib.webworker, workers-types and `@types/node`, on TypeScript 5.9.3 and 7.0.2, while an
+ * `ArrayBuffer` is refused. `AsyncIterable<Uint8Array>`, the obvious alternative, is NOT satisfied
+ * by lib.dom's stream on TypeScript 5.9 unless `dom.asynciterable` is also listed - which the usual
+ * `["ES2020", "DOM", "DOM.Iterable"]` does not.
+ *
+ * The same precedent as a multipart file part: a type only an ambient library declares is spelled
+ * structurally, so the emitted output compiles wherever it lands.
+ */
+const BYTE_STREAM = `
+/**
+ * A stream of bytes, as every platform's \`ReadableStream<Uint8Array>\` satisfies it - spelled
+ * structurally so this file needs no DOM or runtime library to name it.
+ */
+export interface ByteStream {
+	getReader(): {
+		read(): Promise<{ readonly done: boolean; readonly value?: Uint8Array | undefined }>;
+		releaseLock(): void;
+	};
+}
+`;
+
 function renderRequestTypes(
 	entries: readonly RequestTypeEntry[],
 	responses: readonly ResponseTypeEntry[],
@@ -2647,32 +2676,25 @@ function renderRequestTypes(
 			: `\nexport type ${declaration.name} = ${declaration.source};\n`;
 	});
 
-	const inputs = entries.map((entry) => {
-		const parts: string[] = [];
-		if (entry.bodyRef !== undefined) parts.push(entry.bodyRef);
-		if (entry.extraProperties.length > 0) {
-			parts.push(`{\n${entry.extraProperties.map((line) => `\t${line}`).join("\n")}\n}`);
-		}
-		return (
-			`\n/** The effective input for \`${entry.operationId}\` - its body, with path and query parameters merged over it. */\n` +
-			`export type ${upperFirst(entry.operationId)}Input = Simplify<${parts.join(" & ")}>;\n`
-		);
-	});
-
-	/**
-	 * The same set again, keyed by operation id.
-	 *
-	 * TypeScript cannot index a module's *type* exports by a computed name - `typeof Contracts` carries
-	 * only the value side, so `Contracts["AppointOfficerInput"]` does not resolve. Both sides'
-	 * assertions are written as mapped types over every operation, and this is what makes that
-	 * possible. Generated with the aliases above, so it cannot fall behind them.
-	 */
 	const responseLookup = responses
 		.map((entry) => `\t${entry.operationId}: Produced<${entry.ref}>;`)
 		.join("\n");
 
+	/**
+	 * **Keyed by operation id, and the only name an operation's input has.**
+	 *
+	 * Each input used to be declared a second time as an alias, `CreateUserInput` for `createUser`,
+	 * and this lookup referenced the aliases. That is the name half the specs in existence give their
+	 * own request model, so the two declarations collided (`TS2300`) and `requests.gen.ts` did not
+	 * compile for an operation as ordinary as `createUser(@body body: CreateUserInput)`. A type
+	 * exported under a name this emitter invents is a name a spec author can already be using.
+	 * `WireInputs["createUser"]` is the same type, and nothing a spec declares can collide with it.
+	 */
 	const lookup = entries
-		.map((entry) => `\t${entry.operationId}: ${upperFirst(entry.operationId)}Input;`)
+		.map(
+			(entry) =>
+				`\t/** The input for \`${entry.operationId}\`, as its handler receives it. */\n\t${entry.operationId}: ${entry.input.replaceAll("\n", "\n\t")};`,
+		)
 		.join("\n");
 
 	/**
@@ -2685,12 +2707,11 @@ function renderRequestTypes(
 	 * `TS6196: 'Simplify' is declared but never used.` Third of its kind, after the unconditional
 	 * `zValidator` and `z` imports.
 	 *
-	 * Decided from the aliases actually rendered rather than by searching the output for the name.
+	 * Decided from the inputs actually rendered rather than by searching the output for the name.
 	 */
-	const simplifyHelper =
-		inputs.length === 0
-			? ""
-			: `/**
+	const simplifyHelper = !entries.some((entry) => entry.input.startsWith("Simplify<"))
+		? ""
+		: `/**
  * Flattens an intersection into a single object type.
  *
  * Without it, \`Body & { filingId: string }\` and the equivalent flat object are structurally the
@@ -2725,8 +2746,11 @@ export type Produced<T> = T extends readonly (infer Element)[]
 	: T extends object
 		? { readonly [K in keyof T]: Produced<T[K]> }
 		: T;
-${declarations.join("")}${inputs.join("")}
-/** Every operation's effective input, keyed by operation id - what both sides assert against. */
+${entries.some((entry) => entry.streamsBody) ? BYTE_STREAM : ""}${declarations.join("")}
+/**
+ * Every operation's input, keyed by operation id: what its handler receives, and what a caller of a
+ * backend typed by it hands over. An operation that takes nothing is \`Record<string, never>\`.
+ */
 export interface WireInputs {
 ${lookup}
 }
