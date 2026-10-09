@@ -32,7 +32,8 @@ import {
 import { getOperationId, resolveOperationId } from "@typespec/openapi";
 import { type EmitterOptions, reportDiagnostic } from "./lib.js";
 import { SchemaRegistry, TypeRegistry } from "./registry.js";
-import { typeToTs } from "./types.js";
+import { isJsonMediaType, type StatusKey } from "./results.js";
+import { propertyTypeToTs } from "./types.js";
 import { resolveStreamModule, streamedTypeOf, withStreamModule } from "./streams.js";
 import { resolveVersioningModule, serviceSnapshots } from "./versioning.js";
 import {
@@ -48,6 +49,17 @@ import {
 
 export type { EmittedPathSegment } from "./uri-template.js";
 export { CONTENTLESS_STATUS_CODES, STATUS_CODES } from "./statuses.js";
+export {
+	type BodyServing,
+	isJsonMediaType,
+	isMediaRange,
+	mediaTypeTypeOf,
+	type ResponseFacts,
+	type ResultMember,
+	resultMembersOf,
+	type StatusKey,
+	statusCodesOf,
+} from "./results.js";
 import {
 	collectExternalImports,
 	noteDeclaredVocabularies,
@@ -281,14 +293,6 @@ function operationIdOf(program: Program, operation: Operation): string {
 
 /** The five buckets OpenAPI can express a status RANGE as, in the order it names them. */
 const STATUS_RANGE_GROUPS = [1, 2, 3, 4, 5] as const;
-
-/**
- * A status as the DOCUMENT keys it: an exact code, a `4XX` bucket, or the catch-all.
- *
- * `"default"` is kept as itself rather than mapped to a number. The document means "any status not
- * listed above", and inventing one would be answering a question the contract left open.
- */
-export type StatusKey = number | "default" | `${1 | 2 | 3 | 4 | 5}XX`;
 
 /**
  * What the document will key this response under - **openapi3's rule, copied, not re-derived.**
@@ -547,7 +551,13 @@ function responsesOf(
 		response,
 		headers: response.headers.map(({ name, property }): EmittedResponseHeader => ({
 			name,
-			type: typeToTs(program, property.type),
+			/**
+			 * **Encode-aware, as the schema beside it is.** `@encode(seconds, int32)` makes a `duration`
+			 * an integer on the wire, and the header schema checks an integer; reading the declared type
+			 * alone published `string`, so a handler satisfying its own result type was refused by its
+			 * own header check and the arm could not be returned without a cast.
+			 */
+			type: propertyTypeToTs(program, property),
 			/**
 			 * **The Zod expression, which used to be discarded here.** Every REQUEST parameter goes
 			 * through `expressionForProperty` a few hundred lines below; a response header went
@@ -1069,7 +1079,7 @@ function isBinaryPart(type: Type): boolean {
  */
 export function isRawBinaryMediaType(contentTypes: readonly string[]): boolean {
 	if (contentTypes.length === 0) return false;
-	return contentTypes.every((type) => !/^application\/(json|.*\+json)$/.test(type));
+	return contentTypes.every((type) => !isJsonMediaType(type));
 }
 
 /** The declared request body type, if the operation takes one. */

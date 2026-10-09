@@ -69,6 +69,22 @@ change a consumer feels, and is treated as such here rather than as an implement
   `@typespec/versioning` peers admit `^0.87.0`, so a consumer on the current compiler no longer gets
   an unmet peer. The corpus is `@typespec/http-specs` `0.1.0-alpha.44`.
 
+### Fixed
+
+- **A response header's published type is encode-aware, as its schema already was.**
+  `@header("Retry-After") @encode(DurationKnownEncoding.seconds, int32) retryAfter: duration` published
+  `EmittedResponseHeader.type` as `string` while its schema checks `z.int32()` and the document says
+  `integer`. A server emitter typing a handler's result from it demanded a string that its own
+  header check then refused, so the arm could not be returned without a cast. The type now comes
+  from `propertyTypeToTs`, which request parameters already used.
+
+### Added
+
+- **`resultMembersOf`, `statusCodesOf`, `mediaTypeTypeOf`, `isJsonMediaType`, `isMediaRange` and
+  `STATUS_CODES`**: what a result is made of (one member per declared response and media type, its
+  serving kind, and the status codes each answers with), exported for the server emitters. Both
+  `typespec-hono` and `typespec-http-mcp` held a copy of these rules and of the status table.
+
 ### Fixed (graded, not shipped)
 
 - **The portability harness proves what it claimed.** It set `types: []` and no `lib`, and
