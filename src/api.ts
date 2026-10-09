@@ -2509,6 +2509,8 @@ interface ResponseTypeEntry {
 	readonly result: readonly string[];
 	/** Whether either names `ByteStream`, so the file declares it. */
 	readonly streams: boolean;
+	/** The contract type of every body the result states, so the assertions can pair a model. */
+	readonly bodyRefs: readonly string[];
 }
 
 /** One operation's input, as its handler receives it. */
@@ -2674,6 +2676,7 @@ function collectResponseTypes(
 			const responses = inPrecedenceOrder(resolvedResponsesOf(program, operation));
 			const hasBody = (response: ResolvedResponse): boolean => response.body !== undefined;
 			let streams = false;
+			const bodyRefs: string[] = [];
 			/**
 			 * **What a producer SUPPLIES for a body, which is what the server emitters accept for it.** A
 			 * stream or a raw binary body is handed over as bytes and never parsed, so it is spelled as
@@ -2693,10 +2696,12 @@ function collectResponseTypes(
 						return "ByteStream | Uint8Array<ArrayBuffer> | ArrayBuffer";
 					case "unvalidated":
 						return "string";
-					default:
-						return member.response.body === undefined
-							? undefined
-							: `Produced<${registry.expressionFor(member.response.body)}>`;
+					default: {
+						if (member.response.body === undefined) return undefined;
+						const ref = registry.expressionFor(member.response.body);
+						bodyRefs.push(ref);
+						return `Produced<${ref}>`;
+					}
 				}
 			};
 			const members = resultMembersOf(responses, hasBody).map((member) => {
@@ -2742,6 +2747,7 @@ function collectResponseTypes(
 				output: outputs.length === 0 ? "never" : outputs.join(" | "),
 				result: members.map(({ text }) => text),
 				streams,
+				bodyRefs,
 			});
 		}
 	});
@@ -2981,18 +2987,26 @@ function renderWireAssertions(
 	schemas: SchemaRegistry,
 	types: TypeRegistry,
 	entries: readonly RequestTypeEntry[],
+	responses: readonly ResponseTypeEntry[],
 	contractsPackage: string | undefined,
 ): string | undefined {
 	// The assertions pair the emitted Zod against the request TYPES, which live in the contracts
 	// package. With no package named there is nothing to import them from and nothing to pair - the
 	// types are still written to `contracts-output-dir`, they simply have no shared specifier yet.
 	if (contractsPackage === undefined) return undefined;
-	const requestModels = new Set(
-		entries.map((entry) => entry.bodyRef).filter((ref): ref is string => ref !== undefined),
-	);
+	/**
+	 * **Every model a body names, the responses' as well as the requests'.** This paired request
+	 * bodies only, so a model that is only ever SENT was compared with nothing; that was harmless
+	 * while the contract types described a single success body and nothing consumed it, and is not now
+	 * that `WireResults` states every response a backend returns.
+	 */
+	const bodyModels = new Set([
+		...entries.map((entry) => entry.bodyRef).filter((ref): ref is string => ref !== undefined),
+		...responses.flatMap((entry) => entry.bodyRefs),
+	]);
 	const paired: { name: string; identifier: string }[] = [];
 	for (const declaration of types.declarations()) {
-		if (!requestModels.has(declaration.name)) continue;
+		if (!bodyModels.has(declaration.name)) continue;
 		const schema = schemas
 			.declarations()
 			.find((candidate) => candidate.typeName === declaration.name);
@@ -3443,7 +3457,13 @@ export async function emitHttpZod(context: EmitContext): Promise<readonly Emitte
 				path: resolvePath(resolved.contractsOutputDir, "vocabularies.gen.ts"),
 				content: renderVocabularies(vocabularies),
 			});
-			const assertions = renderWireAssertions(registry, types, entries, resolved.contractsPackage);
+			const assertions = renderWireAssertions(
+				registry,
+				types,
+				entries,
+				responses,
+				resolved.contractsPackage,
+			);
 			if (assertions !== undefined) {
 				await emitFile(context.program, {
 					path: resolvePath(outputDir, "wire-contract.gen.ts"),

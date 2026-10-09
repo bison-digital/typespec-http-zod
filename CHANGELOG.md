@@ -128,6 +128,10 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ### Fixed (graded, not shipped)
 
+- **`wire-contract.gen.ts` pairs every model a response names, not only request bodies.** A model
+  only ever SENT was compared with nothing, so its contract type could drift from the validator the
+  server serves it through: measured, a planted drift in a response-only model left every arm green
+  under the old pairing and fails the build under this one.
 - **The portability harness proves what it claimed.** It set `types: []` and no `lib`, and
   TypeScript's default libraries include the DOM, so a `File` in emitted output compiled. It now
   compiles under `lib: ["es2023"]`.
