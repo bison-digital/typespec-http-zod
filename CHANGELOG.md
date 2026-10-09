@@ -79,6 +79,25 @@ change a consumer feels, and is treated as such here rather than as an implement
 
 ### Fixed
 
+- **An `Http.File` body reaches the route, as an upload and as a download.** `requestBodyOf` and
+  the response walk read only `bodyKind === "single"`, so a file body was dropped silently: every
+  upload in the corpus's `type/file` handed its handler `{}`, and every download was served with no
+  body, from a compile that reported success. A file is now what `@typespec/openapi3` publishes it
+  as, a media type and nothing to parse:
+  - **An upload** is a raw body under its parameter's name, with the media type the request declared
+    as `"Content-Type"`, exactly as a declared `@header contentType` would be.
+  - **A download** is a binary arm.
+
+  Both are bytes whatever the media type, which `@typespec/http` permits for a textual file, so
+  `EmittedRoute.rawBodyBinary` (new) says so: a file declared `application/json` cannot be told from
+  a JSON body by its media type.
+
+  **Found by a new divergence kind, `dropped-body`:** wherever the document publishes request or
+  response content and the route record carries none. It fires on exactly those eight positions
+  before this change and on none after. The baseline's `unreadableResponseBodies: 4`, documented as
+  "a stream or a union", had been counting the four downloads all along; it is 0 now and the limit is
+  no longer listed.
+
 - **A response header's published type is encode-aware, as its schema already was.**
   `@header("Retry-After") @encode(DurationKnownEncoding.seconds, int32) retryAfter: duration` published
   `EmittedResponseHeader.type` as `string` while its schema checks `z.int32()` and the document says

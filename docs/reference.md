@@ -172,7 +172,6 @@ which nothing a spec declares can collide with.
 - **4 negotiated response bodies cannot be attributed to a single arm.** OpenAPI lists one body per
   media type against members that each carry their own, so there is no single arm to compare them to.
   The status-to-body mapping is still checked.
-- **4 response bodies reduce to no readable kind on one side**, being a stream or a union.
 - **A reserved path parameter is carried in the route record and not in the document, which is the
   one place this IR deliberately says more than OpenAPI can.** `@route("/vault/{+path}")` states RFC
   6570 reserved expansion: the parameter matches across `/`, so `GET /vault/areas/health.md` reaches

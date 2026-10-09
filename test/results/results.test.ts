@@ -39,7 +39,7 @@ type Bytes = ByteStream | Uint8Array<ArrayBuffer> | ArrayBuffer;
 export type Referenced = [Deletion, OrgError, Other, Problem, Produced<Thing>, Thing, WireOutputs, WireResults, Bytes, MustHold<Identical<1, 1>>];
 `;
 
-const OPERATIONS = `"getThing" | "mixed" | "bodyOrNone" | "scheduleDeletion" | "cancelDeletion" | "throttled" | "ranged" | "negotiated" | "download" | "image" | "ticks" | "refuse"`;
+const OPERATIONS = `"getThing" | "mixed" | "bodyOrNone" | "scheduleDeletion" | "cancelDeletion" | "throttled" | "ranged" | "negotiated" | "download" | "image" | "ticks" | "refuse" | "downloadFile"`;
 
 describe("every operation's success bodies, in WireOutputs", () => {
 	it("compiles with no error diagnostic", () => {
@@ -60,6 +60,7 @@ export type Text = MustHold<Identical<WireOutputs["negotiated"], string>>;
 export type Binary = MustHold<Identical<WireOutputs["download"], Bytes>>;
 export type Stream = MustHold<Identical<WireOutputs["ticks"], ByteStream>>;
 export type FailuresOnly = MustHold<Identical<WireOutputs["refuse"], never>>;
+export type File = MustHold<Identical<WireOutputs["downloadFile"], Bytes>>;
 `);
 		expect(output).toBe("");
 		expect(failed).toBe(false);
@@ -102,6 +103,9 @@ export type Negotiated = MustHold<Identical<WireResults["negotiated"],
 export type Binary = MustHold<Identical<WireResults["download"], { readonly status: 200; readonly body: Bytes }>>;
 export type Range = MustHold<Identical<WireResults["image"], { readonly status: 200; readonly contentType: \`image/\${string}\`; readonly body: Bytes }>>;
 export type Stream = MustHold<Identical<WireResults["ticks"], { readonly status: 200; readonly body: ByteStream }>>;
+export type File = MustHold<Identical<WireResults["downloadFile"],
+	| { readonly status: 200; readonly contentType: "image/png"; readonly body: Bytes }
+	| { readonly status: 200; readonly contentType: "image/jpeg"; readonly body: Bytes }>>;
 `);
 		expect(output).toBe("");
 		expect(failed).toBe(false);

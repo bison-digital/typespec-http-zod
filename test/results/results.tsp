@@ -113,3 +113,6 @@ union Ticks {
 
 /** Failures only: no success member at all. */
 @route("/refuse") @get op refuse(): OrgError;
+
+/** An `Http.File` response: bytes, with the media type named where there is a choice. */
+@route("/file") @get op downloadFile(): Http.File<"image/png" | "image/jpeg">;

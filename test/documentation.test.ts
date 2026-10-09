@@ -230,9 +230,13 @@ describe("the README documents everything this package can do to you", () => {
 		expect(reference).toMatch(
 			new RegExp(`\\b${baseline.negotiatedResponseBodies}\\b negotiated response bodies`, "s"),
 		);
-		expect(reference).toMatch(
-			new RegExp(`\\b${baseline.unreadableResponseBodies}\\b response bodies reduce`, "s"),
-		);
+		/**
+		 * **The unreadable-response-body limit is closed, and it was never what it said.** Listed as
+		 * "4 response bodies reduce to no readable kind on one side, being a stream or a union", the
+		 * four were the `type/file` downloads, whose bodies never reached the route at all. They are
+		 * read and compared now; the differential pins the count at zero.
+		 */
+		expect(baseline.unreadableResponseBodies).toBe(0);
 		/**
 		 * **A limit that has been CLOSED must stop being listed.** A README describing a gap that no
 		 * longer exists is the same defect as one omitting a gap that does: both leave the reader with a
@@ -242,5 +246,6 @@ describe("the README documents everything this package can do to you", () => {
 		expect(reference).not.toMatch(
 			/response bodies are read by status but not resolved to a component/,
 		);
+		expect(reference).not.toMatch(/response bodies reduce to no readable kind/);
 	});
 });

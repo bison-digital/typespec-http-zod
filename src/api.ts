@@ -486,6 +486,7 @@ export function resolvedResponsesOf(
 			readonly contentTypes: Set<string>;
 			readonly headers: { readonly name: string; readonly property: ModelProperty }[];
 			streamed: boolean;
+			file: boolean;
 		}
 	>();
 	for (const response of operation.responses) {
@@ -497,10 +498,20 @@ export function resolvedResponsesOf(
 				contentTypes: new Set<string>(),
 				headers: [],
 				streamed: false,
+				file: false,
 			};
 			for (const content of response.responses) {
 				if (entry.body === undefined && content.body?.bodyKind === "single") {
 					entry.body = bodyTypeOf(content.body.type);
+				}
+				/**
+				 * **An `Http.File` response's body is its contents, served as bytes.** The same reading
+				 * as a file request body: a media type and nothing to serialise. Read only for
+				 * `"single"`, every download in `type/file` declared `image/png` and was served empty.
+				 */
+				if (entry.body === undefined && content.body?.bodyKind === "file") {
+					entry.body = content.body.contents.type;
+					entry.file = true;
 				}
 				for (const contentType of content.body?.contentTypes ?? []) {
 					entry.contentTypes.add(contentType);
@@ -522,9 +533,12 @@ export function resolvedResponsesOf(
 			contentTypes,
 			headers: entry.headers,
 			binary:
-				entry.body !== undefined && isBinaryPart(entry.body) && isRawBinaryMediaType(contentTypes),
+				entry.file ||
+				(entry.body !== undefined &&
+					isBinaryPart(entry.body) &&
+					isRawBinaryMediaType(contentTypes)),
 			streamed: entry.streamed,
-			textual: entry.body !== undefined && isStringType(entry.body),
+			textual: !entry.file && entry.body !== undefined && isStringType(entry.body),
 		};
 	});
 }
@@ -1202,6 +1216,14 @@ export interface EmittedRoute {
 	 */
 	readonly rawBodyProperty: string | undefined;
 	/**
+	 * Whether the raw body is BYTES - handed over as the unread stream - rather than the text a
+	 * signature covers. A `bytes` body is bytes under a binary media type and text under a JSON one;
+	 * an `Http.File` body is bytes whatever its media type, which is why a server cannot read this off
+	 * {@link requestContentTypes}: a file declared `application/json` looks like a JSON body there.
+	 * `false` where there is no raw body.
+	 */
+	readonly rawBodyBinary: boolean;
+	/**
 	 * The input property a PARSED body arrives under, where it must not be spread into the parameters.
 	 *
 	 * **A body with an indexer cannot be flattened.** `@body body: Record<string>` merged with the
@@ -1657,6 +1679,13 @@ function parameterSchemasOf(
 			(byTarget["header-without-accept"] ??= []).push(entry);
 		}
 	}
+	const fileContentType = fileContentTypeOf(operation);
+	if (fileContentType !== undefined) {
+		// The same decoding a declared `Content-Type` header gets: parameters dropped, lowercased.
+		const entry = `\t${objectKey("Content-Type")}: ${mediaTypeDecoded(registry.expressionFor(fileContentType.type))},`;
+		(byTarget["header"] ??= []).push(entry);
+		(byTarget["header-without-accept"] ??= []).push(entry);
+	}
 	const shape = (target: string): string | undefined => {
 		const entries = byTarget[target];
 		return entries === undefined ? undefined : `z.object({\n${entries.join("\n")}\n})`;
@@ -1698,6 +1727,24 @@ function modelPropertiesOf(model: Model): ModelProperty[] {
 }
 
 /**
+ * **The media type an `Http.File` body declares, as the input it is.** A file's `contentType` is the
+ * request's `Content-Type`: `Http.File<"image/png" | "image/jpeg">` accepts either and the handler has
+ * to know which arrived, exactly as it would from a declared `@header contentType`. `@typespec/http`
+ * keeps it on the file model rather than among the operation's parameters, so without this a
+ * handler for a two-type upload had the bytes and no way to tell what they were.
+ *
+ * `undefined` where the body is not a file, or where the operation already declares the header.
+ */
+function fileContentTypeOf(operation: HttpOperation): ModelProperty | undefined {
+	const body = operation.parameters.body;
+	if (body?.bodyKind !== "file") return undefined;
+	const declared = operation.parameters.parameters.some(
+		(parameter) => parameter.type === "header" && parameter.name.toLowerCase() === "content-type",
+	);
+	return declared ? undefined : body.contentTypeProperty;
+}
+
+/**
  * Where a request body reaches a handler's input: spread into it, named under a property, or handed
  * over unread.
  *
@@ -1709,6 +1756,7 @@ function modelPropertiesOf(model: Model): ModelProperty[] {
  */
 function requestBodyPlacementOf(operation: HttpOperation): {
 	readonly rawBodyProperty: string | undefined;
+	readonly rawBodyBinary: boolean;
 	readonly bodyProperty: string | undefined;
 	readonly optionalBody: boolean;
 } {
@@ -1720,8 +1768,17 @@ function requestBodyPlacementOf(operation: HttpOperation): {
 	 * verify a different string and every delivery would fail authentication.
 	 */
 	const bodyParameter = operation.parameters.body;
+	/**
+	 * **An `Http.File` body is raw too: the file's contents ARE the body.** `@typespec/openapi3`
+	 * publishes it as `content: { "image/png": { schema: { contentMediaType: "image/png" } } }` - a
+	 * media type and no type, nothing to parse and nothing to validate - which is exactly a `bytes`
+	 * body under that media type. `requestBodyOf` reads only `bodyKind === "single"`, so a file body
+	 * reached no placement at all: the handler was passed `{}` and the upload was dropped, from a
+	 * compile that reported success, on all four uploads in `type/file`.
+	 */
 	const rawBodyProperty =
-		requestType?.kind === "Scalar" && requestType.name === "bytes"
+		(requestType?.kind === "Scalar" && requestType.name === "bytes") ||
+		bodyParameter?.bodyKind === "file"
 			? (bodyParameter?.property?.name ?? "body")
 			: undefined;
 	/**
@@ -1783,7 +1840,17 @@ function requestBodyPlacementOf(operation: HttpOperation): {
 		unmergeableBody
 			? (bodyParameter?.property?.name ?? "body")
 			: undefined;
-	return { rawBodyProperty, bodyProperty, optionalBody };
+	/**
+	 * A file is handed over as a stream of bytes whatever its media type. `@typespec/http` lets an
+	 * emitter represent a textual file "as strings or streams of textual characters", and one
+	 * representation for every file is what lets a file declared `application/json` be told from a
+	 * JSON body - which the media type alone cannot do.
+	 */
+	const rawBodyBinary =
+		rawBodyProperty !== undefined &&
+		(bodyParameter?.bodyKind === "file" ||
+			isRawBinaryMediaType([...(bodyParameter?.contentTypes ?? [])]));
+	return { rawBodyProperty, rawBodyBinary, bodyProperty, optionalBody };
 }
 
 export function collectRoutes(
@@ -1823,7 +1890,8 @@ export function collectRoutes(
 				operation.operation,
 				operation.verb,
 			);
-			const { rawBodyProperty, bodyProperty, optionalBody } = requestBodyPlacementOf(operation);
+			const { rawBodyProperty, rawBodyBinary, bodyProperty, optionalBody } =
+				requestBodyPlacementOf(operation);
 			const authentication = authenticationFor(program, operation);
 			const template = routeTemplateOf(
 				operation.uriTemplate,
@@ -1927,6 +1995,7 @@ export function collectRoutes(
 					responsesOf(program, operation, registry),
 				),
 				rawBodyProperty,
+				rawBodyBinary,
 				bodyProperty,
 				optionalBody,
 				scopes: authentication.scopes,
@@ -2528,6 +2597,12 @@ function collectRequestTypes(
 					 * fails to typecheck against a server that is correct.
 					 */
 					.map((parameter) => registry.expressionForProperty(parameter.param, parameter.name));
+				const fileContentType = fileContentTypeOf(operation);
+				if (fileContentType !== undefined) {
+					extraProperties.push(
+						`${objectKey("Content-Type")}: ${registry.expressionFor(fileContentType.type)};`,
+					);
+				}
 				const parts: string[] = [];
 				let streamsBody = false;
 				let bodyRef: string | undefined;
@@ -2539,7 +2614,7 @@ function collectRequestTypes(
 					 * into an isolate to satisfy it. See `BYTE_STREAM`. A `bytes` body under a JSON type is
 					 * the text a signature covers, and arrives as a string.
 					 */
-					streamsBody = isRawBinaryMediaType([...(parameterBody?.contentTypes ?? [])]);
+					streamsBody = placement.rawBodyBinary;
 					parts.push(
 						`{\n\t${objectKey(placement.rawBodyProperty)}: ${streamsBody ? "ByteStream | null" : "string"};\n}`,
 					);

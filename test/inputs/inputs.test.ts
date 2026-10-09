@@ -48,7 +48,7 @@ describe("every operation's input, as the handler receives it", () => {
 		const { output, failed } = withConsumer(`${PRELUDE}
 export type Keys = MustHold<Identical<keyof WireInputs,
 	| "readThing" | "createThing" | "cancelPending" | "createCharge" | "authorize" | "ingestEvents"
-	| "ingestEvent" | "setColour" | "setNote" | "upload" | "signed" | "submitForm" | "ranged">>;
+	| "ingestEvent" | "setColour" | "setNote" | "upload" | "signed" | "submitForm" | "ranged" | "uploadFile">>;
 export type Nothing = MustHold<Identical<WireInputs["cancelPending"], Record<string, never>>>;
 export type RangeOnly = MustHold<Identical<WireInputs["ranged"], { q: string }>>;
 `);
@@ -90,6 +90,8 @@ export type Multipart = MustHold<Identical<WireInputs["submitForm"], { body?: { 
 		const { output, failed } = withConsumer(`${PRELUDE}
 export type Binary = MustHold<Identical<WireInputs["upload"], { body: ByteStream | null; "Content-Type": "application/octet-stream" }>>;
 export type Signed = MustHold<Identical<WireInputs["signed"], { payload: string; "Content-Type": "application/json" }>>;
+// A file is its contents, unread, and the media type the request declared is an input.
+export type File = MustHold<Identical<WireInputs["uploadFile"], { file: ByteStream | null; "Content-Type": "image/png" | "image/jpeg" }>>;
 
 // @ts-expect-error a buffer is not the stream the server hands over
 export const buffered: WireInputs["upload"] = { body: new ArrayBuffer(1), "Content-Type": "application/octet-stream" };

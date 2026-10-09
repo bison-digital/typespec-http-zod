@@ -2,7 +2,10 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
+import { getAllHttpServices } from "@typespec/http";
 import { z } from "zod";
+import { collectRoutes, type EmittedRoute } from "../../src/index.js";
+import { SchemaRegistry } from "../../src/registry.js";
 import {
 	compileScenario,
 	depthSources,
@@ -1115,6 +1118,24 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 		// Schema object -> declared name, so an array of `Bird` can be told from an array of strings.
 		const nameOf = namesFromModule(emitted);
 
+		/**
+		 * **The route records themselves, for the one question no emitted file can answer: did a body
+		 * the document publishes reach them at all.** A body that never reaches `EmittedRoute` leaves
+		 * every artefact consistent with every other - no validator, no type, nothing to disagree - so
+		 * the differential above passed while `type/file` handed every upload's handler nothing and
+		 * served every download empty.
+		 */
+		const routesById = new Map<string, EmittedRoute>();
+		if (compiled.program !== undefined) {
+			const program = compiled.program;
+			const [services] = getAllHttpServices(program);
+			for (const service of services) {
+				for (const route of collectRoutes(program, new SchemaRegistry(program), service)) {
+					routesById.set(route.operationId, route);
+				}
+			}
+		}
+
 		const declaredOperations = operationsInDocument(document);
 		/**
 		 * **The generated SERVER, which no oracle had ever read.** `schemas.gen.ts` holds the
@@ -1245,6 +1266,35 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 				 * The same two readings as the response side: a shape where both sides reduce to an
 				 * object, a top-level kind where they do not, and a count where neither can be read.
 				 */
+				const route = routesById.get(operationId);
+				if (route !== undefined) {
+					const published = (operation as { requestBody?: { content?: Record<string, unknown> } })
+						.requestBody?.content;
+					if (
+						Object.keys(published ?? {}).length > 0 &&
+						route.requestSchema === undefined &&
+						route.rawBodyProperty === undefined
+					) {
+						add(
+							"dropped-body",
+							`${scenario.name}:${operationId}.requestBody`,
+							"no request body reached the route",
+						);
+					}
+					for (const [status, response] of Object.entries(operation.responses ?? {})) {
+						if (Object.keys(response.content ?? {}).length === 0) continue;
+						const key = /^\d+$/.test(status) ? Number(status) : status;
+						const emittedResponse = route.responses.find((candidate) => candidate.status === key);
+						if (emittedResponse?.schema === undefined) {
+							add(
+								"dropped-body",
+								`${scenario.name}:${operationId}.${status}`,
+								"no response body reached the route",
+							);
+						}
+					}
+				}
+
 				const requestBody = requestBodySchema(operation);
 				const bodyValidator = validatorFor(emitted, operationId, "Body");
 				if (requestBody !== undefined && bodyValidator !== undefined) {

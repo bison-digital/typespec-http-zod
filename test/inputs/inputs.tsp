@@ -98,3 +98,6 @@ enum Colour {
   @minValue(200) @maxValue(299) @statusCode code: int32;
   @body body: Thing;
 };
+
+/** An `Http.File` body: handed over unread, with the media type it was sent as. */
+@route("/file") @post op uploadFile(@bodyRoot file: Http.File<"image/png" | "image/jpeg">): void;

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { NodeHost, compile, listServices } from "@typespec/compiler";
+import { NodeHost, type Program, compile, listServices } from "@typespec/compiler";
 import { getVersions } from "@typespec/versioning";
 import { CONTRACTS_BARREL_SPECIFIER, writeContractsBarrel } from "../support/contracts-barrel.js";
 
@@ -166,6 +166,12 @@ export interface CompiledScenario {
 	 * easily have been masked by an older version agreeing.
 	 */
 	readonly latestVersion?: string;
+	/**
+	 * The compiled program, for an arm that has to read the route records themselves rather than the
+	 * files written from them: what reaches a server is `EmittedRoute`, and a body the document
+	 * publishes can be absent from it while every emitted file is consistent with every other.
+	 */
+	readonly program?: Program;
 }
 
 /** `@typespec/openapi3/path-query` -> `@typespec/openapi3`; our own codes have no prefix. */
@@ -331,8 +337,8 @@ export async function compileScenario(
 	const error = program.diagnostics.find((diagnostic) => diagnostic.severity === "error");
 	if (error === undefined) {
 		return latestVersion === undefined
-			? { scenario, ...dirs, emitterWarnings }
-			: { scenario, ...dirs, emitterWarnings, latestVersion };
+			? { scenario, ...dirs, emitterWarnings, program }
+			: { scenario, ...dirs, emitterWarnings, latestVersion, program };
 	}
 	return {
 		scenario,
