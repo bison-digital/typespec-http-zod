@@ -57,14 +57,25 @@ export interface ResultMember<R extends ResponseFacts> {
 	readonly serving: BodyServing;
 }
 
+/**
+ * **A media type's essence: `type/subtype`, lowercased, with no parameters** (RFC 9110 section
+ * 8.3.1). Two media types are the same type exactly when their essences are equal, so every
+ * comparison of a declared media type is of this. `application/json; charset=utf-8` and
+ * `Application/JSON` were compared as whole strings and read as not JSON: the body became raw text,
+ * and the response an unvalidated string.
+ */
+export function mediaTypeEssenceOf(type: string): string {
+	return (type.split(";")[0] ?? "").trim().toLowerCase();
+}
+
 /** `application/json` and every `+json` suffix: the media types a body is serialised as JSON for. */
 export function isJsonMediaType(type: string): boolean {
-	return /^application\/(json|.*\+json)$/.test(type);
+	return /^application\/(json|.*\+json)$/.test(mediaTypeEssenceOf(type));
 }
 
 /** A media range such as `image/*`, rather than a type a response can be sent as. */
 export function isMediaRange(mediaType: string): boolean {
-	return mediaType.endsWith("/*");
+	return mediaTypeEssenceOf(mediaType).endsWith("/*");
 }
 
 /**

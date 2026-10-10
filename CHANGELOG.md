@@ -81,6 +81,13 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
 
 ### Fixed
 
+- **A media type declared with a parameter or in capitals is compared by its essence.**
+  `@header contentType: "application/json; charset=utf-8"` declares JSON, and `Application/JSON` is
+  `application/json`. The `Content-Type` validator reduced a request's value to its essence and
+  compared that with the declared text, so it refused every request to such an operation. It now
+  compares essences and hands the handler the value as declared, which is what its input type says.
+  The JSON, parseable and range checks compare essences too, so such a body is placed and validated
+  as JSON, not handed over as text.
 - **A body declared only under media types nothing can parse into it is handed over as text.** A
   model under `application/xml`, or a `string | int32` under its default `text/plain`, has no reader
   this emitter can derive. The server checked the request's headers and called the handler with the
@@ -136,6 +143,9 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
   a service binding typed `(input: WireInputs[K]) => Promise<WireResults[K]>` can say whether it
   answered `200` or `201` with the same model, which a body type cannot; one consumer typed its
   backends' results `{ status: number }` for want of it.
+
+- **`mediaTypeEssenceOf`**: a media type's `type/subtype`, lowercased and without parameters, for
+  an emitter comparing declared media types the way this package does.
 
 - **`resultMembersOf`, `statusCodesOf`, `mediaTypeTypeOf`, `isJsonMediaType`, `isMediaRange` and
   `STATUS_CODES`**: what a result is made of (one member per declared response and media type, its

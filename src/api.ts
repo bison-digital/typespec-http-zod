@@ -34,6 +34,8 @@ import { type EmitterOptions, reportDiagnostic } from "./lib.js";
 import { SchemaRegistry, TypeRegistry } from "./registry.js";
 import {
 	isJsonMediaType,
+	isMediaRange,
+	mediaTypeEssenceOf,
 	mediaTypeTypeOf,
 	type ResultMember,
 	resultMembersOf,
@@ -60,6 +62,7 @@ export {
 	type BodyServing,
 	isJsonMediaType,
 	isMediaRange,
+	mediaTypeEssenceOf,
 	mediaTypeTypeOf,
 	type ResponseFacts,
 	type ResultMember,
@@ -1083,10 +1086,11 @@ export function isRawBinaryMediaType(contentTypes: readonly string[]): boolean {
  * vendor type - has no reading this emitter can derive from the document.
  */
 function isParseableMediaType(type: string): boolean {
+	const essence = mediaTypeEssenceOf(type);
 	return (
-		isJsonMediaType(type) ||
-		type === "application/x-www-form-urlencoded" ||
-		type.startsWith("multipart/")
+		isJsonMediaType(essence) ||
+		essence === "application/x-www-form-urlencoded" ||
+		essence.startsWith("multipart/")
 	);
 }
 
@@ -1513,16 +1517,35 @@ function mediaTypeDecoded(declared: string): string {
 		 * whatever the caller sends.
 		 */
 		if (value === "*/*") return "z.string()";
-		return value.endsWith("/*")
-			? `z.templateLiteral([${JSON.stringify(value.slice(0, -1))}, z.string()])`
+		return isMediaRange(value)
+			? `z.templateLiteral([${JSON.stringify(mediaTypeEssenceOf(value).slice(0, -1))}, z.string()])`
 			: `z.literal(${JSON.stringify(value)})`;
 	});
 	const schema =
 		admitted.length === 1 ? (admitted[0] ?? declared) : `z.union([${admitted.join(", ")}])`;
-	const ranged = values.some((value) => value.endsWith("/*")) ? schema : declared;
-	// Lowercased only when every declared value already is, so an oddly-cased one keeps matching.
-	const normalise = values.every((value) => value === value.toLowerCase()) ? ".toLowerCase()" : "";
-	return `z.preprocess((raw) => (typeof raw === "string" ? (raw.split(";")[0] ?? "").trim()${normalise} : raw), ${ranged})`;
+	const ranged = values.some(isMediaRange) ? schema : declared;
+	/**
+	 * **The request's media type is reduced to its essence, and so is every declared one.** A value
+	 * declared as its own essence - `application/json` - is the literal the essence is compared with.
+	 * One declared with a parameter or in capitals - `application/json; charset=utf-8` - is restored
+	 * from the essence, so the request is admitted and the handler is given the type as the document
+	 * declares it, which is what its input type says. Compared as written, such a value refused every
+	 * request: no request's essence carries a parameter.
+	 */
+	const restored = values.filter(
+		(value) => !isMediaRange(value) && mediaTypeEssenceOf(value) !== value,
+	);
+	const essence = `(raw.split(";")[0] ?? "").trim().toLowerCase()`;
+	const decoded =
+		restored.length === 0
+			? essence
+			: `((essence) => ${restored
+					.map(
+						(value) =>
+							`essence === ${JSON.stringify(mediaTypeEssenceOf(value))} ? ${JSON.stringify(value)} : `,
+					)
+					.join("")}essence)(${essence})`;
+	return `z.preprocess((raw) => (typeof raw === "string" ? ${decoded} : raw), ${ranged})`;
 }
 
 function parameterSchemasOf(
