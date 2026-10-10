@@ -208,9 +208,11 @@ download was served empty.
 
 #### A spec with more than one `@service` gets contracts per service
 
-A shared `contracts-output-dir` is split into `<dir>/<ServiceName>`, as `output-dir` already is. Point
-each service's imports at its own directory. A package specifier given as `contracts-package` has to
-be set per service, under `services`.
+Where two or more services write to the top-level `contracts-output-dir`, each writes to
+`<dir>/<ServiceName>`. Point each service's imports at its own directory. A package specifier given
+as `contracts-package` has to be set per service, under `services`. A service that is the only one
+writing there, the others naming their own `contracts-output-dir` under `services`, writes where it
+did, and nothing changes for it.
 
 #### TypeSpec 1.17
 

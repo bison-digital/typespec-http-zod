@@ -3359,6 +3359,10 @@ export async function emitHttpZod(context: EmitContext): Promise<readonly Emitte
 	 * there means a server emitter follows without knowing this rule exists.
 	 */
 	const distinctServices = new Set(snapshots.map((snapshot) => snapshot.service.namespace.name));
+	/** The services writing to the top-level `contracts-output-dir`: every one not naming its own. */
+	const sharingContracts = [...distinctServices].filter(
+		(name) => options.services?.[name]?.["contracts-output-dir"] === undefined,
+	);
 	/**
 	 * **Every service must seal the same way, because `@typespec/openapi3` has no per-service
 	 * options.**
@@ -3408,18 +3412,20 @@ export async function emitHttpZod(context: EmitContext): Promise<readonly Emitte
 				? resolvePath(context.emitterOutputDir, serviceName)
 				: context.emitterOutputDir);
 		/**
-		 * **Split the same way as `output-dir`, and for the same reason.** A shared contracts directory
-		 * was written once per service to one path, so the second service's `requests.gen.ts` replaced
-		 * the first's and a whole surface lost its contracts with no diagnostic - the defect the
-		 * per-service validators were split to fix, one artefact over. A relative `contracts-package`
-		 * is resolved from each service's own `wire-contract.gen.ts`, so it names that service's
-		 * contracts; a package specifier has to be set per service.
+		 * **Split where two services would write one file, and nowhere else.** A shared contracts
+		 * directory was written once per service to one path, so the second service's
+		 * `requests.gen.ts` replaced the first's and a whole surface lost its contracts with no
+		 * diagnostic. Counted over the services that WRITE there: one service falling back to the
+		 * shared directory, beside others that name their own, collides with nothing, and splitting
+		 * it moved contracts a project already imported. A relative `contracts-package` is resolved
+		 * from each service's own `wire-contract.gen.ts`, so it names that service's contracts; a
+		 * package specifier has to be set per service.
 		 */
 		const sharedContractsDir = options["contracts-output-dir"];
 		const resolved: ResolvedServiceOptions = {
 			contractsOutputDir:
 				perService?.["contracts-output-dir"] ??
-				(sharedContractsDir !== undefined && distinctServices.size > 1
+				(sharedContractsDir !== undefined && sharingContracts.length > 1
 					? resolvePath(sharedContractsDir, serviceName)
 					: sharedContractsDir),
 			contractsPackage: perService?.["contracts-package"] ?? options["contracts-package"],

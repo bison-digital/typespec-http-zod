@@ -96,6 +96,36 @@ describe("every service in a spec gets its own artefacts", () => {
 	});
 });
 
+describe("a contracts directory is split only where services share it", () => {
+	/**
+	 * **The split exists to stop two services overwriting one file, so it applies only where two do.**
+	 * A project whose second service names its own `contracts-output-dir` leaves the shared one to the
+	 * first service alone, and 0.27.0 wrote that service's contracts there. Splitting by the number of
+	 * services rather than the number SHARING moved them into a subdirectory nothing collided in.
+	 */
+	it("leaves the one service falling back to the shared directory where it was", async () => {
+		const outDir = join(here, ".out", "two-one-shared");
+		const single = await compileFixture(here, "two", {
+			outName: "two-one-shared",
+			extraOptions: {
+				services: {
+					PublicApi: {
+						"contracts-output-dir": join(outDir, "public-contract"),
+						"contracts-package": "../public-contract/requests.gen.js",
+					},
+				},
+			},
+		});
+		expect(single.diagnostics).toEqual([]);
+		const shared = join(outDir, "requests.gen.ts");
+		expect(existsSync(shared), shared).toBe(true);
+		expect(readFileSync(shared, "utf8")).toContain("interface Widget");
+		expect(existsSync(join(outDir, "InternalApi", "requests.gen.ts"))).toBe(false);
+		const own = join(outDir, "public-contract", "requests.gen.ts");
+		expect(readFileSync(own, "utf8")).toContain("interface Article");
+	}, 120_000);
+});
+
 describe("a single service is emitted exactly where it always was", () => {
 	/**
 	 * Relocating output for every existing consumer would be a worse defect than the collision it
