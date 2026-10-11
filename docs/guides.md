@@ -189,8 +189,11 @@ any check made on the path saw account 1. The handler now receives both:
 ```
 
 A read-only property is not in the body sent, so `@path id` beside a model whose `id` is
-`@visibility(Lifecycle.Read)` collides with nothing and still merges. Read `input.body.x` where a
-handler read `input.x` for a body property, and decide which of the two values the operation means.
+`@visibility(Lifecycle.Read)` collides with nothing and still merges. The body is under its `@body`
+parameter's name, so for `@body body: Entry` read `input.body.x` where a handler read `input.x`, and
+decide which of the two values the operation means. **Typecheck before you ship it:** a build that
+bundles without typechecking, as `wrangler deploy` does, compiles a handler still reading `input.x`,
+which is then `undefined`.
 
 Every operation is keyed, so `keyof WireInputs` is every operation the service declares. One that takes
 no input is `Record<string, never>`. A hand-kept list of the operations it used to leave out can be
