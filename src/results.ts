@@ -55,6 +55,13 @@ export interface ResultMember<R extends ResponseFacts> {
 	 */
 	readonly choosesMediaType: boolean;
 	readonly serving: BodyServing;
+	/**
+	 * **The document declares a schema for this body that nothing checks it against**: a model under a
+	 * media type that is not JSON, which the handler supplies as text (`"unvalidated"`) or, under a
+	 * type that is not text, as bytes (`"binary"`). A `bytes` or `Http.File` body declares nothing to
+	 * check, so it is not this.
+	 */
+	readonly unvalidated: boolean;
 }
 
 /**
@@ -71,6 +78,22 @@ export function mediaTypeEssenceOf(type: string): string {
 /** `application/json` and every `+json` suffix: the media types a body is serialised as JSON for. */
 export function isJsonMediaType(type: string): boolean {
 	return /^application\/(json|.*\+json)$/.test(mediaTypeEssenceOf(type));
+}
+
+/**
+ * **A media type whose body is text by its registration**: the `text` top-level type (RFC 2046
+ * section 4.1) and the XML media types, `application/xml` and the `+xml` suffix (RFC 7303).
+ *
+ * **What decides whether a body nothing parses is text or bytes.** A model declared under such a type
+ * has no reader or serialisation this emitter can derive, so it is handed over as the text that
+ * arrived and answered as the text the handler writes. Under any other type, such as
+ * `application/octet-stream` or `application/x-protobuf`, text cannot carry it: decoded as UTF-8,
+ * every byte that is not a valid sequence becomes U+FFFD, so it is bytes instead. JSON is text as
+ * well, and is parsed rather than handed over, so it never reaches this question.
+ */
+export function isTextualMediaType(type: string): boolean {
+	const essence = mediaTypeEssenceOf(type);
+	return essence.startsWith("text/") || essence === "application/xml" || essence.endsWith("+xml");
 }
 
 /** A media range such as `image/*`, rather than a type a response can be sent as. */
@@ -103,17 +126,30 @@ export function resultMembersOf<R extends ResponseFacts>(
 ): ResultMember<R>[] {
 	return responses.flatMap((response, index): ResultMember<R>[] => {
 		if (response.contentTypes.length === 0) {
-			return [{ response, index, mediaType: undefined, choosesMediaType: false, serving: "none" }];
+			return [
+				{
+					response,
+					index,
+					mediaType: undefined,
+					choosesMediaType: false,
+					serving: "none",
+					unvalidated: false,
+				},
+			];
 		}
 		const choosesMediaType =
 			response.contentTypes.length > 1 || response.contentTypes.some(isMediaRange);
-		return response.contentTypes.map((mediaType) => ({
-			response,
-			index,
-			mediaType,
-			choosesMediaType,
-			serving: servingOf(response, mediaType, hasBody(response)),
-		}));
+		return response.contentTypes.map((mediaType) => {
+			const serving = servingOf(response, mediaType, hasBody(response));
+			return {
+				response,
+				index,
+				mediaType,
+				choosesMediaType,
+				serving,
+				unvalidated: serving === "unvalidated" || (serving === "binary" && !response.binary),
+			};
+		});
 	});
 }
 
@@ -125,9 +161,11 @@ function servingOf(response: ResponseFacts, mediaType: string, bodied: boolean):
 	/**
 	 * **A string body under a non-JSON media type IS the text**, so it is validated and served as is.
 	 * Any other body under one - a model as `application/xml` - has no serialisation this emitter can
-	 * derive, so the text has to come from the application and is served unvalidated.
+	 * derive, so it has to come from the application and is served unvalidated: as the text it writes
+	 * under a textual media type, and as bytes under any other (see {@link isTextualMediaType}).
 	 */
-	return response.textual ? "text" : "unvalidated";
+	if (response.textual) return "text";
+	return isTextualMediaType(mediaType) ? "unvalidated" : "binary";
 }
 
 /**

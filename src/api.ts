@@ -36,6 +36,7 @@ import { SchemaRegistry, TypeRegistry } from "./registry.js";
 import {
 	isJsonMediaType,
 	isMediaRange,
+	isTextualMediaType,
 	mediaTypeEssenceOf,
 	mediaTypeTypeOf,
 	type ResultMember,
@@ -63,6 +64,7 @@ export {
 	type BodyServing,
 	isJsonMediaType,
 	isMediaRange,
+	isTextualMediaType,
 	mediaTypeEssenceOf,
 	mediaTypeTypeOf,
 	type ResponseFacts,
@@ -1246,7 +1248,8 @@ export interface EmittedRoute {
 	 * contract: where a signature covers exactly what arrived, parsing and re-serialising would verify
 	 * a different string than the sender signed. An `Http.File` body, whose contents are the body. And
 	 * a body declared only under media types nothing can parse into it, such as a model as
-	 * `application/xml`, which is the text that arrived. {@link rawBodyBinary} says which are bytes.
+	 * `application/xml`, which is the text that arrived, or as `application/octet-stream`, which is
+	 * the bytes. {@link rawBodyBinary} says which are bytes.
 	 */
 	readonly rawBodyProperty: string | undefined;
 	/**
@@ -1257,6 +1260,13 @@ export interface EmittedRoute {
 	 * `false` where there is no raw body.
 	 */
 	readonly rawBodyBinary: boolean;
+	/**
+	 * **The raw body is declared with a schema nothing checks it against**: it is declared only under
+	 * media types nothing can parse into it, such as a model as `application/xml`. A `bytes` or
+	 * `Http.File` body declares nothing to check, so it is not this. The request-side twin of
+	 * {@link ResultMember.unvalidated}.
+	 */
+	readonly rawBodyUnvalidated: boolean;
 	/**
 	 * The input property a PARSED body arrives under, where it must not be spread into the parameters.
 	 *
@@ -1835,6 +1845,7 @@ function requestBodyPlacementOf(
 ): {
 	readonly rawBodyProperty: string | undefined;
 	readonly rawBodyBinary: boolean;
+	readonly rawBodyUnvalidated: boolean;
 	readonly bodyProperty: string | undefined;
 	readonly optionalBody: boolean;
 } {
@@ -1954,12 +1965,23 @@ function requestBodyPlacementOf(
 	 * emitter represent a textual file "as strings or streams of textual characters", and one
 	 * representation for every file is what lets a file declared `application/json` be told from a
 	 * JSON body - which the media type alone cannot do.
+	 *
+	 * **A body nothing parses is bytes unless every type it is declared under is text.** Decoded as
+	 * text, `application/octet-stream` lost every byte that is not valid UTF-8; see
+	 * {@link isTextualMediaType}.
 	 */
 	const rawBodyBinary =
 		rawBodyProperty !== undefined &&
-		!unparseable &&
-		(bodyParameter?.bodyKind === "file" || isRawBinaryMediaType(contentTypes));
-	return { rawBodyProperty, rawBodyBinary, bodyProperty, optionalBody };
+		(unparseable
+			? !contentTypes.every(isTextualMediaType)
+			: bodyParameter?.bodyKind === "file" || isRawBinaryMediaType(contentTypes));
+	return {
+		rawBodyProperty,
+		rawBodyBinary,
+		rawBodyUnvalidated: unparseable,
+		bodyProperty,
+		optionalBody,
+	};
 }
 
 export function collectRoutes(
@@ -1999,10 +2021,8 @@ export function collectRoutes(
 				operation.operation,
 				operation.verb,
 			);
-			const { rawBodyProperty, rawBodyBinary, bodyProperty, optionalBody } = requestBodyPlacementOf(
-				program,
-				operation,
-			);
+			const { rawBodyProperty, rawBodyBinary, rawBodyUnvalidated, bodyProperty, optionalBody } =
+				requestBodyPlacementOf(program, operation);
 			const authentication = authenticationFor(program, operation);
 			const template = routeTemplateOf(
 				operation.uriTemplate,
@@ -2107,6 +2127,7 @@ export function collectRoutes(
 				),
 				rawBodyProperty,
 				rawBodyBinary,
+				rawBodyUnvalidated,
 				bodyProperty,
 				optionalBody,
 				scopes: authentication.scopes,
@@ -2746,9 +2767,9 @@ function collectRequestTypes(
 						`{\n\t${objectKey(placement.rawBodyProperty)}: ${streamsBody ? "ByteStream | null" : "string"};\n}`,
 					);
 					/**
-					 * **The model a body under XML names is still declared**, as the document declares it,
-					 * though the input is the text that arrived. 0.27.0 declared it, and a consumer
-					 * importing it lost the import when the body became text.
+					 * **The model a body nothing parses names is still declared**, as the document declares
+					 * it, though the input is the text or the bytes that arrived. 0.27.0 declared it, and a
+					 * consumer importing it lost the import when the body became raw.
 					 */
 					if (body !== undefined && declaresComponent(body)) registry.expressionFor(body);
 				} else {
@@ -2812,10 +2833,20 @@ function collectResponseTypes(
 			 * **What a producer SUPPLIES for a body, which is what the server emitters accept for it.** A
 			 * stream or a raw binary body is handed over as bytes and never parsed, so it is spelled as
 			 * bytes - `ByteStream` rather than the platform stream, for the same reason as a request body.
-			 * A model under a media type that is not JSON is text the producer serialised. Everything else
-			 * is the producer's view of the contract type.
+			 * A model under a media type that is not JSON is what the producer serialised: text under a
+			 * textual media type, bytes under any other. Everything else is the producer's view of the
+			 * contract type.
 			 */
 			const bodyOf = (member: ResultMember<ResolvedResponse>): string | undefined => {
+				// A model a body served unvalidated names is declared all the same, as the request side
+				// declares one under a media type nothing parses: the document declares it either way.
+				if (
+					member.unvalidated &&
+					member.response.body !== undefined &&
+					declaresComponent(member.response.body)
+				) {
+					registry.expressionFor(member.response.body);
+				}
 				switch (member.serving) {
 					case "none":
 						return undefined;
@@ -2826,10 +2857,6 @@ function collectResponseTypes(
 						streams = true;
 						return "ByteStream | Uint8Array<ArrayBuffer> | ArrayBuffer";
 					case "unvalidated":
-						// The model is declared all the same, as the request side declares one under XML.
-						if (member.response.body !== undefined && declaresComponent(member.response.body)) {
-							registry.expressionFor(member.response.body);
-						}
 						return "string";
 					default: {
 						if (member.response.body === undefined) return undefined;

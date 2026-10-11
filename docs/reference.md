@@ -223,7 +223,7 @@ for one of these reasons, and nothing else.
 | a property with a default is optional, `?: T \| undefined`                                                                   | required                    | the contract is the caller's view: a caller may leave it out, and `.default()` accepts `undefined` and fills it. A handler receives it filled                                     |
 | a response body is `Produced<T>`, deeply `readonly`                                                                          | `T`                         | a producer may hand back a readonly view, and nothing the server does depends on mutability                                                                                       |
 | a binary or streamed body is `ByteStream` (a request) or `ByteStream \| Uint8Array<ArrayBuffer> \| ArrayBuffer` (a response) | `string`                    | the bytes are handed over unread, and a platform stream satisfies `ByteStream` with no DOM or runtime library                                                                     |
-| a body under a media type nothing parses, such as a model as `application/xml`, is `string`                                  | the model                   | it is the text that arrives or is sent; the model is still declared                                                                                                               |
+| a body under a media type nothing parses, such as a model as `application/xml`, is `string`                                  | the model                   | it is the text that arrives or is sent; the model is still declared. Under a type that is not text, such as `application/octet-stream`, it is bytes, as a binary body is          |
 | a multipart file part is a structural `{ name, type, arrayBuffer() }`                                                        | `string`                    | the part a server hands over is a file, and `File` needs an ambient library                                                                                                       |
 | a `@sharedRoute`'s operations are keyed separately                                                                           | one operation per path item | each is its own operation in the spec, chosen by its `accept`                                                                                                                     |
 | an optional path parameter is optional                                                                                       | required                    | TypeSpec declares it optional, and the route admits its absence; OpenAPI requires every path parameter                                                                            |
@@ -306,8 +306,8 @@ response is a redirect, gets its arms like any other.
 `EmittedRoute.responses` publishes the same facts to an emitter built on this API, with each header's
 TypeScript type, whether a body is raw binary (`binary`, whose schema is `z.unknown()`), whether it
 is a stream of events or lines (`streamed`), and whether its type is a string (`textual`), which is
-what decides whether a body under a non-JSON media type is the text itself. `EmittedService.schemaNames` gives the identifier each
-arm's body is declared under, in the same order.
+what decides whether a body under a non-JSON media type is the text itself. `EmittedService.schemaNames`
+gives the identifier each arm's body is declared under, in the same order.
 
 ## What a declared type checks, and what a `format` annotation does not
 

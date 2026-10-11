@@ -85,7 +85,14 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
   body is `ByteStream | Uint8Array<ArrayBuffer> | ArrayBuffer`, and a stream is `ByteStream`, as the
   server emitters accept them. A model served under a media type that is not JSON, such as
   `application/xml`, is `string`, the text a producer serialised: it was `Produced<Model>`, which no
-  server serialises from. The model itself is still declared.
+  server serialises from. Under a media type that is not text either, such as
+  `application/octet-stream`, it is bytes, as a binary body is. The model itself is still declared.
+- **A model answered under a media type that is neither JSON nor text is served as bytes.** Its
+  `ResultMember.serving` is `"binary"` where it was `"unvalidated"`, so a server emitter serves the
+  bytes a handler returns rather than a string, which served as UTF-8 cannot carry an
+  `application/octet-stream` or `application/x-protobuf` body. `ResultMember.unvalidated` (new) still
+  says its schema goes unchecked. Text is the `text/*` types and the XML types, `application/xml`
+  and the `+xml` suffix (RFC 2046, RFC 7303); `isTextualMediaType` (new) is the rule.
 
 ### Changed
 
@@ -111,14 +118,17 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
   compares essences and hands the handler the value as declared, which is what its input type says.
   The JSON, parseable and range checks compare essences too, so such a body is placed and validated
   as JSON, not handed over as text.
-- **A body declared only under media types nothing can parse into it is handed over as text.** A
+- **A body declared only under media types nothing can parse into it is handed over raw.** A
   model under `application/xml`, or a `string | int32` under its default `text/plain`, has no reader
   this emitter can derive. The server checked the request's headers and called the handler with the
   body never read, while `typespec-hono`'s `unvalidatable-media-type` warning said such requests
-  were refused. It is now a raw body, `rawBodyProperty` with `rawBodyBinary: false`, and
-  `WireInputs` states it as `{ body: string }`. That is what the response side already asks of a
-  handler serving a model as XML. A string body is unchanged: it is text, and its schema still
-  checks it.
+  were refused. It is now a raw body, `rawBodyProperty`, and `EmittedRoute.rawBodyUnvalidated` (new)
+  says its schema goes unchecked. Under a textual media type it is the text that arrived
+  (`rawBodyBinary: false`, `{ body: string }` in `WireInputs`), which is what the response side
+  already asks of a handler serving a model as XML. Under any other, such as
+  `application/octet-stream`, it is the unread stream (`ByteStream | null`): decoded as text, every
+  byte that is not valid UTF-8 became U+FFFD. A string body is unchanged: it is text, and its
+  schema still checks it.
 - **A delimited query parameter's contract type is the list, as its handler receives it.**
   `@query @encode(ArrayEncoding.pipeDelimited) colors: string[]` was typed `colors: string` in
   `WireInputs`, while the validator splits it back into the declared `string[]`. The contract walk
@@ -177,10 +187,13 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
   an emitter comparing declared media types the way this package does.
 
 - **`resultMembersOf`, `statusCodesOf`, `mediaTypeTypeOf`, `isJsonMediaType`, `isMediaRange`,
-  `STATUS_CODES` and `CONTENTLESS_STATUS_CODES`, with the types `ResultMember`, `ResponseFacts` and
-  `BodyServing`**: what a result is made of (one member per declared response and media type, its
-  serving kind, and the status codes each answers with), exported for the server emitters. Both
-  `typespec-hono` and `typespec-http-mcp` held a copy of these rules and of the status table.
+  `isTextualMediaType`, `STATUS_CODES` and `CONTENTLESS_STATUS_CODES`, with the types `ResultMember`,
+  `ResponseFacts` and `BodyServing`**: what a result is made of (one member per declared response
+  and media type, its serving kind, whether its schema goes unchecked, and the status codes each
+  answers with), exported for the server emitters. Both `typespec-hono` and `typespec-http-mcp` held
+  a copy of these rules and of the status table.
+- **`EmittedRoute.rawBodyUnvalidated`**: the raw body is declared with a schema nothing checks it
+  against, so a server emitter can say so without inferring it from the media types.
 
 - **`EmittedService.operations`: the `HttpOperation` each route was collected from, keyed by
   operation id.** Verb and path do not identify an operation, because `@sharedRoute` gives every

@@ -1,7 +1,10 @@
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getAllHttpServices } from "@typespec/http";
 import { beforeAll, describe, expect, it } from "vitest";
+import { collectRoutes } from "../../src/index.js";
+import { SchemaRegistry } from "../../src/registry.js";
 import { compileFixture, type CompiledFixture } from "../support/compile-fixture.js";
 import { typecheckEmitted } from "../support/typecheck-emitted.js";
 
@@ -49,7 +52,7 @@ describe("every operation's input, as the handler receives it", () => {
 export type Keys = MustHold<Identical<keyof WireInputs,
 	| "readThing" | "createThing" | "cancelPending" | "createCharge" | "authorize" | "ingestEvents"
 	| "ingestEvent" | "setColour" | "setNote" | "upload" | "signed" | "submitForm" | "ranged" | "uploadFile" | "putXml" | "listColours"
-	| "rename" | "replaceWidget" | "putXmlOnly">>;
+	| "rename" | "replaceWidget" | "putXmlOnly" | "putBlobOnly">>;
 export type Nothing = MustHold<Identical<WireInputs["cancelPending"], Record<string, never>>>;
 export type RangeOnly = MustHold<Identical<WireInputs["ranged"], { q: string }>>;
 `);
@@ -129,6 +132,45 @@ export type Output = MustHold<Identical<WireOutputs["putXmlOnly"], string>>;
 `);
 		expect(output).toBe("");
 		expect(failed).toBe(false);
+	});
+
+	/**
+	 * **A model under a media type that is not text is bytes, both ways.** Handed over as text, an
+	 * `application/octet-stream` body lost every byte that is not valid UTF-8, and a result typed
+	 * `string` could not carry one.
+	 */
+	it("hands a model under a media type that is not text over as bytes, and answers it as bytes", () => {
+		const { output, failed } = withConsumer(`${PRELUDE}
+import type { BlobRequest, BlobResponse, WireOutputs } from "./requests.gen.js";
+export type Request = MustHold<Identical<BlobRequest, { note: string }>>;
+export type Response = MustHold<Identical<BlobResponse, { echo: string }>>;
+export type Input = MustHold<Identical<WireInputs["putBlobOnly"], { body: ByteStream | null; "Content-Type": "application/octet-stream" }>>;
+export type Output = MustHold<Identical<WireOutputs["putBlobOnly"], ByteStream | Uint8Array<ArrayBuffer> | ArrayBuffer>>;
+`);
+		expect(output).toBe("");
+		expect(failed).toBe(false);
+	});
+
+	/**
+	 * **The route says which raw bodies are bytes, and which carry a schema nothing checks**, which is
+	 * what a server emitter reads to read the body and to say it is unchecked.
+	 */
+	it("records each raw body as bytes or text, and whether its schema goes unchecked", () => {
+		const [[service]] = getAllHttpServices(compiled.program);
+		if (service === undefined) throw new Error("no service");
+		const facts = Object.fromEntries(
+			collectRoutes(compiled.program, new SchemaRegistry(compiled.program), service)
+				.filter((route) => route.rawBodyProperty !== undefined)
+				.map((route) => [route.operationId, [route.rawBodyBinary, route.rawBodyUnvalidated]]),
+		);
+		expect(facts).toEqual({
+			upload: [true, false],
+			signed: [false, false],
+			uploadFile: [true, false],
+			putXml: [false, true],
+			putXmlOnly: [false, true],
+			putBlobOnly: [true, true],
+		});
 	});
 
 	it("declares no per-operation alias beside the lookup", () => {

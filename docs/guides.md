@@ -112,13 +112,15 @@ optional. `@typespec/versioning` is an optional peer dependency, resolved behind
 
 ### To `0.28.0`
 
-**Most changes here are to `requests.gen.ts`, the framework-free contract types.** Four reach a server
+**Most changes here are to `requests.gen.ts`, the framework-free contract types.** Five reach a server
 emitter's handlers whether or not contracts are emitted, because they change what `EmittedRoute`
-publishes:
+and `resultMembersOf` publish:
 
 - a body declared only under media types nothing can parse, such as a model as `application/xml` or a
-  `string | int32` as `text/plain`, is handed over as the text that arrived, under its parameter's
-  name, and is not validated;
+  `string | int32` as `text/plain`, is handed over under its parameter's name as it arrived, and is
+  not validated: as the text under a textual media type, and as the unread stream under any other,
+  such as `application/octet-stream`;
+- a model answered under a media type that is neither JSON nor text is bytes, not a string;
 - a model body that sends a key a parameter also has is named rather than merged;
 - a media type declared with a parameter or in capitals, such as `application/json; charset=utf-8`, is
   JSON, so its body is placed and validated as JSON;

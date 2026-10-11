@@ -123,6 +123,26 @@ model XmlResponse {
   @body body: XmlResponse;
 };
 
+/**
+ * The same under a media type that is not text, in both directions: the bytes, because text cannot
+ * carry them, and the models still declared.
+ */
+model BlobRequest {
+  note: string;
+}
+
+model BlobResponse {
+  echo: string;
+}
+
+@route("/blob-only") @put op putBlobOnly(
+  @header contentType: "application/octet-stream",
+  @body body: BlobRequest,
+): {
+  @header contentType: "application/octet-stream";
+  @body body: BlobResponse;
+};
+
 model Renaming {
   name: string;
 }
