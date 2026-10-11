@@ -147,8 +147,9 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
 - **`mediaTypeEssenceOf`**: a media type's `type/subtype`, lowercased and without parameters, for
   an emitter comparing declared media types the way this package does.
 
-- **`resultMembersOf`, `statusCodesOf`, `mediaTypeTypeOf`, `isJsonMediaType`, `isMediaRange` and
-  `STATUS_CODES`**: what a result is made of (one member per declared response and media type, its
+- **`resultMembersOf`, `statusCodesOf`, `mediaTypeTypeOf`, `isJsonMediaType`, `isMediaRange`,
+  `STATUS_CODES` and `CONTENTLESS_STATUS_CODES`, with the types `ResultMember`, `ResponseFacts` and
+  `BodyServing`**: what a result is made of (one member per declared response and media type, its
   serving kind, and the status codes each answers with), exported for the server emitters. Both
   `typespec-hono` and `typespec-http-mcp` held a copy of these rules and of the status table.
 

@@ -445,7 +445,7 @@ export interface EmittedResponse {
  * there while the runtime carried both arms. Each walk now renders these records, so a status one
  * walk can see is a status the other can see.
  */
-export interface ResolvedResponse {
+interface ResolvedResponse {
 	readonly status: StatusKey;
 	/** The body type, or `undefined` where the status declares none (`void` and `never` included). */
 	readonly body: Type | undefined;
@@ -476,11 +476,25 @@ export interface ResolvedResponse {
  *
  * Resolution order, not precedence order, because a renderer that declares components has to
  * declare them in the order they were always declared; {@link inPrecedenceOrder} sorts.
+ *
+ * **Resolved once per operation, and every walk reads that record.** Resolving reports what the
+ * document cannot publish, such as a status range OpenAPI cannot key; the route walk and the contract
+ * walk each resolved the same operation, so with contracts emitted every such error was raised twice.
  */
-export function resolvedResponsesOf(
+function resolvedResponsesOf(
 	program: Program,
 	operation: HttpOperation,
-): ResolvedResponse[] {
+): readonly ResolvedResponse[] {
+	const resolved = resolvedResponses.get(operation);
+	if (resolved !== undefined) return resolved;
+	const fresh = resolveResponses(program, operation);
+	resolvedResponses.set(operation, fresh);
+	return fresh;
+}
+
+const resolvedResponses = new WeakMap<HttpOperation, readonly ResolvedResponse[]>();
+
+function resolveResponses(program: Program, operation: HttpOperation): ResolvedResponse[] {
 	const byStatus = new Map<
 		string,
 		{
@@ -547,9 +561,7 @@ export function resolvedResponsesOf(
 }
 
 /** Responses in OpenAPI's precedence order: exact codes, then ranges, then `default`. */
-export function inPrecedenceOrder<R extends { readonly status: StatusKey }>(
-	responses: readonly R[],
-): R[] {
+function inPrecedenceOrder<R extends { readonly status: StatusKey }>(responses: readonly R[]): R[] {
 	return responses.toSorted(
 		(a, b) =>
 			statusPrecedenceOf(a.status) - statusPrecedenceOf(b.status) ||
