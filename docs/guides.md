@@ -172,7 +172,10 @@ WireInputs["createCharge"]; // { id: string; body: Charge }
 ```
 
 A model body is still merged. **Delete any code that flattened a handler's input to reach a backend
-typed by the old contract**: the two now agree, and the flattening is the bug.
+typed by the old contract**: the two now agree, and the flattening is the bug. Where a backend's own
+port takes the body and its parameters as one object, merge them where it is called,
+`{ ...input.body, id: input.id }`, and type a raw body read for itself as `WireInputs["op"]["body"]`,
+not as the whole input.
 
 **A model body that sends a key a parameter also has is named too.** Merged, one value replaced the
 other and the handler saw only the body's: `POST /accounts/1/entries` with `{ "accountId": 2 }` in
