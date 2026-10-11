@@ -205,6 +205,10 @@ interface Backend {
 
 A hand-written result type such as `{ status: number; body: T }` can be deleted.
 
+A model served under a media type that is not JSON, such as `application/xml`, is `string` in both:
+the text the producer serialises, which is what a server hands over and sends. It was
+`Produced<Model>`. The model is still declared, so an import of it keeps working.
+
 A binary response body is `Uint8Array<ArrayBuffer>` among its alternatives, which needs TypeScript 5.7
 or later.
 

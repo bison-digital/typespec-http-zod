@@ -109,6 +109,20 @@ enum Colour {
  */
 @route("/xml") @put op putXml(@header contentType: "application/xml", @body body: Thing): void;
 
+/** Models named only under XML, in both directions: still declared, as the document declares them. */
+model XmlRequest {
+  note: string;
+}
+
+model XmlResponse {
+  echo: string;
+}
+
+@route("/xml-only") @put op putXmlOnly(@header contentType: "application/xml", @body body: XmlRequest): {
+  @header contentType: "application/xml";
+  @body body: XmlResponse;
+};
+
 model Renaming {
   name: string;
 }

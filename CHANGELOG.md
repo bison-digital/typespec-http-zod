@@ -79,7 +79,9 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
   runtime beside it carried every arm. It is now the union of each `2xx`/`3xx` response's body,
   `undefined` for one with no body, and `never` for an operation that declares no success. A binary
   body is `ByteStream | Uint8Array<ArrayBuffer> | ArrayBuffer`, and a stream is `ByteStream`, as the
-  server emitters accept them.
+  server emitters accept them. A model served under a media type that is not JSON, such as
+  `application/xml`, is `string`, the text a producer serialised: it was `Produced<Model>`, which no
+  server serialises from. The model itself is still declared.
 
 ### Changed
 

@@ -49,7 +49,7 @@ describe("every operation's input, as the handler receives it", () => {
 export type Keys = MustHold<Identical<keyof WireInputs,
 	| "readThing" | "createThing" | "cancelPending" | "createCharge" | "authorize" | "ingestEvents"
 	| "ingestEvent" | "setColour" | "setNote" | "upload" | "signed" | "submitForm" | "ranged" | "uploadFile" | "putXml" | "listColours"
-	| "rename" | "replaceWidget">>;
+	| "rename" | "replaceWidget" | "putXmlOnly">>;
 export type Nothing = MustHold<Identical<WireInputs["cancelPending"], Record<string, never>>>;
 export type RangeOnly = MustHold<Identical<WireInputs["ranged"], { q: string }>>;
 `);
@@ -114,6 +114,23 @@ export const buffered: WireInputs["upload"] = { body: new ArrayBuffer(1), "Conte
 	 * `CreateUserInput` for `createUser`, is the name half the specs in existence give their own body
 	 * model, and the two declarations collided (`TS2300`), so the contracts did not compile.
 	 */
+	/**
+	 * **A model the document declares is declared here, whichever media type carries it.** A body
+	 * under XML is handed over as text, so no lookup names its model; 0.27.0 declared it all the same,
+	 * and `openapi-typescript` declares every component. Dropping it broke an import that worked.
+	 */
+	it("declares a model named only under XML, though the lookups type its body as text", () => {
+		const { output, failed } = withConsumer(`${PRELUDE}
+import type { WireOutputs, XmlRequest, XmlResponse } from "./requests.gen.js";
+export type Request = MustHold<Identical<XmlRequest, { note: string }>>;
+export type Response = MustHold<Identical<XmlResponse, { echo: string }>>;
+export type Input = MustHold<Identical<WireInputs["putXmlOnly"], { body: string; "Content-Type": "application/xml" }>>;
+export type Output = MustHold<Identical<WireOutputs["putXmlOnly"], string>>;
+`);
+		expect(output).toBe("");
+		expect(failed).toBe(false);
+	});
+
 	it("declares no per-operation alias beside the lookup", () => {
 		const { output, failed } = withConsumer(`${PRELUDE}
 // @ts-expect-error the per-operation alias is gone

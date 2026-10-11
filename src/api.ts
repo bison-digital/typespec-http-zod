@@ -2664,6 +2664,11 @@ interface RequestTypeEntry {
  * type while the Zod validator went on requiring it. Two artefacts describing different shapes, from
  * a rule no document states.
  */
+/** A body type the contract declares by name, rather than spells inline: a model, union or enum. */
+function declaresComponent(type: Type): boolean {
+	return type.kind === "Model" || type.kind === "Union" || type.kind === "Enum";
+}
+
 function collectRequestTypes(
 	program: Program,
 	registry: TypeRegistry,
@@ -2737,6 +2742,12 @@ function collectRequestTypes(
 					parts.push(
 						`{\n\t${objectKey(placement.rawBodyProperty)}: ${streamsBody ? "ByteStream | null" : "string"};\n}`,
 					);
+					/**
+					 * **The model a body under XML names is still declared**, as the document declares it,
+					 * though the input is the text that arrived. 0.27.0 declared it, and a consumer
+					 * importing it lost the import when the body became text.
+					 */
+					if (body !== undefined && declaresComponent(body)) registry.expressionFor(body);
 				} else {
 					const expression =
 						parameterBody?.bodyKind === "multipart"
@@ -2812,6 +2823,10 @@ function collectResponseTypes(
 						streams = true;
 						return "ByteStream | Uint8Array<ArrayBuffer> | ArrayBuffer";
 					case "unvalidated":
+						// The model is declared all the same, as the request side declares one under XML.
+						if (member.response.body !== undefined && declaresComponent(member.response.body)) {
+							registry.expressionFor(member.response.body);
+						}
 						return "string";
 					default: {
 						if (member.response.body === undefined) return undefined;
