@@ -154,9 +154,20 @@ Under `exactOptionalPropertyTypes`, code that assigns `{ note: maybe }` where `m
 const thing: Thing = { id, ...(maybe === undefined ? {} : { note: maybe }) };
 ```
 
-A helper that widened one side to compare the two surfaces, such as a `Loosen<T>` adding
-`| undefined` to `openapi-typescript`'s output, has to be deleted: the widened side no longer
-assigns to the exact `?: T` (`TS2375`).
+The spread covers one property. A value whose own type declares `?: T | undefined` further down, such
+as an envelope's `meta.correlationid`, fails at that depth, and `TS2375` names the path. Declare that
+type's optional properties `?: T` as well, and the value assigns whole. Where the type cannot change,
+the conversion has to leave the key out at every depth, because the validator refuses a present
+`undefined`.
+
+A widening helper has to be deleted wherever it stood in for the old `?: T | undefined`:
+
+- one that widened a side so the two surfaces compared equal, such as a `Loosen<T>` adding
+  `| undefined` to `openapi-typescript`'s output, now makes the comparison fail;
+- a value of a widened type no longer assigns to the contract (`TS2375`).
+
+A widening on a type that only receives a contract value, such as a parameter, still compiles. It
+admits a value the validator refuses, so delete it as well.
 
 #### `WireInputs["op"]` is the handler's input
 
