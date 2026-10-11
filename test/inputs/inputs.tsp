@@ -109,5 +109,26 @@ enum Colour {
  */
 @route("/xml") @put op putXml(@header contentType: "application/xml", @body body: Thing): void;
 
+model Renaming {
+  name: string;
+}
+
+model Widget {
+  @visibility(Lifecycle.Read) id: string;
+  label: string;
+}
+
+/**
+ * A body key equal to a parameter's name: named, because merged one value would replace the other.
+ * The path's `name` was lost, and the handler was given the body's under the path's name.
+ */
+@route("/renames/{name}") @put op rename(@path name: string, @body body: Renaming): void;
+
+/**
+ * The same names, but the body's `id` is read-only, so the body SENT has no `id` and nothing
+ * collides: merged.
+ */
+@route("/widgets/{id}") @put op replaceWidget(@path id: string, @body body: Widget): void;
+
 /** A delimited query list: a style of flattening, not a type - the handler receives the list. */
 @route("/colours") @get op listColours(@query @encode(ArrayEncoding.pipeDelimited) colors: string[]): void;

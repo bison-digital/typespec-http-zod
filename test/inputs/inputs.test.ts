@@ -31,12 +31,12 @@ function withConsumer(source: string): { output: string; failed: boolean } {
 	}
 }
 
-const PRELUDE = `import type { AuthorizationRequest, ByteStream, Charge, Colour, Event, WireInputs } from "./requests.gen.js";
+const PRELUDE = `import type { AuthorizationRequest, ByteStream, Charge, Colour, Event, Renaming, WireInputs } from "./requests.gen.js";
 
 type Identical<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 type MustHold<T extends true> = T;
 // Every name above is referenced, so an arm that uses only some of them still compiles cleanly.
-export type Referenced = [AuthorizationRequest, ByteStream, Charge, Colour, Event, WireInputs, MustHold<Identical<1, 1>>];
+export type Referenced = [AuthorizationRequest, ByteStream, Charge, Colour, Event, Renaming, WireInputs, MustHold<Identical<1, 1>>];
 `;
 
 describe("every operation's input, as the handler receives it", () => {
@@ -48,7 +48,8 @@ describe("every operation's input, as the handler receives it", () => {
 		const { output, failed } = withConsumer(`${PRELUDE}
 export type Keys = MustHold<Identical<keyof WireInputs,
 	| "readThing" | "createThing" | "cancelPending" | "createCharge" | "authorize" | "ingestEvents"
-	| "ingestEvent" | "setColour" | "setNote" | "upload" | "signed" | "submitForm" | "ranged" | "uploadFile" | "putXml" | "listColours">>;
+	| "ingestEvent" | "setColour" | "setNote" | "upload" | "signed" | "submitForm" | "ranged" | "uploadFile" | "putXml" | "listColours"
+	| "rename" | "replaceWidget">>;
 export type Nothing = MustHold<Identical<WireInputs["cancelPending"], Record<string, never>>>;
 export type RangeOnly = MustHold<Identical<WireInputs["ranged"], { q: string }>>;
 `);
@@ -62,6 +63,8 @@ export type Params = MustHold<Identical<WireInputs["readThing"], { id: string }>
 export type Model = MustHold<Identical<WireInputs["createThing"], { id: string }>>;
 // An array encoding on a query parameter says how it was flattened; the validator splits it back.
 export type Delimited = MustHold<Identical<WireInputs["listColours"], { colors: string[] }>>;
+// A read-only body property is not in the body sent, so it collides with nothing.
+export type NoCollision = MustHold<Identical<WireInputs["replaceWidget"], { id: string; label: string }>>;
 `);
 		expect(output).toBe("");
 		expect(failed).toBe(false);
@@ -76,6 +79,8 @@ export type Indexed = MustHold<Identical<WireInputs["ingestEvent"], { body: Even
 export type Enum = MustHold<Identical<WireInputs["setColour"], { colour: Colour }>>;
 export type Text = MustHold<Identical<WireInputs["setNote"], { note: string; "Content-Type": "text/plain" }>>;
 export type Multipart = MustHold<Identical<WireInputs["submitForm"], { body?: { title: string }; "Content-Type": "multipart/form-data" }>>;
+// A body key equal to a parameter's name: merged, one value would replace the other.
+export type Collides = MustHold<Identical<WireInputs["rename"], { name: string; body: Renaming }>>;
 `);
 		expect(output).toBe("");
 		expect(failed).toBe(false);

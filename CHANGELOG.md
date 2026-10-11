@@ -59,6 +59,14 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
     is the name half the specs in existence give their own body model, so the two collided (`TS2300`)
     and the contracts did not compile. Use `WireInputs["createUser"]`.
 
+- **A model body that sends a key a parameter also has is named, rather than merged.** Merged, the
+  body's value replaced the parameter's and nothing reported it: `parameters/spread`'s composite
+  request lost its path `name`, and a body carrying the `accountId` its path already names put the
+  entry on the account the body chose while a check on the path saw the other. The body is now under
+  its parameter's name, beside the parameter, as `WireInputs` and the server emitters' inputs state
+  it. A read-only property is not in the body sent, so it collides with nothing. Measured over eleven
+  consumer specs, about 1,100 operations: one operation changes.
+
 - **A model named after a helper the emitted files declare is renamed with a trailing `_`**, as a
   reserved word already is: `ByteStream`, `Produced`, `ResponseArm`, `Simplify`, `WireInputs` and
   `WireOutputs`. A model named `Produced`, `Simplify` or `ResponseArm` was declared twice (`TS2300`),

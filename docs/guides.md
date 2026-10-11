@@ -161,6 +161,21 @@ WireInputs["createCharge"]; // { id: string; body: Charge }
 A model body is still merged. **Delete any code that flattened a handler's input to reach a backend
 typed by the old contract**: the two now agree, and the flattening is the bug.
 
+**A model body that sends a key a parameter also has is named too.** Merged, one value replaced the
+other and the handler saw only the body's: `POST /accounts/1/entries` with `{ "accountId": 2 }` in
+the body handed the handler `accountId: 2`, so the entry landed on the account the BODY named while
+any check made on the path saw account 1. The handler now receives both:
+
+```ts
+// op add(@path accountId: int64, @body body: Entry): Entry;   // Entry has accountId
+// before: { accountId: number; amountMinor: number; ... }      // the path's accountId was lost
+// now:    { accountId: number; body: Entry }                   // input.accountId is the path's
+```
+
+A read-only property is not in the body sent, so `@path id` beside a model whose `id` is
+`@visibility(Lifecycle.Read)` collides with nothing and still merges. Read `input.body.x` where a
+handler read `input.x` for a body property, and decide which of the two values the operation means.
+
 Every operation is keyed, so `keyof WireInputs` is every operation the service declares. One that takes
 no input is `Record<string, never>`. A hand-kept list of the operations it used to leave out can be
 deleted.

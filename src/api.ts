@@ -19,6 +19,7 @@ import {
 	resolvePath,
 	type Scalar,
 	type Type,
+	walkPropertiesInherited,
 } from "@typespec/compiler";
 import {
 	getAuthenticationForOperation,
@@ -72,6 +73,7 @@ export {
 } from "./results.js";
 import {
 	collectExternalImports,
+	isPayloadProperty,
 	noteDeclaredVocabularies,
 	noteKeyVocabularies,
 	objectKey,
@@ -1802,7 +1804,32 @@ function fileContentTypeOf(operation: HttpOperation): ModelProperty | undefined 
  * names - an indexer, an optional body, a scalar, enum or union - `WireInputs` described an input no
  * handler receives.
  */
-function requestBodyPlacementOf(operation: HttpOperation): {
+/**
+ * The keys a merged body would contribute to the handler's input: each property of the body SENT,
+ * at the operation's request visibility, under its wire name, or each named part of a multipart
+ * body. A read-only property is not sent, so it contributes nothing.
+ */
+function mergedBodyKeysOf(program: Program, operation: HttpOperation): string[] {
+	const body = operation.parameters.body;
+	if (body?.bodyKind === "multipart") {
+		return body.parts.flatMap((part) => (part.name === undefined ? [] : [part.name]));
+	}
+	const type = requestBodyOf(operation);
+	if (type?.kind !== "Model") return [];
+	return withVisibility(
+		program,
+		resolveRequestVisibility(program, operation.operation, operation.verb),
+		() =>
+			[...walkPropertiesInherited(type)]
+				.filter((property) => isPayloadProperty(program, property))
+				.map((property) => resolveEncodedName(program, property, "application/json")),
+	);
+}
+
+function requestBodyPlacementOf(
+	program: Program,
+	operation: HttpOperation,
+): {
 	readonly rawBodyProperty: string | undefined;
 	readonly rawBodyBinary: boolean;
 	readonly bodyProperty: string | undefined;
@@ -1898,10 +1925,25 @@ function requestBodyPlacementOf(operation: HttpOperation): {
 	 */
 	const unmergeableBody =
 		requestType !== undefined && requestType.kind !== "Model" && rawBodyProperty === undefined;
+	/**
+	 * **A body sharing a key with a parameter is named, because merged one value replaces the
+	 * other.** `PUT /renames/{name}` with a body `{ name }` handed the handler one `name`, the body's,
+	 * and the path's was lost with nothing reported - in `parameters/spread`'s composite request, and
+	 * in any spec whose body repeats a path or query parameter. The document states the two
+	 * separately; named, the handler is given both. A read-only property is not in the body sent, so
+	 * `@path id` beside a model whose `id` is read-only collides with nothing and still merges.
+	 */
+	const parameterNames = new Set(
+		operation.parameters.parameters.map((parameter) => parameter.name),
+	);
+	const collides =
+		rawBodyProperty === undefined &&
+		mergedBodyKeysOf(program, operation).some((key) => parameterNames.has(key));
 	const bodyProperty =
 		(requestType?.kind === "Model" && (requestType.indexer !== undefined || optionalBody)) ||
 		optionalMultipartBody ||
-		unmergeableBody
+		unmergeableBody ||
+		collides
 			? (bodyParameter?.property?.name ?? "body")
 			: undefined;
 	/**
@@ -1954,8 +1996,10 @@ export function collectRoutes(
 				operation.operation,
 				operation.verb,
 			);
-			const { rawBodyProperty, rawBodyBinary, bodyProperty, optionalBody } =
-				requestBodyPlacementOf(operation);
+			const { rawBodyProperty, rawBodyBinary, bodyProperty, optionalBody } = requestBodyPlacementOf(
+				program,
+				operation,
+			);
 			const authentication = authenticationFor(program, operation);
 			const template = routeTemplateOf(
 				operation.uriTemplate,
@@ -2646,7 +2690,7 @@ function collectRequestTypes(
 			resolveRequestVisibility(program, operation.operation, operation.verb),
 			() => {
 				const body = requestBodyOf(operation);
-				const placement = requestBodyPlacementOf(operation);
+				const placement = requestBodyPlacementOf(program, operation);
 				/** The parts of a multipart body, which `requestBodyOf` deliberately does not return. */
 				const parameterBody = operation.parameters.body;
 				/**
