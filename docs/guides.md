@@ -154,7 +154,9 @@ Under `exactOptionalPropertyTypes`, code that assigns `{ note: maybe }` where `m
 const thing: Thing = { id, ...(maybe === undefined ? {} : { note: maybe }) };
 ```
 
-A helper that widened one side to compare the two surfaces, such as a `Loosen<T>`, can be deleted.
+A helper that widened one side to compare the two surfaces, such as a `Loosen<T>` adding
+`| undefined` to `openapi-typescript`'s output, has to be deleted: the widened side no longer
+assigns to the exact `?: T` (`TS2375`).
 
 #### `WireInputs["op"]` is the handler's input
 
@@ -190,6 +192,10 @@ handler read `input.x` for a body property, and decide which of the two values t
 Every operation is keyed, so `keyof WireInputs` is every operation the service declares. One that takes
 no input is `Record<string, never>`. A hand-kept list of the operations it used to leave out can be
 deleted.
+
+A type that told operations with an input from those without by asking `K extends keyof WireInputs`
+no longer separates them: every operation is a key now. An operation with no input takes `{}`, which
+is what the generated route passes it, so pass `{}` where such a type had you pass `undefined`.
 
 A binary `bytes` body is a `ByteStream`, the stream the server hands over unread. It was an
 `ArrayBuffer`. A platform `ReadableStream<Uint8Array>` is assignable to it, so a handler's input can be
