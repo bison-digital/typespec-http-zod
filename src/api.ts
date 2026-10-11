@@ -1860,12 +1860,14 @@ function requestBodyPlacementOf(
 	 */
 	const bytes = requestType?.kind === "Scalar" && requestType.name === "bytes";
 	/**
-	 * **A body declared only under media types nothing can parse into it is the text that arrived.**
-	 * A model as `application/xml` has no serialisation this emitter can derive, and the server has
-	 * no reader for it; it used to get a header check and then call the handler with the body never
-	 * read, while the warning beside it said such requests were refused. Handed over as text, the
-	 * handler parses it - exactly what the response side already asks of a handler serving a model as
-	 * XML. A string body is not this: it IS text, and its schema still checks it (`requestTextual`).
+	 * **A body declared only under media types nothing can parse into it is handed over raw.** A
+	 * model as `application/xml` has no serialisation this emitter can derive, and the server has no
+	 * reader for it; it used to get a header check and then call the handler with the body never
+	 * read, while the warning beside it said such requests were refused. Handed over as it arrived,
+	 * the handler parses it - exactly what the response side already asks of a handler serving a model
+	 * as XML. It is the text under a textual media type and the bytes under any other
+	 * (`rawBodyBinary`). A string body is not this: it IS text, and its schema still checks it
+	 * (`requestTextual`).
 	 */
 	const unparseable =
 		bodyParameter?.bodyKind === "single" &&
