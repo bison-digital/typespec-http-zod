@@ -12,7 +12,7 @@ import {
 	type Program,
 	type Type,
 } from "@typespec/compiler";
-import { isSafePattern } from "redos-detector";
+import { defaultMaxSteps, isSafePattern } from "redos-detector";
 import { reportDiagnostic } from "./lib.js";
 
 /**
@@ -106,19 +106,22 @@ function encodesAsString(program: Program, target: Type): boolean {
 }
 
 /**
- * How long one pattern may be analysed before the answer is "could not prove it".
+ * How much analysis one pattern gets before the answer is "could not prove it": a number of steps.
  *
- * **Bounded, because the analysis is itself exponential in the bad case.** Measured: `^(a|a)+$`
- * takes 1.6 seconds to decide, and a build should not stall on a pattern whose whole problem is that
- * it does too much work. A pattern that cannot be decided inside this is one this emitter cannot
- * certify, which is what the warning says.
+ * **Bounded, because the analysis is itself exponential in the bad case, and bounded in STEPS,
+ * because a verdict must not depend on the machine.** It was 500 ms of wall-clock time, and on a
+ * loaded CI host `^([0-9a-f]{40}|[0-9a-f]{64})$` took 93 to 403 ms and once ran out: the same spec
+ * warned on one build and not the next. A step count is the same everywhere. `redos-detector`'s own
+ * default; measured, `^(a|a)+$` spends it in 1.7 seconds idle and 6 under load, and every ordinary
+ * pattern decides in milliseconds. A pattern that cannot be decided inside it is one this emitter
+ * cannot certify, which is what the warning says.
  */
-const ANALYSIS_TIMEOUT_MS = 500;
+const ANALYSIS_STEPS = defaultMaxSteps;
 
 /**
  * Patterns already judged, keyed on the text, which is the only input the verdict depends on.
  *
- * The analysis costs up to {@link ANALYSIS_TIMEOUT_MS} a pattern, and one pattern text commonly
+ * The analysis costs up to {@link ANALYSIS_STEPS} steps a pattern, and one pattern text commonly
  * recurs across declarations - `^\\d{4}-\\d{2}-\\d{2}$` appears on several scalars in more than one
  * consumer spec - so each distinct text is analysed once per process.
  */
@@ -184,7 +187,7 @@ function firstReportOf(program: Program, code: string, target: Type): boolean {
  *
  * **`false` means "not proven safe", not "proven dangerous"**, and the rule's wording follows that.
  * `redos-detector` proves safety rather than guessing at danger, so a pattern it cannot decide inside
- * the timeout is judged the same way as one it decides against. Measured over a realistic spread of
+ * the step budget is judged the same way as one it decides against. Measured over a realistic spread of
  * 14 patterns an API would carry: 2 conservative warnings, both on a quantifier nested over an
  * overlapping class, and nothing dangerous missed - including `^\w+([.-]?\w+)*$`, which reads as
  * ordinary and takes **11 seconds** on a 29-character input.
@@ -195,7 +198,8 @@ export function patternIsProvablySafe(pattern: string): boolean {
 		try {
 			safe = isSafePattern(pattern, {
 				unicode: unicodeSafe(pattern),
-				timeout: ANALYSIS_TIMEOUT_MS,
+				maxSteps: ANALYSIS_STEPS,
+				timeout: Number.POSITIVE_INFINITY,
 			}).safe;
 		} catch {
 			// A pattern the analyser cannot even parse is not one to make a claim about.

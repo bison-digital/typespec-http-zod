@@ -91,6 +91,11 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
 
 ### Fixed
 
+- **`redos-prone-pattern` gives every pattern the same verdict on every machine.** Its analysis was
+  bounded by 500 ms of wall-clock time and running out read as "not proven safe", so under load an
+  ordinary pattern was sometimes reported: one consumer's
+  `^([0-9a-f]{40}|[0-9a-f]{64})$` took 93 to 403 ms on a loaded CI host and once timed out, which
+  with `warn-as-error` is a flaky build. The bound is now `redos-detector`'s step count.
 - **A media type declared with a parameter or in capitals is compared by its essence.**
   `@header contentType: "application/json; charset=utf-8"` declares JSON, and `Application/JSON` is
   `application/json`. The `Content-Type` validator reduced a request's value to its essence and
