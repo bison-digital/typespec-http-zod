@@ -29,9 +29,11 @@ options:
 ```
 
 `requests.gen.ts` holds plain TypeScript with no imports, so the types can cross layers that must not
-see a validation library. `WireInputs["op"]` is each operation's input exactly as its handler receives
-it: a model body merged with the parameters, any other body under its parameter's name, a binary
-`bytes` body as a `ByteStream`, and `Record<string, never>` for an operation that takes nothing.
+see a validation library. `WireInputs["op"]` is each operation's input as a caller supplies it, and what
+its handler receives is assignable to it: a model body merged with the parameters, any other body under
+its parameter's name, a binary `bytes` body as a `ByteStream | null`, and `Record<string, never>` for an
+operation that takes nothing. A property with a default is optional here, because a caller may leave it
+out, though the handler always receives it.
 `keyof WireInputs` is every operation the service declares. `WireResults["op"]` is its result: one
 member per declared response, each a `{ status, body, headers }` pairing a status with its own body,
 which is what a backend reached over a service binding returns and a server emitter's handler can hand
@@ -110,9 +112,18 @@ optional. `@typespec/versioning` is an optional peer dependency, resolved behind
 
 ### To `0.28.0`
 
-**Every change here is to `requests.gen.ts`, the framework-free contract types**, except the file body
-and the TypeSpec range. A project that emits no contracts (`contracts-output-dir` unset) has nothing to
-change beyond the file body.
+**Most changes here are to `requests.gen.ts`, the framework-free contract types.** Four reach a server
+emitter's handlers whether or not contracts are emitted, because they change what `EmittedRoute`
+publishes:
+
+- a body declared only under media types nothing can parse, such as a model as `application/xml` or a
+  `string | int32` as `text/plain`, is handed over as the text that arrived, under its parameter's
+  name, and is not validated;
+- a model body that sends a key a parameter also has is named rather than merged;
+- a media type declared with a parameter or in capitals, such as `application/json; charset=utf-8`, is
+  JSON, so its body is placed and validated as JSON;
+- an `@encode`d response header's type is its encoded type: `number` for
+  `@encode(DurationKnownEncoding.seconds, int32)`, where it was `string`.
 
 #### An optional property is `?: T`
 

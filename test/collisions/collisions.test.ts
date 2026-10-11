@@ -69,8 +69,17 @@ beforeAll(async () => {
 
 describe("a model may be named after anything the emitter declares", () => {
 	it("found the helpers it is meant to guard", () => {
-		// Non-vacuity: a pattern that stopped matching would generate an empty spec that compiles.
-		expect(helpers.length).toBeGreaterThanOrEqual(6);
+		// Named exactly, so one that stopped being emitted is noticed rather than counted past, and a
+		// new one is a change somebody looks at.
+		expect([...helpers].toSorted()).toEqual([
+			"ByteStream",
+			"Produced",
+			"ResponseArm",
+			"Simplify",
+			"WireInputs",
+			"WireOutputs",
+			"WireResults",
+		]);
 	});
 
 	it("compiles a spec declaring a model under every one of them", () => {

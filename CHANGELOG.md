@@ -43,21 +43,19 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
   tests. Both walks now read one placement rule, the one `EmittedRoute.bodyProperty`,
   `optionalBody` and `rawBodyProperty` publish.
 
-  Measured on the corpus: 72 operations name their body.
-
   - **Every operation is keyed.** One taking no input is `Record<string, never>`, which is what its
     handler is passed, and one whose only success is a range is included. Both were skipped, so
-    `keyof WireInputs` could not enumerate a document's operations: 283 of the corpus's 789 were
-    missing, and a consumer named them by hand.
-  - **A binary `bytes` body is a `ByteStream`, a new export**, because the server hands it over
-    unread. `ArrayBuffer` made a gateway read the whole body to satisfy a backend typed by it.
+    `keyof WireInputs` could not enumerate a document's operations, and a consumer named the
+    missing ones by hand.
+  - **A binary `bytes` body is a `ByteStream | null`, `ByteStream` a new export**, because the
+    server hands it over unread, and `null` where the request carried no body. `ArrayBuffer` made a gateway read the whole body to satisfy a backend typed by it.
     `ByteStream` is the reader every platform stream has, spelled structurally so a contracts
     package compiled with no DOM or runtime library can name it. A platform
     `ReadableStream<Uint8Array>` is assignable to it under lib.dom, lib.webworker,
     `@cloudflare/workers-types` and `@types/node`, on TypeScript 5.9 and 7.0.
   - **The per-operation aliases are gone.** `CreateUserInput` was declared for `createUser`, and that
-    is the name half the specs in existence give their own body model, so the two collided (`TS2300`)
-    and the contracts did not compile. Use `WireInputs["createUser"]`.
+    is a name a spec may well give its own body model, so the two collided (`TS2300`) and the
+    contracts did not compile. Use `WireInputs["createUser"]`.
 
 - **A model body that sends a key a parameter also has is named, rather than merged.** Merged, the
   body's value replaced the parameter's and nothing reported it: `parameters/spread`'s composite
@@ -67,10 +65,15 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
   it. A read-only property is not in the body sent, so it collides with nothing. Measured over eleven
   consumer specs, about 1,100 operations: one operation changes.
 
+- **`requests.gen.ts` needs TypeScript 5.7 or later where an operation answers bytes.** A binary
+  response body is `Uint8Array<ArrayBuffer>` among its alternatives, and typed arrays take a type
+  argument from TypeScript 5.7. Nothing in 0.27.0's output needed it.
+
 - **A model named after a helper the emitted files declare is renamed with a trailing `_`**, as a
-  reserved word already is: `ByteStream`, `Produced`, `ResponseArm`, `Simplify`, `WireInputs` and
-  `WireOutputs`. A model named `Produced`, `Simplify` or `ResponseArm` was declared twice (`TS2300`),
-  and one named `WireInputs` or `WireOutputs` silently MERGED into the lookup of that name. The guard
+  reserved word already is: `ByteStream`, `Produced`, `ResponseArm`, `Simplify`, `WireInputs`,
+  `WireOutputs` and `WireResults`. A model named `Produced`, `Simplify` or `ResponseArm` was declared twice (`TS2300`),
+  and one named `WireInputs`, `WireOutputs` or `WireResults` silently MERGED into the lookup of that
+  name, so an import of the model gave the lookup instead. The guard
   reads the names off emitted output rather than off the list it grades.
 
 - **`WireOutputs[op]` is every success body the operation declares, for every operation.** It was
@@ -91,6 +94,10 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
 
 ### Fixed
 
+- **`wire-contract.gen.ts` pairs every model a response names, not only request bodies.** A model
+  only ever SENT was compared with nothing, so its contract type could drift from the validator the
+  server serves it through: measured, a planted drift in a response-only model left every arm green
+  under the old pairing and fails the build under this one.
 - **`redos-prone-pattern` gives every pattern the same verdict on every machine.** Its analysis was
   bounded by 500 ms of wall-clock time and running out read as "not proven safe", so under load an
   ordinary pattern was sometimes reported: one consumer's
@@ -181,10 +188,6 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
 
 ### Fixed (graded, not shipped)
 
-- **`wire-contract.gen.ts` pairs every model a response names, not only request bodies.** A model
-  only ever SENT was compared with nothing, so its contract type could drift from the validator the
-  server serves it through: measured, a planted drift in a response-only model left every arm green
-  under the old pairing and fails the build under this one.
 - **The portability harness proves what it claimed.** It set `types: []` and no `lib`, and
   TypeScript's default libraries include the DOM, so a `File` in emitted output compiled. It now
   compiles under `lib: ["es2023"]`.

@@ -111,8 +111,8 @@ export const buffered: WireInputs["upload"] = { body: new ArrayBuffer(1), "Conte
 
 	/**
 	 * **There is one name for an operation's input: `WireInputs["op"]`.** A per-operation alias,
-	 * `CreateUserInput` for `createUser`, is the name half the specs in existence give their own body
-	 * model, and the two declarations collided (`TS2300`), so the contracts did not compile.
+	 * `CreateUserInput` for `createUser`, is a name a spec may well give its own body model, and the
+	 * two declarations collided (`TS2300`), so the contracts did not compile.
 	 */
 	/**
 	 * **A model the document declares is declared here, whichever media type carries it.** A body

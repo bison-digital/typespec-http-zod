@@ -245,10 +245,10 @@ let operationIds:
 /**
  * Establish a fresh id resolver for one service's emission.
  *
- * **Scoped per SERVICE rather than per walk, because the walks see different subsets.**
- * `collectRoutes` visits every operation with a success status; `collectRequestTypes` skips any with
- * no body and no parameters. Deduplicating independently would let the two assign a suffix to
- * different operations, and the artefacts would name one operation two ways.
+ * **Scoped per SERVICE rather than per walk, because every walk has to name an operation the same
+ * way.** `collectRoutes` and `collectRequestTypes` both visit every operation, but each is a separate
+ * walk; deduplicating independently would let a suffix depend on the order a walk happened to meet
+ * two operations in, and the artefacts would name one operation two ways.
  *
  * A reset rather than a wrapper, because the emission loop is `for (const snapshot of snapshots)`
  * and awaits each service to completion before the next begins. Nothing interleaves, so there is no
@@ -1242,8 +1242,11 @@ export interface EmittedRoute {
 	/**
 	 * The input property that receives the UNPARSED body, when the operation declares one.
 	 *
-	 * A `bytes` body means the bytes themselves are the contract: where a signature covers exactly
-	 * what arrived, parsing and re-serialising would verify a different string than the sender signed.
+	 * Three bodies are handed over unparsed. A `bytes` body, because the bytes themselves are the
+	 * contract: where a signature covers exactly what arrived, parsing and re-serialising would verify
+	 * a different string than the sender signed. An `Http.File` body, whose contents are the body. And
+	 * a body declared only under media types nothing can parse into it, such as a model as
+	 * `application/xml`, which is the text that arrived. {@link rawBodyBinary} says which are bytes.
 	 */
 	readonly rawBodyProperty: string | undefined;
 	/**
@@ -1836,22 +1839,15 @@ function requestBodyPlacementOf(
 	readonly optionalBody: boolean;
 } {
 	const requestType = requestBodyOf(operation);
+	const bodyParameter = operation.parameters.body;
+	const contentTypes = [...(bodyParameter?.contentTypes ?? [])];
 	/**
 	 * A `bytes` body means the BYTES are the contract.
 	 *
 	 * A webhook's MAC covers exactly what arrived, so a parsed-and-re-serialised object would
 	 * verify a different string and every delivery would fail authentication.
 	 */
-	const bodyParameter = operation.parameters.body;
-	/**
-	 * **An `Http.File` body is raw too: the file's contents ARE the body.** `@typespec/openapi3`
-	 * publishes it as `content: { "image/png": { schema: { contentMediaType: "image/png" } } }` - a
-	 * media type and no type, nothing to parse and nothing to validate - which is exactly a `bytes`
-	 * body under that media type. `requestBodyOf` reads only `bodyKind === "single"`, so a file body
-	 * reached no placement at all: the handler was passed `{}` and the upload was dropped, from a
-	 * compile that reported success, on all four uploads in `type/file`.
-	 */
-	const contentTypes = [...(bodyParameter?.contentTypes ?? [])];
+	const bytes = requestType?.kind === "Scalar" && requestType.name === "bytes";
 	/**
 	 * **A body declared only under media types nothing can parse into it is the text that arrived.**
 	 * A model as `application/xml` has no serialisation this emitter can derive, and the server has
@@ -1860,7 +1856,6 @@ function requestBodyPlacementOf(
 	 * handler parses it - exactly what the response side already asks of a handler serving a model as
 	 * XML. A string body is not this: it IS text, and its schema still checks it (`requestTextual`).
 	 */
-	const bytes = requestType?.kind === "Scalar" && requestType.name === "bytes";
 	const unparseable =
 		bodyParameter?.bodyKind === "single" &&
 		requestType !== undefined &&
@@ -1868,6 +1863,14 @@ function requestBodyPlacementOf(
 		!isStringType(requestType) &&
 		contentTypes.length > 0 &&
 		contentTypes.every((type) => !isParseableMediaType(type));
+	/**
+	 * **An `Http.File` body is raw too: the file's contents ARE the body.** `@typespec/openapi3`
+	 * publishes it as `content: { "image/png": { schema: { contentMediaType: "image/png" } } }` - a
+	 * media type and no type, nothing to parse and nothing to validate - which is exactly a `bytes`
+	 * body under that media type. `requestBodyOf` reads only `bodyKind === "single"`, so a file body
+	 * reached no placement at all: the handler was passed `{}` and the upload was dropped, from a
+	 * compile that reported success, on all four uploads in `type/file`.
+	 */
 	const rawBodyProperty =
 		bytes || bodyParameter?.bodyKind === "file" || unparseable
 			? (bodyParameter?.property?.name ?? "body")
@@ -2893,15 +2896,6 @@ function isSuccessStatus(status: StatusKey): boolean {
 }
 
 /**
- * `requests.gen.ts` - the shape both sides are checked against.
- *
- * Plain TypeScript with no imports at all, so the contract types stay framework-free and a layering
- * rule banning a validation library from the rest of the codebase is untouched. `wire-contract.gen.ts`
- * asserts the emitted Zod infers exactly this; a consumer asserts its own code produces it. Neither
- * imports the other, and a disagreement that would otherwise answer 400 on every request becomes a
- * typecheck failure.
- */
-/**
  * **A stream of bytes, spelled as the reader every stream has rather than as `ReadableStream`.**
  *
  * The server hands a binary request body over unread, so the contract has to say "stream" - a
@@ -2933,6 +2927,15 @@ export interface ByteStream {
 }
 `;
 
+/**
+ * `requests.gen.ts` - the shape both sides are checked against.
+ *
+ * Plain TypeScript with no imports at all, so the contract types stay framework-free and a layering
+ * rule banning a validation library from the rest of the codebase is untouched. `wire-contract.gen.ts`
+ * asserts the emitted Zod infers exactly this; a consumer asserts its own code produces it. Neither
+ * imports the other, and a disagreement that would otherwise answer 400 on every request becomes a
+ * typecheck failure.
+ */
 function renderRequestTypes(
 	entries: readonly RequestTypeEntry[],
 	responses: readonly ResponseTypeEntry[],
@@ -2984,8 +2987,8 @@ function renderRequestTypes(
 	 * **Keyed by operation id, and the only name an operation's input has.**
 	 *
 	 * Each input used to be declared a second time as an alias, `CreateUserInput` for `createUser`,
-	 * and this lookup referenced the aliases. That is the name half the specs in existence give their
-	 * own request model, so the two declarations collided (`TS2300`) and `requests.gen.ts` did not
+	 * and this lookup referenced the aliases. That is a name a spec may well give its own request
+	 * model, so the two declarations collided (`TS2300`) and `requests.gen.ts` did not
 	 * compile for an operation as ordinary as `createUser(@body body: CreateUserInput)`. A type
 	 * exported under a name this emitter invents is a name a spec author can already be using.
 	 * `WireInputs["createUser"]` is the same type, and nothing a spec declares can collide with it.

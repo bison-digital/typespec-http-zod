@@ -79,8 +79,8 @@ model Entry {
  *
  * **Both carry a TypeScript-only property into a wire type if the walk is careless.** `?` on the
  * contract side was written `?: T | undefined` until `0.28.0`, long after the validator stopped
- * accepting an explicit `undefined` - and JSON has no `undefined`. Arrays are emitted mutable, and a codebase that hands back `readonly T[]`
- * cannot satisfy that; `Produced<>` exists for exactly this and was reachable from nowhere.
+ * accepting an explicit `undefined` - and JSON has no `undefined`. Arrays are emitted mutable, and a
+ * codebase that hands back `readonly T[]` cannot satisfy that; `Produced<>` exists for exactly this and was reachable from nowhere.
  */
 model Page {
   entries: Entry[];
