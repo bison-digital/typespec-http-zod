@@ -2923,6 +2923,7 @@ export interface ByteStream {
 	getReader(): {
 		read(): Promise<{ readonly done: boolean; readonly value?: Uint8Array | undefined }>;
 		releaseLock(): void;
+		cancel?(reason?: unknown): Promise<void>;
 	};
 }
 `;

@@ -48,11 +48,12 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
     `keyof WireInputs` could not enumerate a document's operations, and a consumer named the
     missing ones by hand.
   - **A binary `bytes` body is a `ByteStream | null`, `ByteStream` a new export**, because the
-    server hands it over unread, and `null` where the request carried no body. `ArrayBuffer` made a gateway read the whole body to satisfy a backend typed by it.
-    `ByteStream` is the reader every platform stream has, spelled structurally so a contracts
-    package compiled with no DOM or runtime library can name it. A platform
-    `ReadableStream<Uint8Array>` is assignable to it under lib.dom, lib.webworker,
-    `@cloudflare/workers-types` and `@types/node`, on TypeScript 5.9 and 7.0.
+    server hands it over unread, and `null` where the request carried no body. `ArrayBuffer` made a
+    gateway read the whole body to satisfy a backend typed by it. `ByteStream` is the reader every
+    platform stream has, with its optional `cancel`, spelled structurally so a contracts package
+    compiled with no DOM or runtime library can name it. A platform `ReadableStream<Uint8Array>` is
+    assignable to it under lib.dom, lib.webworker, `@cloudflare/workers-types` and `@types/node`, on
+    TypeScript 5.9 and 7.0.
   - **The per-operation aliases are gone.** `CreateUserInput` was declared for `createUser`, and that
     is a name a spec may well give its own body model, so the two collided (`TS2300`) and the
     contracts did not compile. Use `WireInputs["createUser"]`.
