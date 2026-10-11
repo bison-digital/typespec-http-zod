@@ -309,10 +309,13 @@ function explodedQuery(
 		readonly values: "number" | "boolean" | "";
 	},
 ): unknown {
-	if (raw === null || typeof raw !== "object" || Array.isArray(raw) || spec.name in raw) return raw;
+	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
 	const gathered: Record<string, unknown> = {};
 	const rest: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(raw)) {
+		// Already gathered only where an OBJECT sits under the name: a query value from the wire is a
+		// string or a list of them, and \`{ param: 0 }\` expands to \`?param=0\`.
+		if (key === spec.name && value !== null && typeof value === "object" && !Array.isArray(value)) return raw;
 		const own = spec.keys === null ? !spec.others.includes(key) : spec.keys.includes(key);
 		if (!own) {
 			rest[key] = value;

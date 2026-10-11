@@ -125,6 +125,12 @@ Upgrading: [what to check before you take this](docs/guides.md#to-0280).
   read `@encode` directly and missed the exception the Zod walk already made for a parameter's array
   style. Both now ask `encodedTypeOf`. Found by `typespec-hono`'s new corpus agreement oracle on
   `parameters/collection-format`.
+- **A form-exploded query record whose key is the parameter's own name is gathered.**
+  `{ param: 0 }` for `@query(#{ explode: true }) param: Record<int32>` arrives as `?param=0`. The
+  gatherer took any `param` key as a query already gathered and left it in place, so the record
+  schema refused the string with a 400. Only an object under the name is now taken as gathered, since
+  a query value from the wire is a string or a list of them. Found by `typespec-postman`'s corpus
+  judge on `routes`.
 - **Each `@service` gets its own contract types.** `contracts-output-dir` was shared by every service
   in a spec, so the second service's `requests.gen.ts` replaced the first's, and a whole surface lost
   its contracts with no diagnostic. Where two or more services write to it, each now writes to

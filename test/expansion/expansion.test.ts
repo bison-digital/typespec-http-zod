@@ -109,6 +109,27 @@ describe("a query value is decoded from its form expansion", () => {
 		expect(parsed("queryExplodeRecordQuery", { a: "1", b: "2" }).data).toEqual({ param: RECORD });
 	});
 
+	/**
+	 * **A record's key may be the parameter's own name.** `{ param: 0 }` expands to `?param=0`, which
+	 * a gatherer that took any `param` key as an already-gathered object left in place, and the record
+	 * schema then refused the string. A query value from the wire is a string or a list of them, never
+	 * an object, so only an object under the name is already gathered.
+	 */
+	it("gathers an exploded record whose key is the parameter's own name: ?param=0", () => {
+		expect(parsed("queryExplodeRecordQuery", { param: "0" }).data).toEqual({
+			param: { param: 0 },
+		});
+		expect(parsed("continuationRecordQuery", { fixed: "true", param: "0" }).data).toEqual({
+			param: { param: 0 },
+		});
+	});
+
+	it("control: a query already gathered under the parameter's name is left as it is", () => {
+		expect(parsed("queryExplodeRecordQuery", { param: { a: 1 } }).data).toEqual({
+			param: { a: 1 },
+		});
+	});
+
 	it("gathers an exploded model from its own property names: ?field=status&value=active", () => {
 		expect(parsed("queryExplodeModelQuery", { field: "status", value: "active" }).data).toEqual({
 			param: { field: "status", value: "active" },
