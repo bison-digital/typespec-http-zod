@@ -1,3 +1,5 @@
+import { literal } from "./literal.js";
+
 /**
  * RFC 6570 URI templates, read for what a server has to mount and what it has to decode.
  *
@@ -194,7 +196,7 @@ export function uriExpansionCall(spec: {
 	readonly shape: ExpansionShape;
 	readonly values: "number" | "boolean" | "";
 }): string {
-	return `(raw, ctx) => uriExpansion(raw, ctx, { prefix: ${JSON.stringify(spec.prefix)}, suffix: ${JSON.stringify(spec.suffix)}, operator: ${JSON.stringify(spec.operator)}, name: ${JSON.stringify(spec.name)}, explode: ${spec.explode}, shape: ${JSON.stringify(spec.shape)}, values: ${JSON.stringify(spec.values)} })`;
+	return `(raw, ctx) => uriExpansion(raw, ctx, { prefix: ${literal(spec.prefix)}, suffix: ${literal(spec.suffix)}, operator: ${literal(spec.operator)}, name: ${literal(spec.name)}, explode: ${spec.explode}, shape: ${literal(spec.shape)}, values: ${literal(spec.values)} })`;
 }
 
 /**
@@ -287,7 +289,7 @@ export function explodedQueryCall(spec: {
 	/** For a record, how every value decodes. */
 	readonly values: "number" | "boolean" | "";
 }): string {
-	return `(raw) => explodedQuery(raw, { name: ${JSON.stringify(spec.name)}, others: ${JSON.stringify(spec.others)}, keys: ${JSON.stringify(spec.keys ?? null)}, numbers: ${JSON.stringify(spec.numbers)}, booleans: ${JSON.stringify(spec.booleans)}, values: ${JSON.stringify(spec.values)} })`;
+	return `(raw) => explodedQuery(raw, { name: ${literal(spec.name)}, others: ${literal(spec.others)}, keys: ${literal(spec.keys ?? null)}, numbers: ${literal(spec.numbers)}, booleans: ${literal(spec.booleans)}, values: ${literal(spec.values)} })`;
 }
 
 /**

@@ -26,12 +26,14 @@ import {
 	resolveRequestVisibility,
 	Visibility,
 	type HttpOperation,
+	type HttpOperationParameter,
 	type HttpOperationPart,
 	type HttpOperationResponse,
 	type HttpService,
 } from "@typespec/http";
 import { getOperationId, resolveOperationId } from "@typespec/openapi";
 import { type EmitterOptions, reportDiagnostic } from "./lib.js";
+import { literal } from "./literal.js";
 import { SchemaRegistry, TypeRegistry } from "./registry.js";
 import {
 	isJsonMediaType,
@@ -129,6 +131,12 @@ export { EmitterOptionsSchema, type EmitterOptions } from "./lib.js";
  * independently.
  */
 export { jsDocComment, objectKey } from "./zod.js";
+/**
+ * And the same for a VALUE written into emitted code: a string, enum value or media type as a literal
+ * whose source is ASCII. Spec text outside ASCII is the case, and a sibling emitter spelling it with a
+ * bare `JSON.stringify` writes the character itself into a file its consumer commits.
+ */
+export { literal } from "./literal.js";
 
 /** Named once. The emitted banner and the internal-invariant messages both quote it. */
 const PACKAGE_NAME = "typespec-http-zod";
@@ -1162,6 +1170,19 @@ export interface EmittedRoute {
 	 */
 	readonly pathSegments: readonly EmittedPathSegment[];
 	/**
+	 * **The path parameters whose validator undoes an RFC 6570 expansion**, by wire name.
+	 *
+	 * For these, the path validator's field is `z.preprocess(<decode>, <value schema>)`: it takes the
+	 * TEXT of the segment a router extracts - `primitive.a` for `{.param}` - and hands on the value,
+	 * `a`. A caller already holding the value, such as a tool call or a service-binding request, must
+	 * validate it against the value schema, `pathSchema.shape[name].out`: through the decoder, the value
+	 * `a` is refused as not the expansion the route declares, and a value that happens to start with
+	 * the route's literal is rewritten without an error. Decided by the same rule the validator is
+	 * built by: a prefix or suffix in the segment, the `.` or `;` operator, or a parameter that is not
+	 * a scalar. Empty when there is none, never `undefined`.
+	 */
+	readonly decodedPathParameters: readonly string[];
+	/**
 	 * A query string written into the route itself, as the pairs it spells:
 	 * `/items?fixed=true{&param}` carries `[["fixed", "true"]]`. It identifies the route as much as
 	 * the path does, and it is never part of `pathSegments`. Empty when there is none.
@@ -1545,8 +1566,8 @@ function mediaTypeDecoded(declared: string): string {
 		 */
 		if (value === "*/*") return "z.string()";
 		return isMediaRange(value)
-			? `z.templateLiteral([${JSON.stringify(mediaTypeEssenceOf(value).slice(0, -1))}, z.string()])`
-			: `z.literal(${JSON.stringify(value)})`;
+			? `z.templateLiteral([${literal(mediaTypeEssenceOf(value).slice(0, -1))}, z.string()])`
+			: `z.literal(${literal(value)})`;
 	});
 	const schema =
 		admitted.length === 1 ? (admitted[0] ?? declared) : `z.union([${admitted.join(", ")}])`;
@@ -1568,8 +1589,7 @@ function mediaTypeDecoded(declared: string): string {
 			? essence
 			: `((essence) => ${restored
 					.map(
-						(value) =>
-							`essence === ${JSON.stringify(mediaTypeEssenceOf(value))} ? ${JSON.stringify(value)} : `,
+						(value) => `essence === ${literal(mediaTypeEssenceOf(value))} ? ${literal(value)} : `,
 					)
 					.join("")}essence)(${essence})`;
 	return `z.preprocess((raw) => (typeof raw === "string" ? ${decoded} : raw), ${ranged})`;
@@ -1674,7 +1694,7 @@ function parameterSchemasOf(
 			? `z.preprocess((raw) => (typeof raw === "string" ? [raw] : raw), ${decoded})`
 			: delimiter === undefined
 				? decoded
-				: `z.preprocess((raw) => (typeof raw === "string" ? raw.split(${JSON.stringify(delimiter)}) : raw), ${decoded})`;
+				: `z.preprocess((raw) => (typeof raw === "string" ? raw.split(${literal(delimiter)}) : raw), ${decoded})`;
 		/**
 		 * **An RFC 6570 expansion is undone OUTSIDE everything above**, because it is the first thing the
 		 * wire did: `array.a.b` becomes `["a", "b"]`, then the element decoder and the document's schema
@@ -1684,11 +1704,8 @@ function parameterSchemasOf(
 		const values = recordValuesOf(program, parameter.param.type);
 		let expression = boxedOrSplit;
 		if (parameter.type === "path") {
-			const segment = segments.find(
-				(candidate): candidate is Extract<EmittedPathSegment, { kind: "expression" }> =>
-					candidate.kind === "expression" && candidate.parameter === parameter.name,
-			);
-			if (segment !== undefined && needsExpansionDecoding(segment, shape)) {
+			const segment = decodedSegmentOf(parameter, segments);
+			if (segment !== undefined) {
 				expression = `z.preprocess(${uriExpansionCall({ ...segment, name: parameter.name, shape, values })}, ${decoded})`;
 			}
 		} else if (parameter.type === "query" && shape === "record") {
@@ -1736,8 +1753,8 @@ function parameterSchemasOf(
 		 * validates every OTHER header and leaves this one to the negotiation.
 		 */
 		if (parameter.type === "header" && parameter.name.toLowerCase() === "accept") {
-			const literal = parameter.param.type;
-			if (literal.kind === "String") accept = { name: parameter.name, value: literal.value };
+			const declared = parameter.param.type;
+			if (declared.kind === "String") accept = { name: parameter.name, value: declared.value };
 		} else if (parameter.type === "header") {
 			(byTarget["header-without-accept"] ??= []).push(entry);
 		}
@@ -1769,6 +1786,26 @@ function parameterSchemasOf(
 }
 
 /** What a parameter's value decodes into once its expansion is undone. */
+/**
+ * The route segment a path parameter's validator decodes, or `undefined` where it validates the
+ * segment's text as the value. The one rule for both the validator and
+ * {@link EmittedRoute.decodedPathParameters}, so a consumer reading the route cannot disagree with
+ * the validator it describes.
+ */
+function decodedSegmentOf(
+	parameter: HttpOperationParameter,
+	segments: readonly EmittedPathSegment[],
+): Extract<EmittedPathSegment, { kind: "expression" }> | undefined {
+	const segment = segments.find(
+		(candidate): candidate is Extract<EmittedPathSegment, { kind: "expression" }> =>
+			candidate.kind === "expression" && candidate.parameter === parameter.name,
+	);
+	return segment !== undefined &&
+		needsExpansionDecoding(segment, expansionShapeOf(parameter.param.type))
+		? segment
+		: undefined;
+}
+
 function expansionShapeOf(type: Type): ExpansionShape {
 	if (isArrayType(type)) return "list";
 	return type.kind === "Model" ? "record" : "scalar";
@@ -2062,6 +2099,9 @@ export function collectRoutes(
 					.filter((parameter) => parameter.type === "path" && parameter.allowReserved)
 					.map((parameter) => parameter.name),
 				pathSegments: template.segments,
+				decodedPathParameters: operation.parameters.parameters
+					.filter((parameter) => decodedSegmentOf(parameter, template.segments) !== undefined)
+					.map((parameter) => parameter.name),
 				literalQuery: template.literalQuery,
 				responseContentTypes:
 					statusCode === undefined ? [] : responseContentTypesOf(operation, statusCode),
@@ -2172,9 +2212,105 @@ type ExternalImports = ReadonlyMap<string, ReadonlySet<string>>;
  * Tokenising has neither, needs no escaping to stay correct, and is one pass rather than one pattern
  * per name. `typespec-hono` arrived at it after the same defect went live there: a spec whose every
  * identifier carried a `$` emitted a file that imported nothing and did not compile.
+ *
+ * **Only CODE is tokenised: string, template and regular-expression literals and comments are
+ * skipped.** Spec-authored text reaches emitted source inside them - a `.describe("...")`, a
+ * `.regex(/.../)` - and a word in that text is not a reference. Measured: a parameter documented as
+ * "names uriExpansion and explodedQuery" declared both RFC 6570 decoders in a service that decodes
+ * nothing, and the file failed `noUnusedLocals` - the lint a generated file has to pass like any
+ * other. A literal is told from code by its opening character; a `/` opens a regular expression only
+ * where an expression may start, which is the rule a JavaScript scanner uses, and this emitter
+ * writes no division.
  */
 function identifiersIn(source: string): ReadonlySet<string> {
-	return new Set(source.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? []);
+	const found = new Set<string>();
+	scanCode(source, 0, found, false);
+	return found;
+}
+
+/**
+ * Collect the identifiers of the code from `start`, returning where it stopped: at the end, or -
+ * `nested`, for a template's `${...}` - just past the brace that closes it.
+ */
+function scanCode(source: string, start: number, found: Set<string>, nested: boolean): number {
+	const identifier = /[A-Za-z_$][A-Za-z0-9_$]*/y;
+	let previous = "";
+	let depth = 0;
+	let index = start;
+	while (index < source.length) {
+		const char = source.charAt(index);
+		const next = source.charAt(index + 1);
+		if (char === "`") {
+			index = scanTemplate(source, index, found);
+			previous = char;
+		} else if (char === '"' || char === "'") {
+			index = quotedEnd(source, index, char);
+			previous = char;
+		} else if (char === "/" && next === "/") {
+			const end = source.indexOf("\n", index);
+			index = end === -1 ? source.length : end;
+		} else if (char === "/" && next === "*") {
+			const end = source.indexOf("*/", index + 2);
+			index = end === -1 ? source.length : end + 2;
+		} else if (char === "/" && (previous === "" || "(,=:[!&|?{};".includes(previous))) {
+			index = regexEnd(source, index);
+			previous = char;
+		} else if (/[A-Za-z_$]/.test(char)) {
+			identifier.lastIndex = index;
+			const [name = char] = identifier.exec(source) ?? [];
+			found.add(name);
+			index += name.length;
+			previous = "a";
+		} else {
+			if (char === "}" && nested && depth === 0) return index + 1;
+			if (char === "{") depth += 1;
+			if (char === "}") depth -= 1;
+			if (!/\s/.test(char)) previous = char;
+			index += 1;
+		}
+	}
+	return index;
+}
+
+/** Past a template literal opened at `start`, collecting the code in each `${...}` on the way. */
+function scanTemplate(source: string, start: number, found: Set<string>): number {
+	let index = start + 1;
+	while (index < source.length) {
+		const char = source.charAt(index);
+		if (char === "\\") index += 2;
+		else if (char === "`") return index + 1;
+		else if (char === "$" && source.charAt(index + 1) === "{") {
+			index = scanCode(source, index + 2, found, true);
+		} else index += 1;
+	}
+	return index;
+}
+
+/** Past a quoted string opened at `start`, escapes honoured. */
+function quotedEnd(source: string, start: number, quote: string): number {
+	for (let index = start + 1; index < source.length; index += 1) {
+		const char = source.charAt(index);
+		if (char === "\\") index += 1;
+		else if (char === quote) return index + 1;
+	}
+	return source.length;
+}
+
+/** Past a regular-expression literal opened at `start`, flags included. */
+function regexEnd(source: string, start: number): number {
+	let inClass = false;
+	for (let index = start + 1; index < source.length; index += 1) {
+		const char = source.charAt(index);
+		if (char === "\\") index += 1;
+		else if (char === "[") inClass = true;
+		else if (char === "]") inClass = false;
+		else if (char === "/" && !inClass) {
+			let end = index + 1;
+			while (/[a-z]/.test(source.charAt(end))) end += 1;
+			return end;
+		}
+	}
+	return source.length;
 }
 
 /** Whether emitted source references `name` as an identifier rather than as part of a longer one. */
@@ -2188,7 +2324,7 @@ function renderExternalImports(externals: ExternalImports, ...bodies: string[]):
 	for (const [module, names] of externals) {
 		const used = [...names].filter((name) => referencedIn(haystack, name));
 		if (used.length > 0) {
-			lines.push(`import { ${used.toSorted().join(", ")} } from ${JSON.stringify(module)};\n`);
+			lines.push(`import { ${used.toSorted().join(", ")} } from ${literal(module)};\n`);
 		}
 	}
 	return lines.join("");
@@ -2633,12 +2769,12 @@ function responseArmsOf(
 		const contentTypes =
 			response.contentTypes.length === 0
 				? ""
-				: `, contentTypes: [${response.contentTypes.map((type) => JSON.stringify(type)).join(", ")}]`;
+				: `, contentTypes: [${response.contentTypes.map((type) => literal(type)).join(", ")}]`;
 		const headers =
 			response.headers.length === 0
 				? ""
-				: `, headers: [${response.headers.map((header) => `{ name: ${JSON.stringify(header.name)}, optional: ${header.optional} }`).join(", ")}]`;
-		return `{ status: ${JSON.stringify(response.status)}, schema: ${schema}${contentTypes}${headers} }`;
+				: `, headers: [${response.headers.map((header) => `{ name: ${literal(header.name)}, optional: ${header.optional} }`).join(", ")}]`;
+		return `{ status: ${literal(response.status)}, schema: ${schema}${contentTypes}${headers} }`;
 	});
 	return `[${rendered.join(", ")}]`;
 }
@@ -3299,7 +3435,7 @@ ${assertions.join("\n")}
 function renderVocabularies(vocabularies: ReadonlyMap<string, readonly string[]>): string {
 	const entries = [...vocabularies.entries()]
 		.toSorted(([a], [b]) => a.localeCompare(b))
-		.map(([name, values]) => `\t${name}: [${values.map((v) => JSON.stringify(v)).join(", ")}],`);
+		.map(([name, values]) => `\t${name}: [${values.map((v) => literal(v)).join(", ")}],`);
 	return `${generatedBanner()}
 /**
  * The spec's vocabularies - every enum the surface reaches, and what each one contains.

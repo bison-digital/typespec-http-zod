@@ -100,6 +100,53 @@ describe("a path value is decoded from the text its expression expanded to", () 
 	});
 });
 
+/**
+ * **A caller holding the VALUE validates against the value schema, and the route says which
+ * parameters that differs for.** A tool call carries `{ param: "a" }`, not the segment text; through
+ * the decoder that value is refused for `{.param}`, and `"primitivex"` under `primitive{param}` is
+ * rewritten to `"x"`. `typespec-http-mcp` spread the path validator's shape into a tool's arguments
+ * and met exactly that (its issue #1), so the fact is published rather than re-derived downstream.
+ */
+describe("the route names the path parameters it decodes", () => {
+	const decoded = (operation: string) =>
+		routes.find((route) => route.operationId === operation)?.decodedPathParameters;
+	const field = (operation: string, name: string) =>
+		(
+			schemas[`${operation}Path`] as unknown as {
+				shape: Record<string, ZodType & { out?: ZodType }>;
+			}
+		).shape[name];
+
+	it("lists exactly the parameters whose segment is decoded", () => {
+		const listed = PATH_CASES.filter(([operation]) => (decoded(operation) ?? []).length > 0).map(
+			([operation]) => operation,
+		);
+		// `{/param}` and `{param}` over a whole segment hand over the value itself.
+		expect(PATH_CASES.map(([operation]) => operation).filter((op) => !listed.includes(op))).toEqual(
+			["pathPrimitive"],
+		);
+		expect(decoded("plain")).toEqual([]);
+		expect(decoded("labelNumber")).toEqual(["version"]);
+	});
+
+	for (const [operation, , value] of PATH_CASES) {
+		it(`${operation}: the value ${JSON.stringify(value)} passes the schema a value-holder validates against`, () => {
+			const name = operation === "labelNumber" ? "version" : "param";
+			const schema = (decoded(operation) ?? []).includes(name)
+				? field(operation, name)?.out
+				: field(operation, name);
+			const result = schema?.safeParse(value);
+			expect(result?.success, JSON.stringify(result?.error?.issues)).toBe(true);
+			expect(result?.data).toEqual(value);
+		});
+	}
+
+	it("rewrites nothing a value-holder sends, where the decoder would", () => {
+		expect(field("simplePrimitive", "param")?.parse("primitiveprimitivex")).toBe("primitivex");
+		expect(field("simplePrimitive", "param")?.out?.parse("primitivex")).toBe("primitivex");
+	});
+});
+
 describe("a query value is decoded from its form expansion", () => {
 	it("pairs an unexploded record: ?param=a,1,b,2", () => {
 		expect(parsed("queryRecordQuery", { param: "a,1,b,2" }).data).toEqual({ param: RECORD });

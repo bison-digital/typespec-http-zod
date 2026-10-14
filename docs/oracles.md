@@ -71,20 +71,21 @@ Each row was checked by planting a defect and confirming the named arm goes red.
   enabling one breaks a test rather than moving a number.
 - **4 negotiated response bodies** cannot be attributed to a single arm, and **4 reduce to no readable
   kind** on one side. Both are pinned counts rather than floors.
-- **Two emitted declarations may share one identifier, and nothing compares that.** Two models of the
-  same name in different namespaces are published by openapi3 as `A.Shared` and `B.Shared`, and this
-  emitter declares `Shared` twice, which does not compile. The differential's
-  `component-name-collision` arm does not catch it: that arm iterates the DOCUMENT's components and
-  fires when two of them claim one identifier, whereas this is two emitter declarations from types
-  the document names apart. Reproduced, not yet fixed. `parameters/body-optionality` and
-  `parameters/spread` carry the same shape through spread-source naming.
+- **Two declarations claiming one identifier are refused, not compared.** Two models of the same
+  name in different namespaces are published by openapi3 as `A.Shared` and `B.Shared`, and a
+  TypeScript module cannot declare `Shared` twice. Since `0.27.0` both walks report
+  `duplicate-declaration` rather than emit a module that does not compile. The differential's
+  `component-name-collision` arm is a different check: it iterates the DOCUMENT's components and
+  fires when two of them claim one identifier.
 - **A probe is only as good as the instance it mutates.** `behaviour.test.ts` builds the smallest
   value the document accepts and mutates one fact at a time; where it cannot build one - an `allOf`
   whose members would have to be merged, a pattern its sampler cannot draw from - the component is
   counted as unbuildable rather than probed with a value that means nothing. The count is floored
   from the other side, so a change that quietly stops producing instances fails.
-- **`emit.test.ts` compiles four fixtures rather than the whole corpus.** Every shape that reached a
-  published version uncompiled was found by adding one; the general form is a corpus-wide `tsc` pass.
+- **The corpus is compiled, and only what the corpus and the fixtures contain.**
+  `conformance/typecheck.test.ts` puts every scenario's emitted output through `tsc`; a shape neither
+  carries is compiled by nothing. Every shape that reached a published version uncompiled was found by
+  adding the fixture that carries it.
 
 ## How a new pair gets a comparator
 

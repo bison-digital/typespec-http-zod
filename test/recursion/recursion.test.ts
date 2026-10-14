@@ -319,3 +319,44 @@ export const plainDeclared: Declared = { label: "a", branch: undefined };
 		}
 	});
 });
+
+describe("a cycle through a model a request projects", () => {
+	let compiled: CompiledFixture;
+	let schemas: Record<string, ZodType>;
+
+	beforeAll(async () => {
+		compiled = await compileFixture(here, "projected", { outName: "projected-cycle" });
+		schemas = (await import(join(compiled.outDir, "schemas.gen.ts"))) as Record<string, ZodType>;
+	}, 120_000);
+
+	it("declares the request's projection beside the read shape", () => {
+		expect(compiled.diagnostics).toEqual([]);
+		expect(schemas["nodeCreateSchema"]).toBeDefined();
+		expect(schemas["nodeSchema"]).toBeDefined();
+	});
+
+	it("types the projection's back edges by the projection, not by the read shape", () => {
+		const source = readFileSync(join(compiled.outDir, "schemas.gen.ts"), "utf8");
+		const projection = /export interface NodeCreate \{[^}]*\}/.exec(source)?.[0] ?? "";
+		expect(projection).toContain("parent?: NodeCreate;");
+		expect(projection).toContain("children: NodeCreate[];");
+		expect(source).toContain("get parent(): z.ZodExactOptional<z.ZodType<NodeCreate, NodeCreate>>");
+	});
+
+	it("typechecks, the wire contract's agreement assertions included", () => {
+		const { output, failed } = typecheckEmitted(compiled.outDir);
+		expect(output).toBe("");
+		expect(failed).toBe(false);
+	});
+
+	it("validates a request without the read-only property, at every depth", () => {
+		const request = { label: "a", children: [{ label: "b", children: [] }] };
+		expect(schemas["nodeCreateSchema"]?.safeParse(request).success).toBe(true);
+		expect(
+			schemas["nodeCreateSchema"]?.safeParse({
+				...request,
+				children: [{ label: "b", children: [], createdAt: "2026-10-14T12:00:00Z" }],
+			}).success,
+		).toBe(false);
+	});
+});

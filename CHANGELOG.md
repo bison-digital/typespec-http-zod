@@ -8,6 +8,73 @@ published types; a patch will not. The **emitted output is part of the API** - a
 validator's shape, to a declared identifier, or to the `EmittedRoute` a wrapping emitter reads is a
 change a consumer feels, and is treated as such here rather than as an implementation detail.
 
+## [Unreleased]
+
+Upgrading: [what to check before you take this](docs/guides.md#to-0290).
+
+### Changed, breaking
+
+- **A date-time header with no `@encode` is an RFC 7231 HTTP-date** (#4). That is TypeSpec's wire
+  form for one and what `@typespec/openapi3` publishes, `format: http-date`. It was validated as RFC
+  3339, so a request sending it as the document describes was refused, and a handler setting it as
+  an HTTP-date failed its own response contract. It is `z.string()`, as the explicit
+  `@encode(DateTimeKnownEncoding.rfc7231)` already was. The rule is openapi3's: the header's own type
+  is the standard `utcDateTime` or `offsetDateTime`. A declared scalar, a list, and `T | null` (an
+  `anyOf` at 3.1 and 3.2) stay RFC 3339, as the documents publish them.
+- **A scalar extending a constrained scalar is constrained by both.** `scalar ShortWord extends
+Word` with `@pattern` on `Word` validated as a bare `z.string()`, accepting every value the
+  document refuses: only the decorators of the scalar a property named were read. Each keyword is now
+  read from the nearest scalar up the `extends` chain that declares it, which is how openapi3 builds
+  the schema - a keyword the derived scalar declares replaces the base's rather than adding to it.
+- **`@encode(DateTimeKnownEncoding.rfc3339)` on a date-time keeps its date-time check.** The encoding
+  reports `string` as its type, which emitted `z.string()` for the explicit spelling of the default,
+  while the document still publishes `format: date-time`.
+
+### Changed
+
+- **Spec text outside ASCII is written as `\uXXXX` escapes**, in every string and regular-expression
+  literal the emitter writes. The values are the same at run time. No generated file may carry such a
+  character, and every site used a bare `JSON.stringify`; the corpus held none until descriptions
+  carried `payload/xml`'s section signs and dashes into `schemas.gen.ts`.
+- **A property named `__proto__` is declared with a computed key**, `["__proto__"]`. The plain key
+  set the shape's prototype instead: the property was missing from the published JSON Schema, and
+  under `seal-object-schemas` every body carrying it was refused as an unrecognised key.
+
+### Fixed
+
+- **A word in a description or a pattern is not a reference.** Which RFC 6570 decoders and imports a
+  file needs was decided by tokenising emitted source, string and regex literals included, so a
+  parameter documented as naming `uriExpansion` declared the decoder in a service that never called
+  it, and the file failed `noUnusedLocals`. Only code is read now.
+- **A cycle through a model a request projects compiles.** The structural type and the getter
+  annotation named each reference by its bare name, so `NodeCreate`'s `children` was typed `Node[]` -
+  the read shape, with a property the request never sends - and the declared validator did not
+  satisfy its own annotation (`TS2375`). Nothing in the corpus combines a cycle with visibility.
+
+### Added
+
+- **The validators carry every description the document publishes.** A model's, enum's or named
+  union's doc goes on its declaration, a property's or parameter's on the property, outermost, and a
+  declared scalar's on each property it types - the property's own doc winning, as OpenAPI 3.1's
+  sibling `description` wins over a `$ref`. Nothing carried one before, so a surface publishing JSON
+  Schema from these validators - an MCP server's `tools/list` - gave a model calling a tool bare
+  patterns and enums: one consumer counted a tool refusing 369 calls against 98 accepted, most of
+  them refused by the client checking that schema before it called. `.describe()` changes nothing a
+  parse decides. A differential arm compares every description in the conformance corpus against the
+  document, 344 positions, and `test/descriptions` each position by construction. See
+  [Descriptions](docs/reference.md#descriptions).
+- **`EmittedRoute.decodedPathParameters`**: the path parameters whose validator undoes an RFC 6570
+  expansion. A caller holding the value rather than the segment text - a tool call, a service
+  binding - validates against `pathSchema.shape[name].out`; through the decoder, `{ param: "a" }` is
+  refused for `{.param}`.
+- **`literal`, exported beside `objectKey`**, for a value written into emitted code as a literal
+  whose source is ASCII.
+- **Two warnings for a wire name a Zod validator cannot treat as a key.**
+  `optional-prototype-name`: an optional property named after an `Object.prototype` member refuses
+  every value that leaves it out, a Zod defect (colinhacks/zod#6666), pinned so its fix is noticed
+  (#5). `unenforceable-property-name`: a property named `__proto__` is never validated, because Zod
+  skips the key by design (#6).
+
 ## [0.28.0] - 2026-10-11
 
 Upgrading: [what to check before you take this](docs/guides.md#to-0280).

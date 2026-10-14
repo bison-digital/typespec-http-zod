@@ -620,6 +620,52 @@ function extraPropertyRule(
  * and `required` union; a cycle stops the walk rather than hanging, and a base that cannot be
  * resolved leaves the `allOf` in place so the difference is reported rather than silently dropped.
  */
+/**
+ * **Every description a schema publishes, keyed by where it sits**: `""` for the schema itself, then
+ * `.key`, `.key[]` and `.key|n` for each property, its items and its `anyOf` branches.
+ *
+ * Each is the description a READER sees there: the position's own, else the one on what it refers to,
+ * because OpenAPI 3.1 and Zod's flattening both let a sibling `description` win over a `$ref`. So the
+ * document's `{ $ref: Subject }` and the validator's inlined, described scalar compare equal, and a
+ * description that sits on the wrong side of a wrapper does not.
+ */
+function descriptionsAt(
+	schema: Record<string, unknown>,
+	dereference: (ref: string) => Record<string, unknown> | undefined,
+): Map<string, string | undefined> {
+	const read = (node: unknown, seen: ReadonlySet<string> = new Set()): string | undefined => {
+		if (typeof node !== "object" || node === null) return undefined;
+		const record = node as Record<string, unknown>;
+		if (typeof record["description"] === "string") return record["description"];
+		const composed = record["allOf"];
+		if (Array.isArray(composed) && composed.length === 1) return read(composed[0], seen);
+		const ref = record["$ref"];
+		if (typeof ref !== "string" || seen.has(ref)) return undefined;
+		return read(dereference(ref), new Set([...seen, ref]));
+	};
+	const positions = new Map<string, string | undefined>([["", read(schema)]]);
+	const properties = schema["properties"];
+	if (typeof properties !== "object" || properties === null) return positions;
+	for (const [key, property] of Object.entries(properties)) {
+		positions.set(`.${key}`, read(property));
+		const record = (property ?? {}) as Record<string, unknown>;
+		if (record["items"] !== undefined) positions.set(`.${key}[]`, read(record["items"]));
+		const branches = record["anyOf"];
+		if (Array.isArray(branches)) {
+			branches.forEach((branch, index) => positions.set(`.${key}|${index}`, read(branch)));
+		}
+	}
+	return positions;
+}
+
+/** A Zod serialisation's own references: `#` is the root, `#/$defs/X` a definition beside it. */
+function zodDefinitions(
+	root: Record<string, unknown>,
+): (ref: string) => Record<string, unknown> | undefined {
+	const definitions = (root["$defs"] ?? {}) as Record<string, Record<string, unknown>>;
+	return (ref) => (ref === "#" ? root : definitions[ref.replace("#/$defs/", "")]);
+}
+
 function flattenAllOf(
 	schema: Record<string, unknown>,
 	resolve: RefResolver,
@@ -920,6 +966,13 @@ interface Comparison {
 	 * ours on either side. Zero means the strongest arm in this file is inert.
 	 */
 	readonly jsonSchemaCompared: number;
+	/**
+	 * Positions whose `description` was compared - a component's own, and each property's, item's
+	 * and `anyOf` branch's - where either side publishes one. Zero means the arm is inert.
+	 */
+	readonly descriptionsCompared: number;
+	/** `scenario:Component.position` where the two artefacts publish different descriptions. */
+	readonly descriptionDivergences: readonly string[];
 	/** Components `z.toJSONSchema()` cannot serialise at all. Counted, never silently skipped. */
 	readonly jsonSchemaUnserialisable: number;
 	/** Polymorphic components compared as a choice. Zero means the discriminator arm is inert. */
@@ -1014,6 +1067,8 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 	let documentsRead = 0;
 	let objectsCompared = 0;
 	let jsonSchemaCompared = 0;
+	let descriptionsCompared = 0;
+	const descriptionDivergences: string[] = [];
 	let jsonSchemaUnserialisable = 0;
 	let unionsCompared = 0;
 	let refConstraintSkips = 0;
@@ -1728,6 +1783,31 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 						);
 					}
 				}
+				/**
+				 * **The description arm reads the DEFAULT registry**, because that is where `.describe()`
+				 * writes and what an MCP server's `tools/list` serialises from. The comparison above
+				 * passes its own `{ id }` registry, which holds no description, and strips the keyword
+				 * as an annotation either way - so it could not see a description that was wrong,
+				 * missing or misplaced.
+				 */
+				const described = z.toJSONSchema(validator, { io: "input" }) as Record<string, unknown>;
+				const carriedAt = descriptionsAt(
+					rootOf(described) as Record<string, unknown>,
+					zodDefinitions(described),
+				);
+				for (const [position, published] of descriptionsAt(
+					flattenAllOf(json as Record<string, unknown>, resolve),
+					(ref) => resolve(ref) as Record<string, unknown> | undefined,
+				)) {
+					const carried = carriedAt.get(position);
+					if (published === undefined && carried === undefined) continue;
+					descriptionsCompared++;
+					if (published !== carried) {
+						descriptionDivergences.push(
+							`${scenario.name}:${component}${position} document=${JSON.stringify(published)} validator=${JSON.stringify(carried)}`,
+						);
+					}
+				}
 			}
 
 			objectsCompared++;
@@ -1752,6 +1832,8 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 		documentsRead,
 		objectsCompared,
 		jsonSchemaCompared,
+		descriptionsCompared,
+		descriptionDivergences,
 		jsonSchemaUnserialisable,
 		parametersCompared,
 		responsesCompared,
@@ -2330,6 +2412,20 @@ describe("the validator and the document agree, over a corpus we did not write",
 		 */
 		const produced = [...new Set(comparison.divergences.map((divergence) => divergence.kind))];
 		expect(produced.filter((kind) => !kinds.includes(kind)).toSorted()).toEqual([]);
+	});
+
+	/**
+	 * **Every description the document publishes in a component, the validator publishes in the
+	 * same position.** A surface serving JSON Schema from these validators - an MCP server's
+	 * `tools/list` - publishes exactly these, and before `0.29.0` it published none: a model calling a
+	 * tool saw bare patterns and enums. `test/descriptions` grades each position by construction;
+	 * this grades the corpus, whose specs this repository did not write.
+	 */
+	it("publishes every description the document publishes, where the document publishes it", () => {
+		expect(comparison.descriptionDivergences).toEqual([]);
+		expect(comparisonAtLater.descriptionDivergences).toEqual([]);
+		// Measured at 3.1: 344 positions where either artefact publishes a description.
+		expect(comparison.descriptionsCompared).toBeGreaterThanOrEqual(344);
 	});
 
 	it("agrees about every constraint keyword", () => {

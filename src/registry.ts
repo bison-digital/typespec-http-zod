@@ -1,4 +1,5 @@
 import {
+	getDoc,
 	getFriendlyName,
 	type Model,
 	type ModelProperty,
@@ -11,6 +12,7 @@ import { propertyToTs, propertyTypeToTs, typeToTsBody, withTsRefResolver } from 
 import {
 	captureBackEdges,
 	currentVisibility,
+	described,
 	isOptionalAt,
 	isTransformedBy,
 	noteBackEdge,
@@ -477,7 +479,17 @@ export class SchemaRegistry {
 		 * and the emitted `const` would read itself while initialising. `z.lazy()` defers the whole body
 		 * instead, which is the only place left to put the deferral once no property can hold it.
 		 */
-		const source = rendered.deferred ? `z.lazy(() => ${rendered.value})` : rendered.value;
+		/**
+		 * **The description goes on the declaration's own body, so the exported const IS the
+		 * described schema.** Every reference then names that one instance, which is what keeps
+		 * identity, `z.compile`'s clone (it inherits the description through its parent link) and
+		 * Zod's `$ref` extraction all intact. Described at a reference instead, each use would be a
+		 * fresh clone. Read from the canonical type, because an anonymous payload has its doc only on
+		 * the model it was spread from, and a visibility projection carries the doc of the model it
+		 * projects - as openapi3 publishes one component for both.
+		 */
+		const body = rendered.deferred ? `z.lazy(() => ${rendered.value})` : rendered.value;
+		const source = described(body, getDoc(this.#program, canonicalTypeFor(type)));
 
 		const declaration: Declaration = {
 			identifier,
@@ -614,9 +626,22 @@ export class SchemaRegistry {
 	 */
 	#structuralBodyOf(type: Type): string {
 		return withTsRefResolver(
-			(candidate) => declaredNameOf(this.#program, candidate),
+			(candidate) => this.#typeNameOf(candidate),
 			() => typeToTsBody(this.#program, type),
 		);
+	}
+
+	/**
+	 * **The TypeScript name a reference resolves to is the one {@link expressionFor} declares it
+	 * under**, visibility suffix included. Resolved by the bare name, a cycle through a model a
+	 * request projects typed the projection's back edges by the READ shape: `NodeCreate`'s
+	 * `children` became `Node[]`, which carries a property the request never sends, and the declared
+	 * validator did not satisfy its own annotation (`TS2375`).
+	 */
+	#typeNameOf(candidate: Type): string | undefined {
+		const bare = declaredNameOf(this.#program, candidate);
+		if (bare === undefined) return undefined;
+		return nameAt(bare, visibilityFor(this.#program, candidate, currentVisibility()));
 	}
 
 	/**
@@ -672,7 +697,7 @@ export class SchemaRegistry {
 	#deferredAnnotationOf(property: ModelProperty): string | undefined {
 		if (property.defaultValue !== undefined) return undefined;
 		const declared = withTsRefResolver(
-			(candidate) => declaredNameOf(this.#program, candidate),
+			(candidate) => this.#typeNameOf(candidate),
 			() => propertyTypeToTs(this.#program, property),
 		);
 		const core = `z.ZodType<${declared}, ${declared}>`;

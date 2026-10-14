@@ -131,8 +131,10 @@ describe("a numeric bound on a value encoded as a string", () => {
 	});
 
 	it("emits no bound at all for either form, rather than one that answers another question", () => {
-		expect(/\n\tcapacity: ([^\n]+),/.exec(schemas)?.[1]).toBe("z.string()");
-		expect(/\n\trate: ([^\n]+),/.exec(schemas)?.[1]).toBe("z.string()");
+		// A string and nothing else - its description aside, which constrains nothing.
+		const unbounded = /^z\.string\(\)(\.describe\("(?:[^"\\]|\\.)*"\))?$/;
+		expect(/\n\tcapacity: ([^\n]+),/.exec(schemas)?.[1]).toMatch(unbounded);
+		expect(/\n\trate: ([^\n]+),/.exec(schemas)?.[1]).toMatch(unbounded);
 	});
 
 	it("reports each one, naming what to write instead", () => {

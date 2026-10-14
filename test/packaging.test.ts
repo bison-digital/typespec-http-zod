@@ -157,6 +157,45 @@ describe("the package declares what it needs to run outside this checkout", () =
 		}
 	});
 
+	/**
+	 * **Spec-authored text sits in emitted source inside literals, and a word in it is not a
+	 * reference.** A description is a string, a pattern a regular expression. Read as code, a
+	 * parameter documented as naming `uriExpansion` declared the decoder in a service that never
+	 * called it, and the file failed `noUnusedLocals`. `test/descriptions` is the end-to-end arm; these
+	 * rows pin each literal form, and the code that sits between and inside them.
+	 */
+	it("reads only code: a name inside a literal or a comment is not referenced", async () => {
+		const { referencedIn } = await import("../src/api.js");
+		const rows: readonly (readonly [string, string, boolean])[] = [
+			['a: z.string().describe("uriExpansion here")', "uriExpansion", false],
+			['a: z.string().describe("say \\"uriExpansion\\"")', "uriExpansion", false],
+			["a: 'it\\'s uriExpansion' + real", "uriExpansion", false],
+			["a: 'it\\'s uriExpansion' + real", "real", true],
+			["a: z.preprocess(uriExpansion(x), z.string())", "uriExpansion", true],
+			[
+				"a: z.string().regex(/^uriExpansion\\/[a-z]$/u), b: explodedQuery(1)",
+				"uriExpansion",
+				false,
+			],
+			[
+				"a: z.string().regex(/^uriExpansion\\/[a-z]$/u), b: explodedQuery(1)",
+				"explodedQuery",
+				true,
+			],
+			["a: z.string().regex(/[/]uriExpansion/), b: c", "uriExpansion", false],
+			["x = `uriExpansion ${foo$bar({ a: 1 })} and ${baz}`; done", "uriExpansion", false],
+			["x = `uriExpansion ${foo$bar({ a: 1 })} and ${baz}`; done", "foo$bar", true],
+			["x = `uriExpansion ${foo$bar({ a: 1 })} and ${baz}`; done", "baz", true],
+			["x = `uriExpansion ${foo$bar({ a: 1 })} and ${baz}`; done", "done", true],
+			["// uriExpansion\nok", "uriExpansion", false],
+			["/* uriExpansion */ ok", "uriExpansion", false],
+			["/* uriExpansion */ ok", "ok", true],
+		];
+		for (const [source, name, expected] of rows) {
+			expect(referencedIn(source, name), `${name} in ${source}`).toBe(expected);
+		}
+	});
+
 	it("marks as optional exactly the peers behind a guarded import", () => {
 		/**
 		 * **A guarded `import()` that is a REQUIRED peer forces every consumer to install it.**

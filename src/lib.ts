@@ -426,6 +426,48 @@ const diagnostics = {
 			default: paramMessage`The bound on '${"name"}' cannot be enforced, and is not emitted. '@encode(string)' makes the wire value text, so '@minValue'/'@maxValue' would become a check on how many CHARACTERS it has - '@minValue(10)' would refuse '"42"' - and the exclusive form has no string equivalent at all. The document is no help either: it publishes 'minimum' on a 'type: string' schema, which JSON Schema ignores, so a validator enforcing the bound would refuse what the published contract accepts. Declare the bound as a '@pattern', which the document publishes and every caller can read, or remove '@encode(string)' and let the value be a number.`,
 		},
 	},
+	/**
+	 * **A property whose wire name is `__proto__` is published, and no Zod validator can check it.**
+	 *
+	 * Zod skips a declared `__proto__` key on purpose, so prototype pollution cannot reach through a
+	 * parse (colinhacks/zod#6386): a value of any type, or none, is accepted for it and dropped from
+	 * the result. The document publishes it like any other property, and nothing emitted can enforce
+	 * it - which is the case `unenforceable-encoded-bound` reports for a bound, for the same reason:
+	 * the spec is representable, so refusing it would make it emit under one emitter and not the
+	 * other, and serving it silently would leave a validator looser than its contract unsaid.
+	 *
+	 * The key is still DECLARED, as a computed `["__proto__"]`, because a plain `__proto__:` in an
+	 * object literal sets the shape's prototype instead. Measured: that dropped the property from the
+	 * published JSON Schema, and under `seal-object-schemas` refused every body carrying it as an
+	 * unrecognised key - the opposite of what the document says.
+	 */
+	"unenforceable-property-name": {
+		severity: "warning",
+		messages: {
+			default: paramMessage`'${"name"}' is published as a property and cannot be validated: Zod skips a key named '__proto__' on purpose (colinhacks/zod#6386), so any value, or none, is accepted for it and dropped from the parsed result. The published schema still states it. Give it another wire name if its value has to be checked.`,
+		},
+	},
+	/**
+	 * **An optional property named after an `Object.prototype` member refuses every value that
+	 * leaves it out.**
+	 *
+	 * Zod reads a property as `input[key]`, so an absent `constructor`, `toString`, `valueOf` or any
+	 * other inherited member reads as the function every object inherits, and is refused as the wrong
+	 * type (colinhacks/zod#6666, open). A required one is unaffected, because a value that leaves it
+	 * out is refused either way. The emitted validators are right and inherit the defect - on
+	 * requests and responses alike - and the only repair in emitted code, a `z.preprocess` onto a
+	 * null-prototype copy, would cost the model `.shape` and `.extend`.
+	 *
+	 * Reported where the property is optional, which includes the PATCH position that makes a
+	 * required property optional. When Zod ships the fix, the peer floor moves to it and this retires:
+	 * `test/inheritednames` pins the defect so that release is noticed.
+	 */
+	"optional-prototype-name": {
+		severity: "warning",
+		messages: {
+			default: paramMessage`'${"name"}' is optional here, and the validator refuses every value that leaves it out: Zod reads an absent '${"name"}' as the member every object inherits from Object.prototype, a function, and rejects it (colinhacks/zod#6666). A value that carries '${"name"}' validates normally. Give it a wire name Object.prototype does not have, or declare it required, until Zod releases a fix.`,
+		},
+	},
 	"duplicate-operation-id": {
 		severity: "error",
 		messages: {

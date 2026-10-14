@@ -10,10 +10,12 @@ import {
 	getMaxValueExclusive,
 	getPattern,
 	type Program,
+	type Scalar,
 	type Type,
 } from "@typespec/compiler";
 import { defaultMaxSteps, isSafePattern } from "redos-detector";
 import { reportDiagnostic } from "./lib.js";
+import { escapeNonAscii } from "./literal.js";
 
 /**
  * Constraint decorators -> the Zod modifiers that enforce them.
@@ -32,17 +34,19 @@ import { reportDiagnostic } from "./lib.js";
  */
 export function applyConstraints(program: Program, expression: string, target: Type): string {
 	let result = expression;
+	const read = <T>(get: (program: Program, target: Type) => T | undefined): T | undefined =>
+		declaredOn(program, target, get);
 
-	const minLength = getMinLength(program, target);
-	const maxLength = getMaxLength(program, target);
-	const minValue = getMinValue(program, target);
-	const maxValue = getMaxValue(program, target);
-	const minItems = getMinItems(program, target);
-	const maxItems = getMaxItems(program, target);
-	const pattern = getPattern(program, target);
+	const minLength = read(getMinLength);
+	const maxLength = read(getMaxLength);
+	const minValue = read(getMinValue);
+	const maxValue = read(getMaxValue);
+	const minItems = read(getMinItems);
+	const maxItems = read(getMaxItems);
+	const pattern = read(getPattern);
 
-	const minExclusive = getMinValueExclusive(program, target);
-	const maxExclusive = getMaxValueExclusive(program, target);
+	const minExclusive = read(getMinValueExclusive);
+	const maxExclusive = read(getMaxValueExclusive);
 
 	/**
 	 * **A numeric bound says nothing about a value carried as text.** `@encode(string)` is legal on a
@@ -88,6 +92,37 @@ export function applyConstraints(program: Program, expression: string, target: T
 	}
 
 	return result;
+}
+
+/**
+ * **A constraint on a scalar is read up its `extends` chain: the nearest scalar declaring it wins.**
+ *
+ * The compiler's getters read the decorators of the one type they are handed, and this read the
+ * scalar a property NAMED. So `scalar ShortWord extends Word` with `@pattern` on `Word` validated
+ * as a bare `z.string()`, and every value the pattern forbids was accepted - while the document
+ * published the pattern on `ShortWord`. `@typespec/openapi3`'s `#getSchemaForScalar` builds a
+ * derived scalar from its base's schema and then applies its own decorators over it, so a keyword
+ * the derived scalar declares REPLACES the base's rather than adding to it. Reading the nearest
+ * declaration per keyword is that rule exactly: `Overrides extends Word` with its own `@pattern`
+ * publishes only its own, and enforcing both would refuse what the document accepts.
+ *
+ * A property is not a chain: its type's constraints are applied where the type is rendered.
+ */
+function declaredOn<T>(
+	program: Program,
+	target: Type,
+	get: (program: Program, target: Type) => T | undefined,
+): T | undefined {
+	if (target.kind !== "Scalar") return get(program, target);
+	for (
+		let current: Scalar | undefined = target;
+		current !== undefined;
+		current = current.baseScalar
+	) {
+		const value = get(program, current);
+		if (value !== undefined) return value;
+	}
+	return undefined;
 }
 
 /**
@@ -232,7 +267,7 @@ export function patternIsProvablySafe(pattern: string): boolean {
  * instead of guessing at an equivalence.
  */
 export function patternToRegex(pattern: string): string {
-	return `/${escapeSlashes(pattern)}/${unicodeSafe(pattern) ? "u" : ""}`;
+	return `/${escapeNonAscii(escapeSlashes(pattern))}/${unicodeSafe(pattern) ? "u" : ""}`;
 }
 
 /**
@@ -255,7 +290,15 @@ function escapeSlashes(pattern: string): string {
 	for (let index = 0; index < pattern.length; index += 1) {
 		const character = pattern[index];
 		if (character === "\\") {
-			escaped += character + (pattern[index + 1] ?? "");
+			const next = pattern[index + 1] ?? "";
+			/**
+			 * **An identity escape of a character outside printable ASCII loses its backslash**, because
+			 * the character is about to be written as `\uXXXX` and `\\uXXXX` would be a literal
+			 * backslash followed by `u`. An accented letter matches the same thing escaped or not; under
+			 * the `u` flag the escape is a syntax error, and `unicodeSafe` has already sent such a
+			 * pattern to the bare form.
+			 */
+			escaped += /[^\x20-\x7e]/.test(next) ? next : character + next;
 			index += 1;
 			continue;
 		}

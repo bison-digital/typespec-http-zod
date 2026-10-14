@@ -110,6 +110,34 @@ optional. `@typespec/versioning` is an optional peer dependency, resolved behind
 
 ## Upgrading
 
+### To `0.29.0`
+
+**Three changes make a validator refuse values it accepted, and in each the document already refused
+them.** Regenerate, then check whether a caller of yours relies on one:
+
+- **A date-time header with no `@encode` is an HTTP-date**, `Fri, 26 Aug 2022 14:38:00 GMT`, and an
+  RFC 3339 value in it is refused. A handler setting one sets the HTTP-date form. To keep RFC 3339 on
+  the wire, say so in the spec, and the document will say it too:
+
+  ```tsp
+  @header @encode(DateTimeKnownEncoding.rfc3339) since: utcDateTime;
+  ```
+
+- **A scalar extending a constrained scalar enforces the base's constraints.** A value breaking a
+  `@pattern`, a bound or a length on the base is refused through the derived one.
+- **`@encode(DateTimeKnownEncoding.rfc3339)` on a date-time checks the date-time**, where it accepted
+  any string.
+
+**Everything else is additive or a spelling.** The emitted validators carry `.describe(...)`, so a
+snapshot of a generated file changes, and spec text outside ASCII is written as `\uXXXX` escapes.
+Two new warnings may appear, `optional-prototype-name` and `unenforceable-property-name`; each names
+a property whose validator cannot do what the document says, and the [reference](reference.md) says
+what to do about it.
+
+**A wrapping emitter that validates a path parameter's VALUE**, rather than the segment text a router
+extracts, reads `EmittedRoute.decodedPathParameters` and validates those against
+`pathSchema.shape[name].out`.
+
 ### To `0.28.0`
 
 **Most changes here are to `requests.gen.ts`, the framework-free contract types.** Five reach a server

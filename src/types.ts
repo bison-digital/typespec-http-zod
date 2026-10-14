@@ -11,6 +11,7 @@ import {
 	type Union,
 } from "@typespec/compiler";
 import { reportDiagnostic } from "./lib.js";
+import { literal } from "./literal.js";
 import {
 	discriminatedSubtypes,
 	effectiveIndexer,
@@ -128,7 +129,7 @@ function scalarToTs(program: Program, scalar: Scalar): string {
 
 function enumToTs(target: Enum): string {
 	const values = [...target.members.values()].map((member) => member.value ?? member.name);
-	return values.map((value) => JSON.stringify(value)).join(" | ");
+	return values.map((value) => literal(value)).join(" | ");
 }
 
 function unionToTs(program: Program, union: Union): string {
@@ -142,7 +143,7 @@ function unionToTs(program: Program, union: Union): string {
 	if (discriminated !== undefined && discriminated.defaultVariant === undefined) {
 		const { envelope, discriminatorPropertyName, envelopePropertyName } = discriminated.options;
 		const arms = [...discriminated.variants.entries()].map(([name, variant]) => {
-			const tag = `${objectKey(discriminatorPropertyName)}: ${JSON.stringify(name)};`;
+			const tag = `${objectKey(discriminatorPropertyName)}: ${literal(name)};`;
 			const inner = typeToTs(program, variant);
 			// No injection: with no envelope the variant declares the discriminator itself, or the union
 			// is refused in `zod.ts`. Nothing is added that the document does not publish.
@@ -405,13 +406,13 @@ export function typeToTsBody(program: Program, type: Type): string {
 		case "Union":
 			return unionToTs(program, type);
 		case "String":
-			return JSON.stringify(type.value);
+			return literal(type.value);
 		case "Number":
 			return String(type.value);
 		case "Boolean":
 			return String(type.value);
 		case "EnumMember":
-			return JSON.stringify(type.value ?? type.name);
+			return literal(type.value ?? type.name);
 		// A named union variant is a referable type - `DogKind.Golden`. See the note in `zod.ts`.
 		case "UnionVariant":
 			return typeToTs(program, type.type);

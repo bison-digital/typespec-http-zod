@@ -1,4 +1,5 @@
 import { CONTENTLESS_STATUS_CODES, STATUS_CODES } from "./statuses.js";
+import { literal } from "./literal.js";
 
 /**
  * **What a result is made of: one member per declared response and media type, and the codes each
@@ -109,7 +110,7 @@ export function isMediaRange(mediaType: string): boolean {
  * full range is `string`.
  */
 export function mediaTypeTypeOf(mediaType: string): string {
-	if (!isMediaRange(mediaType)) return JSON.stringify(mediaType);
+	if (!isMediaRange(mediaType)) return literal(mediaType);
 	if (mediaType === "*/*") return "string";
 	return `\`${mediaType.slice(0, -1)}\${string}\``;
 }

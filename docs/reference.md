@@ -34,6 +34,8 @@ does not mean what they almost certainly intended.
 | `duplicate-declaration`         | Two different types claim one TypeScript name. The document tells them apart by namespace and a module cannot. A REPEAT of the same declaration is not this: visibility projection hands the registry a distinct type object for one model, and those are collapsed silently.                                                                                                                                                                                                                                                                                     |
 | `unenforceable-encoded-bound`   | **A warning.** A `@minValue`/`@maxValue` (or the exclusive form) on a property `@encode(string)` carries as text. The bound is on the number; the emitted expression is a string, so enforcing it would check how many characters the value has - `@minValue(10)` would refuse `"42"`. The document is no help either: it publishes `minimum` on a `type: string` schema, which JSON Schema ignores. The bound is dropped rather than mistranslated. Declare it as a `@pattern`, or remove `@encode(string)`.                                                     |
 | `non-unicode-pattern`           | **A warning.** A `@pattern` that is not a valid regular expression under the Unicode flag, which is how a JSON Schema reader compiles a published pattern: Ajv throws on it rather than evaluating it. The emitted validator falls back to running it without the flag, so the server enforces a rule no reader of its own document can. Remove the character the flag rejects, almost always a backslash that was never needed. See [Patterns and the cost of running them](#patterns-and-the-cost-of-running-them).                                             |
+| `unenforceable-property-name`   | **A warning.** A property whose wire name is `__proto__`. Zod skips that key on purpose so prototype pollution cannot reach through a parse ([colinhacks/zod#6386](https://github.com/colinhacks/zod/pull/6386)), so any value, or none, is accepted for it and dropped from the parsed result. The key is declared as a computed `["__proto__"]`, so the published schema states it and a sealed model does not refuse it; only its value goes unchecked. Give the property another wire name if its value has to be checked.                                    |
+| `optional-prototype-name`       | **A warning.** An optional property whose wire name is an `Object.prototype` member - `constructor`, `toString`, `valueOf`, `hasOwnProperty` and the rest. Zod reads an absent one as the function every object inherits and refuses it ([colinhacks/zod#6666](https://github.com/colinhacks/zod/issues/6666)), so every value that leaves the property out is refused, on requests and responses alike. Reported wherever the property is optional, a merge-patch body included. Make it required, or give it another wire name, until Zod ships the fix.        |
 | `inline-cycle`                  | A reference cycle that never passes through anything this emitter can declare, so the cycle has no name to reference itself by. A template instantiation is the reachable case: it is inlined rather than declared, exactly as `@typespec/openapi3` inlines one, and that emitter refuses the same spec with its own `inline-cycle` error. Give the type a name with `@friendlyName`, which makes it a declaration and gives the back edge something to point at, or break the cycle.                                                                             |
 | `duplicate-operation-id`        | An explicit `@operationId` another operation already answers to. OpenAPI requires the id to be unique, and an explicit one is never renamed to make room, so it cannot be resolved for you. Ids DERIVED from a parent container are deduplicated silently, exactly as `@typespec/openapi3` deduplicates them, and raise nothing.                                                                                                                                                                                                                                  |
 | `unsupported-type`              | A construct with no runtime representation. `never` in a body or a union variant is the reachable case. A `never` property is dropped instead, matching the document.                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -129,11 +131,13 @@ The check is **conservative**: it proves that one input can match a pattern more
 is necessary for catastrophic backtracking but not sufficient for it to be reachable. Measured over
 fourteen patterns an API author actually writes, four were flagged and only one of those could be
 made to backtrack; the three others include the official [semver.org](https://semver.org) regex,
-which takes the full analysis timeout to decide and then runs in 0.07 ms against every attack shape
+which takes the full analysis budget to decide and then runs in 0.07 ms against every attack shape
 tried. That is what `#suppress` is for.
 
-Deciding an unprovable pattern costs the analyser up to 500 ms, once per distinct pattern per
-compile, and only when the rule is enabled. Twenty of them is ten seconds on a cold build.
+The budget is `redos-detector`'s step count, 20,000 steps per distinct pattern, rather than a time
+limit, so a pattern gets the same verdict on every machine. Spending it takes about 1.7 seconds idle
+and longer under load, once per distinct pattern per compile, and only when the rule is enabled;
+every ordinary pattern decides in milliseconds.
 
 **The emitted regex is never changed.** `@typespec/openapi3` publishes the pattern verbatim; anchoring
 or bounding it here would make the validator enforce something the document does not state, which is
@@ -147,8 +151,8 @@ the one trade this package refuses. The remedy belongs in the spec:
 **It proves safety rather than guessing at danger**, so "not proven safe" is what the rule says.
 Measured over a realistic spread of 14 patterns an API would carry: two conservative warnings, both on
 a quantifier nested over an overlapping class, and nothing dangerous missed. The analysis is itself
-exponential in the bad case, so it is capped at 500 ms per distinct pattern and cached, `^(a|a)+$`
-alone takes 1.6 seconds to decide.
+exponential in the bad case, so it is capped at that step count per distinct pattern and cached;
+`^(a|a)+$` spends the whole budget.
 
 ## Declared names
 
@@ -164,6 +168,25 @@ otherwise:
 No name `requests.gen.ts` declares is derived from an operation id; the per-operation validators in
 `schemas.gen.ts` are, as `<operationId>Body` and the like. An operation's input is `WireInputs["createUser"]`,
 which nothing a spec declares can collide with.
+
+## Descriptions
+
+Every description `@typespec/openapi3` publishes in a schema, the emitted validators carry, through
+`.describe()`. Zod keeps it in `z.globalRegistry`, which `z.toJSONSchema` and Zod's Standard Schema
+converter read by default, so a surface publishing JSON Schema from these validators - an MCP
+server's `tools/list` among them - publishes the descriptions too. A description changes nothing a
+parse decides.
+
+| Position                              | Description                                                                                                                                                                           |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A model, enum or named union          | Its doc, on the declaration itself, so every reference names one described schema. A visibility projection carries the doc of the model it projects.                                  |
+| A property or parameter               | Its doc, outermost - outside `.nullable()`, `.exactOptional()` and `.default()`. An operation's `@param` tag is the parameter's doc.                                                  |
+| A property typed by a declared scalar | The property's doc if it has one, else the scalar's, else the nearest one up the scalar's `extends` chain - the order a reader resolves openapi3's sibling `description` over `$ref`. |
+| `T \| null` of a declared scalar      | The scalar's doc inside `.nullable()`, as openapi3 publishes it on the `anyOf` branch, and the property's outside it.                                                                 |
+| A standard scalar                     | None. openapi3 deletes the compiler's own doc on `string`, `int32` and the rest, and so does this.                                                                                    |
+
+`test/descriptions` compares each position against the document compiled from the same spec, and
+`conformance/differential.test.ts` does the same for every component of the corpus.
 
 ## Known limits
 
@@ -196,6 +219,14 @@ which nothing a spec declares can collide with.
   decoders are declared in `schemas.gen.ts` only where a validator calls them. A segment holding two
   expressions is `unsupported`.
 
+- **An optional property named after an `Object.prototype` member refuses its own omission.** A
+  Zod defect, [colinhacks/zod#6666](https://github.com/colinhacks/zod/issues/6666): an absent
+  `constructor?` reads as the inherited function. The emitted validators inherit it, and
+  `optional-prototype-name` reports each property it bites. A required one is unaffected.
+  `test/inheritednames` pins the defect, so the Zod release that fixes it is noticed and the peer
+  floor moves to it.
+- **A property named `__proto__` is published and never validated.** Zod skips the key by design.
+  `unenforceable-property-name` reports it.
 - **A `@head` operation gets validators here and cannot be served by every router.** That is a
   property of the server rather than of this package.
 - **The emitted output requires `zod`, not `zod/mini`.** The tree-shakeable variant has no chained

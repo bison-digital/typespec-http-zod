@@ -1,6 +1,7 @@
 import {
 	getDiscriminatedUnion,
 	getDiscriminator,
+	getDoc,
 	getEncode,
 	resolveEncodedName,
 	isNeverType,
@@ -14,8 +15,21 @@ import {
 	type Union,
 	type Value,
 } from "@typespec/compiler";
-import { createMetadataInfo, isQueryParam, type MetadataInfo, Visibility } from "@typespec/http";
+import {
+	createMetadataInfo,
+	getCookieParamOptions,
+	getHeaderFieldName,
+	getPathParamName,
+	getQueryParamName,
+	isCookieParam,
+	isHeader,
+	isPathParam,
+	isQueryParam,
+	type MetadataInfo,
+	Visibility,
+} from "@typespec/http";
 import { applyConstraints } from "./constraints.js";
+import { literal } from "./literal.js";
 import { reportDiagnostic } from "./lib.js";
 
 /**
@@ -462,10 +476,63 @@ const SCALARS: Readonly<Record<string, string>> = {
 };
 
 function scalarToZod(program: Program, scalar: Scalar): string {
+	return described(scalarSchemaOf(program, scalar), scalarDocOf(program, scalar));
+}
+
+/**
+ * **A doc becomes `.describe()`, which is the one place Zod keeps a description.**
+ *
+ * `@typespec/openapi3` writes every `getDoc` as a JSON Schema `description`, and nothing carried it
+ * into the validators: a surface publishing its input schema FROM them - an MCP server's
+ * `tools/list` - gave a model calling a tool bare patterns and enums with no word on what a field is
+ * for. Measured on one consumer: a tool refused 369 calls and accepted 98, most refusals coming from
+ * the client checking that published schema before it called.
+ *
+ * `.describe()` records the text in `z.globalRegistry`, which is a `globalThis` singleton shared by
+ * every copy of Zod in a process, and both `z.toJSONSchema` and Zod's Standard Schema converter read
+ * it by default. It returns a clone and changes nothing a parse decides.
+ *
+ * **It is always the OUTERMOST call at a position, and never on a bare reference.** Inside
+ * `.nullable()` the text lands in `anyOf[0]` rather than on the property; on an identifier inside
+ * `z.array()` or a union it would clone a declaration that other code finds by identity. So it is
+ * applied where a declaration's body, a property's value or a scalar's schema is finished, and
+ * nowhere else.
+ *
+ * Gated on `undefined` rather than on truthiness, as openapi3's `applyConstraint` is: an empty
+ * `@doc("")` is published as `""`, and so is it here.
+ */
+export function described(expression: string, doc: string | undefined): string {
+	return doc === undefined ? expression : `${expression}.describe(${literal(doc)})`;
+}
+
+/**
+ * The description a declared scalar publishes: its own doc, else the nearest one up its `extends`
+ * chain, and never a standard type's.
+ *
+ * Both halves are openapi3's, from `#getSchemaForScalar`: a derived scalar starts from its base's
+ * schema, description included, and overwrites what it declares itself - so `scalar B extends A`
+ * with no doc publishes A's. A standard scalar's description is deleted, because "standard types are
+ * going to be inlined in the spec and we don't want the description of the scalar to show up".
+ * Without that, `string`'s own "A sequence of textual characters." would sit on every `z.string()`.
+ */
+export function scalarDocOf(program: Program, scalar: Scalar): string | undefined {
+	for (
+		let current: Scalar | undefined = scalar;
+		current !== undefined && !program.checker.isStdType(current);
+		current = current.baseScalar
+	) {
+		const doc = getDoc(program, current);
+		if (doc !== undefined) return doc;
+	}
+	return undefined;
+}
+
+/** A scalar's schema without its description, for a position that publishes its own. */
+function scalarSchemaOf(program: Program, scalar: Scalar): string {
 	// `scalar unixTimestamp32 is utcDateTime;` with `@encode(int32)` on the SCALAR, not on each use.
 	const encoded = encodedTypeOf(program, scalar);
 	if (encoded !== undefined && encoded !== scalar) {
-		return applyConstraints(program, scalarToZod(program, encoded), scalar);
+		return applyConstraints(program, scalarSchemaOf(program, encoded), scalar);
 	}
 	let current: Scalar | undefined = scalar;
 	// Walk the `extends` chain so a named scalar (`scalar chNumber extends string`) resolves to the
@@ -510,7 +577,7 @@ function scalarToZod(program: Program, scalar: Scalar): string {
 function enumToZod(_program: Program, target: Enum): string {
 	const values = [...target.members.values()].map((member) => member.value ?? member.name);
 	if (values.some((value) => typeof value !== "string")) {
-		return `z.union([${values.map((value) => `z.literal(${JSON.stringify(value)})`).join(", ")}])`;
+		return `z.union([${values.map((value) => `z.literal(${literal(value)})`).join(", ")}])`;
 	}
 	/**
 	 * Every string vocabulary resolves through the generated constant rather than being restated.
@@ -531,7 +598,7 @@ function enumToZod(_program: Program, target: Enum): string {
 	 */
 	const shared = contractsPackage();
 	if (shared === undefined) {
-		return `z.enum([${values.map((value) => JSON.stringify(value)).join(", ")}])`;
+		return `z.enum([${values.map((value) => literal(value)).join(", ")}])`;
 	}
 	noteExternalImport(shared, "SPEC_VOCABULARIES");
 	return `z.enum(SPEC_VOCABULARIES.${target.name})`;
@@ -605,7 +672,7 @@ function discriminatedVariant(
 	options: { envelope: string; discriminatorPropertyName: string; envelopePropertyName: string },
 ): string {
 	const inner = typeToZod(program, variant);
-	const tag = `${objectKey(options.discriminatorPropertyName)}: z.literal(${JSON.stringify(variantName)})`;
+	const tag = `${objectKey(options.discriminatorPropertyName)}: z.literal(${literal(variantName)})`;
 	// The variant already carries the discriminator, so the document publishes it and there is
 	// nothing to add.
 	if (options.envelope === "none") return inner;
@@ -667,7 +734,7 @@ function unionToZod(program: Program, union: Union): string {
 			discriminatedVariant(program, union, name, variant, options),
 		);
 		const property = options.discriminatorPropertyName;
-		return `z.discriminatedUnion(${JSON.stringify(property)}, [${members.join(", ")}])`;
+		return `z.discriminatedUnion(${literal(property)}, [${members.join(", ")}])`;
 	}
 	const variants = [...union.variants.values()].map((variant) => variant.type);
 	const nullable = variants.some((type) => type.kind === "Intrinsic" && type.name === "null");
@@ -684,7 +751,7 @@ function unionToZod(program: Program, union: Union): string {
 
 	const suffix = nullable ? ".nullable()" : "";
 	if (real.every((type) => type.kind === "String")) {
-		const literals = real.map((type) => JSON.stringify((type as { value: string }).value));
+		const literals = real.map((type) => literal((type as { value: string }).value));
 		return `z.enum([${literals.join(", ")}])${suffix}`;
 	}
 	if (real.length === 1) return `${typeToZod(program, real[0] as Type)}${suffix}`;
@@ -781,9 +848,10 @@ function modelToZod(program: Program, model: Model): string {
 	 */
 	const subtypes = discriminatedSubtypes(program, model);
 	if (subtypes.length > 0) {
-		const discriminator = getDiscriminator(program, model);
+		// `discriminatedSubtypes` is empty unless the model has a discriminator.
+		const discriminator = getDiscriminator(program, model)?.propertyName ?? "";
 		const options = subtypes.map((derived) => typeToZod(program, derived));
-		return `z.discriminatedUnion(${JSON.stringify(discriminator?.propertyName)}, [${options.join(", ")}])`;
+		return `z.discriminatedUnion(${literal(discriminator)}, [${options.join(", ")}])`;
 	}
 	const indexer = effectiveIndexer(model);
 	const indexerKey = indexer?.key.name;
@@ -1035,7 +1103,15 @@ export function wireKindOf(program: Program, type: Type): "number" | "boolean" |
  * Exported so there is one answer to this question. There were two sites and only one of them knew.
  */
 export function objectKey(name: string): string {
-	return /^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name);
+	/**
+	 * **`__proto__` is the one name a key cannot spell plainly.** In an object literal, `__proto__:`
+	 * - quoted or not - sets the object's prototype rather than declaring a key, so the emitted shape
+	 * had no such property: it vanished from the published JSON Schema, and under
+	 * `seal-object-schemas` every body carrying it was refused as an unrecognised key. A computed
+	 * key declares it, in a value and in a type alike. See `unenforceable-property-name`.
+	 */
+	if (name === "__proto__") return `[${literal(name)}]`;
+	return /^[A-Za-z_$][\w$]*$/.test(name) ? name : literal(name);
 }
 
 /**
@@ -1154,12 +1230,68 @@ const PARAMETER_STYLE_ENCODINGS = new Set([
 	"ArrayEncoding.newlineDelimited",
 ]);
 
+/**
+ * **A date-time header with no `@encode` is an RFC 7231 HTTP-date, as if it said
+ * `@encode(DateTimeKnownEncoding.rfc7231)`.**
+ *
+ * That is TypeSpec's wire form for one, and `@typespec/openapi3` publishes it as
+ * `format: http-date` from `applyEncoding`'s `isDateTimeHeader` branch, which this emitter did not
+ * follow. The header fell through to the scalar's default, `z.iso.datetime({ offset: true })`, so a
+ * request sending it as the document describes was refused with 400, and a handler setting it as an
+ * HTTP-date failed its own response contract with 500 (issue #4). The explicit encoding already
+ * emitted `z.string()`, and this is that.
+ *
+ * **The predicate is openapi3's: the header's own schema carries `format: date-time`.** That is
+ * the standard `utcDateTime` or `offsetDateTime` itself. A declared scalar extending one is
+ * published as a `$ref`, a list carries the format on its items, and `T | null` is an `anyOf`
+ * under 3.1 and 3.2 - the versions this package grades against - so none of those is an HTTP-date
+ * in the document, and none is here. (3.0 publishes the nullable one as `nullable: true` beside an
+ * `http-date` format; the graded documents do not.)
+ */
+function isDateTimeHeader(program: Program, property: ModelProperty): boolean {
+	const type = property.type;
+	return isHeader(program, property) && type.kind === "Scalar" && isStdDateTime(program, type);
+}
+
+function isStdDateTime(program: Program, scalar: Scalar): boolean {
+	const { checker } = program;
+	return (
+		scalar === checker.getStdType("utcDateTime") || scalar === checker.getStdType("offsetDateTime")
+	);
+}
+
+/** Whether a property's value, or a scalar, is a date-time: one of the two, or built on one. */
+function isDateTime(program: Program, target: ModelProperty | Scalar): boolean {
+	const type =
+		target.kind === "ModelProperty" ? (nullableInnerOf(target.type) ?? target.type) : target;
+	for (
+		let current = type.kind === "Scalar" ? type : undefined;
+		current !== undefined;
+		current = current.baseScalar
+	) {
+		if (isStdDateTime(program, current)) return true;
+	}
+	return false;
+}
+
 export function encodedTypeOf(
 	program: Program,
 	target: ModelProperty | Scalar,
 ): Scalar | undefined {
 	const encoded = getEncode(program, target);
-	if (encoded === undefined) return undefined;
+	if (encoded === undefined) {
+		return target.kind === "ModelProperty" && isDateTimeHeader(program, target)
+			? program.checker.getStdType("string")
+			: undefined;
+	}
+	/**
+	 * **`rfc3339` on a date-time is the form it already has, so it changes nothing.** openapi3's
+	 * `mergeFormatAndEncoding` keeps `format: date-time` for it, and the type it reports, `string`,
+	 * emitted `z.string()`: the explicit spelling of the default dropped the date-time check the
+	 * document still states. Only the encodings that change the wire form - `rfc7231`,
+	 * `unixTimestamp` - change the type.
+	 */
+	if (encoded.encoding === "rfc3339" && isDateTime(program, target)) return undefined;
 	if (
 		target.kind === "ModelProperty" &&
 		isQueryParam(program, target) &&
@@ -1187,10 +1319,27 @@ export function propertyToZod(program: Program, property: ModelProperty): string
 	// wrapper is kept: `@encode` changes what the value IS, not whether it may be absent.
 	const encoded = encodedTypeOf(program, property);
 	const declared = encoded ?? nullable ?? property.type;
-	const base =
-		nullable === undefined || encoded !== undefined
-			? applyConstraints(program, typeToZod(program, declared), property)
-			: `${applyConstraints(program, typeToZod(program, declared), property)}.nullable()`;
+	const bare = nullable === undefined || encoded !== undefined;
+	/**
+	 * **One description per position, and a property's own doc wins over its scalar's.**
+	 *
+	 * openapi3 publishes `subject: Subject` as `{ $ref: Subject, description: <the property's doc> }`,
+	 * and a reader takes the sibling over what the reference carries. A scalar here is inlined rather
+	 * than referenced, so where the property's value IS the scalar, its schema is taken without its
+	 * description and the one the position publishes is decided once: the property's doc, else the
+	 * scalar's. Otherwise a documented property of a documented scalar was written
+	 * `.describe(a).describe(b)`, which says the same thing in a way no one would write.
+	 *
+	 * Under `.nullable()` the scalar keeps its own, inside the wrapper: openapi3 publishes
+	 * `anyOf: [{ $ref: Subject }, { type: "null" }]` there, so the scalar's description belongs to the
+	 * branch and only the property's belongs to the property.
+	 */
+	const inlinedScalar = bare && declared.kind === "Scalar";
+	const value = inlinedScalar ? scalarSchemaOf(program, declared) : typeToZod(program, declared);
+	const constrained = applyConstraints(program, value, property);
+	const base = bare ? constrained : `${constrained}.nullable()`;
+	const description =
+		getDoc(program, property) ?? (inlinedScalar ? scalarDocOf(program, declared) : undefined);
 	/**
 	 * **Optionality is a function of the position too, not only of the `?` in the spec.**
 	 *
@@ -1201,6 +1350,7 @@ export function propertyToZod(program: Program, property: ModelProperty): string
 	 * predicate `@typespec/openapi3` uses to decide the `required` list.
 	 */
 	const optional = property.optional || isOptionalAt(program, property);
+	reportInheritedName(program, property, optional);
 	/**
 	 * **A default only applies where the document says the property may be absent.**
 	 *
@@ -1222,7 +1372,7 @@ export function propertyToZod(program: Program, property: ModelProperty): string
 			target: property,
 			format: { name: property.name },
 		});
-		return base;
+		return described(base, description);
 	}
 	/**
 	 * A TypeSpec default (`basis?: string = "s1159"`) becomes `.default(...)`, which in Zod also makes
@@ -1232,7 +1382,7 @@ export function propertyToZod(program: Program, property: ModelProperty): string
 	 * so the fallback could be skipped.
 	 */
 	const defaulted = defaultOf(program, property);
-	if (defaulted !== undefined) return `${base}.default(${defaulted})`;
+	if (defaulted !== undefined) return described(`${base}.default(${defaulted})`, description);
 	/**
 	 * **`.exactOptional()`, because the document says the KEY may be absent and nothing more.**
 	 *
@@ -1251,7 +1401,62 @@ export function propertyToZod(program: Program, property: ModelProperty): string
 	 * differential's serialisation axis is untouched, and `def.type` is still `"optional"`, so the
 	 * shape describers read it unchanged.
 	 */
-	return optional ? `${base}.exactOptional()` : base;
+	return described(optional ? `${base}.exactOptional()` : base, description);
+}
+
+/**
+ * The names every JavaScript object inherits, which Zod reads in place of an absent property.
+ * `__proto__` is among them and is the different case: Zod skips it outright.
+ */
+const INHERITED_NAMES: ReadonlySet<string> = new Set(Object.getOwnPropertyNames(Object.prototype));
+
+/** Properties already reported, by declaration: one property renders once per visibility. */
+const reportedNames = new WeakMap<Program, WeakSet<object>>();
+
+/**
+ * **A wire name the validator cannot treat as an ordinary key is reported where it bites.** See
+ * `unenforceable-property-name` and `optional-prototype-name` in `lib.ts` for why each is a
+ * warning and what each costs.
+ *
+ * Reported here rather than from a walk over the program because `optional` is a fact about the
+ * POSITION: a PATCH makes a required property optional, and only there does an inherited name
+ * refuse its omission. Once per declaration, by its syntax node, because a visibility projection
+ * hands this a different `ModelProperty` for the same one.
+ */
+function reportInheritedName(program: Program, property: ModelProperty, optional: boolean): void {
+	const name = wireNameOf(program, property);
+	if (!INHERITED_NAMES.has(name)) return;
+	const unenforceable = name === "__proto__";
+	if (!unenforceable && !optional) return;
+	const declaration = property.node ?? property;
+	let reported = reportedNames.get(program);
+	if (reported === undefined) reportedNames.set(program, (reported = new WeakSet()));
+	if (reported.has(declaration)) return;
+	reported.add(declaration);
+	if (unenforceable) {
+		reportDiagnostic(program, {
+			code: "unenforceable-property-name",
+			target: property,
+			format: { name },
+		});
+	} else {
+		reportDiagnostic(program, {
+			code: "optional-prototype-name",
+			target: property,
+			format: { name },
+		});
+	}
+}
+
+/** The key a property is validated under: its parameter name, or its name in a JSON body. */
+function wireNameOf(program: Program, property: ModelProperty): string {
+	if (isHeader(program, property)) return getHeaderFieldName(program, property);
+	if (isQueryParam(program, property)) return getQueryParamName(program, property) ?? property.name;
+	if (isPathParam(program, property)) return getPathParamName(program, property) ?? property.name;
+	if (isCookieParam(program, property)) {
+		return getCookieParamOptions(program, property)?.name ?? property.name;
+	}
+	return rawPropertyKey(program, property);
 }
 
 /**
@@ -1276,13 +1481,13 @@ export function propertyToZod(program: Program, property: ModelProperty): string
  * `utcDateTime.fromISO(...)` is a constructor call rather than a literal.
  */
 function renderValue(value: Value): string | undefined {
-	if (value.valueKind === "StringValue") return JSON.stringify(value.value);
+	if (value.valueKind === "StringValue") return literal(value.value);
 	if (value.valueKind === "NumericValue") return String(value.value.asNumber());
 	if (value.valueKind === "BooleanValue") return String(value.value);
 	if (value.valueKind === "NullValue") return "null";
 	if (value.valueKind === "EnumValue") {
 		const member = value.value as { value?: string | number; name: string };
-		return JSON.stringify(member.value ?? member.name);
+		return literal(member.value ?? member.name);
 	}
 	if (value.valueKind === "ArrayValue") {
 		const rendered = value.values.map(renderValue);
@@ -1295,7 +1500,7 @@ function renderValue(value: Value): string | undefined {
 		for (const [name, descriptor] of value.properties) {
 			const rendered = renderValue(descriptor.value);
 			if (rendered === undefined) return undefined;
-			entries.push(`${JSON.stringify(name)}: ${rendered}`);
+			entries.push(`${literal(name)}: ${rendered}`);
 		}
 		return `{${entries.join(", ")}}`;
 	}
@@ -1431,13 +1636,13 @@ export function typeToZodBody(program: Program, type: Type): string {
 		case "Union":
 			return unionToZod(program, type);
 		case "String":
-			return `z.literal(${JSON.stringify(type.value)})`;
+			return `z.literal(${literal(type.value)})`;
 		case "Number":
 			return `z.literal(${type.value})`;
 		case "Boolean":
 			return `z.literal(${String(type.value)})`;
 		case "EnumMember":
-			return `z.literal(${JSON.stringify(type.value ?? type.name)})`;
+			return `z.literal(${literal(type.value ?? type.name)})`;
 		/**
 		 * **A named union VARIANT is a type you can refer to, and it is not the union.**
 		 *

@@ -75,7 +75,10 @@ describe("a pattern containing a forward slash", () => {
 	 */
 	it("emits one regex for both spellings of the same expression", () => {
 		const emitted = (property: string): string => {
-			const found = new RegExp(`${property}: z\\.string\\(\\)\\.regex\\((.+?)\\),`).exec(source);
+			// Up to the literal's closing slash and flags: a documented property goes on to `.describe()`.
+			const found = new RegExp(`${property}: z\\.string\\(\\)\\.regex\\((\\/.*?\\/u?)\\)`).exec(
+				source,
+			);
 			return found?.[1] ?? `NO MATCH FOR ${property}`;
 		};
 		expect(emitted("escaped")).toBe("/^\\/api\\/v[0-9]+$/u");

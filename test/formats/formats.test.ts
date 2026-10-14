@@ -42,10 +42,14 @@ describe("a scalar whose type the document publishes as a format", () => {
 	});
 
 	it("leaves a plain string alone", () => {
-		expect(propertyOf("plain")).toBe("z.string()");
+		expect(propertyOf("plain")).toBe(
+			'z.string().describe("The control: a plain string stays a plain string.")',
+		);
 	});
 
 	it("leaves an @format ANNOTATION unenforced, because a hint is not a claim", () => {
-		expect(propertyOf("id")).toBe("z.string()");
+		expect(propertyOf("id")).toBe(
+			'z.string().describe("The other control: an ANNOTATION is a hint and is not enforced.")',
+		);
 	});
 });
