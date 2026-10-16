@@ -191,7 +191,7 @@ const reported = new WeakMap<Program, Map<string, WeakSet<Type>>>();
  * 153 times for a single scalar in the reference service - and repeating one warning that often
  * is noise a reader learns to skip, which is how a real one gets missed.
  */
-function firstReportOf(program: Program, code: string, target: Type): boolean {
+export function firstReportOf(program: Program, code: string, target: Type): boolean {
 	let byCode = reported.get(program);
 	if (byCode === undefined) {
 		byCode = new Map();

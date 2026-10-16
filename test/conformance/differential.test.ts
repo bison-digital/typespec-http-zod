@@ -977,6 +977,8 @@ interface Comparison {
 	readonly jsonSchemaUnserialisable: number;
 	/** Polymorphic components compared as a choice. Zero means the discriminator arm is inert. */
 	readonly unionsCompared: number;
+	/** Discriminated bases whose validator admits a value no subtype claims, as their document does. */
+	readonly unionsOpen: number;
 	readonly refConstraintSkips: number;
 	/** Parameter groups (one per operation per location) actually compared. Zero means O3 is inert. */
 	readonly parametersCompared: number;
@@ -1071,6 +1073,7 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 	const descriptionDivergences: string[] = [];
 	let jsonSchemaUnserialisable = 0;
 	let unionsCompared = 0;
+	let unionsOpen = 0;
 	let refConstraintSkips = 0;
 	let parametersCompared = 0;
 	let responsesCompared = 0;
@@ -1695,10 +1698,11 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 			 * A polymorphic component is compared as a CHOICE, not as an object.
 			 *
 			 * Both artefacts stop describing a shape here: the document publishes a `discriminator`
-			 * with a mapping, and the emitter answers with `z.discriminatedUnion`. Comparing the two
-			 * as objects made every discriminated base read as having no validator at all.
+			 * with a mapping, and the emitter answers with `z.discriminatedUnion` - inside a `z.union`
+			 * with a base arm where the base admits a value no subtype claims. Comparing the two as
+			 * objects made every discriminated base read as having no validator at all.
 			 */
-			const unionFromDocument = describeDocumentDiscriminator(json);
+			const unionFromDocument = describeDocumentDiscriminator(json, resolve);
 			if (unionFromDocument !== undefined) {
 				const unionFromZod = describeZodDiscriminatedUnion(emitted[identifier]);
 				if (unionFromZod === undefined) {
@@ -1724,6 +1728,21 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 						`document=[${documentValues}] validator=[${zodValues}]`,
 					);
 				}
+				/**
+				 * **A value no subtype claims is the base model's to accept, or its discriminator's to
+				 * refuse.** The document's base admits whatever its own discriminator admits, so a closed
+				 * enum every member of which is mapped refuses the rest and anything else accepts it. A
+				 * validator that dispatched and stopped refused `{kind: "wrongKind"}` for every open base
+				 * in the corpus, and agreed on property and values throughout.
+				 */
+				if (unionFromDocument.open !== unionFromZod.open) {
+					add(
+						"discriminator-open",
+						`${scenario.name}:${component}`,
+						`document=${unionFromDocument.open} validator=${unionFromZod.open}`,
+					);
+				}
+				unionsOpen += unionFromZod.open ? 1 : 0;
 				continue;
 			}
 
@@ -1851,6 +1870,7 @@ async function compareEverything(specVersion: string): Promise<Comparison> {
 		contentHeaders,
 		unreachableComponents,
 		unionsCompared,
+		unionsOpen,
 		refConstraintSkips,
 		constraintsSeen,
 		unenforcedFormats: formatCounter.count,
@@ -2233,6 +2253,14 @@ describe("the validator and the document agree, over a corpus we did not write",
 		expect(comparison.objectsCompared).toBeGreaterThanOrEqual(140);
 		// A discriminated base is compared as a union; if none were, that whole arm proved nothing.
 		expect(comparison.unionsCompared).toBeGreaterThanOrEqual(5);
+		/**
+		 * Both answers to "is a value no subtype claims admitted" are compared, so neither half of the
+		 * `discriminator-open` arm is vacuous: open bases - `Bird`, `Dinosaur`, `Dog`, `Fish` and `Shark`
+		 * among them, eight of nine when measured - and a closed one every member of which is mapped,
+		 * `Snake`.
+		 */
+		expect(comparison.unionsOpen).toBeGreaterThanOrEqual(5);
+		expect(comparison.unionsCompared - comparison.unionsOpen).toBeGreaterThanOrEqual(1);
 		// Arrays and dictionaries are a minority of properties; 67 across the corpus + spike.
 		expect(comparison.elements.compared).toBeGreaterThanOrEqual(30);
 		expect(comparison.kinds.compared).toBeGreaterThanOrEqual(250);

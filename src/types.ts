@@ -13,9 +13,12 @@ import {
 import { reportDiagnostic } from "./lib.js";
 import { literal } from "./literal.js";
 import {
+	type DiscriminatedBase,
+	discriminatedBaseOf,
 	discriminatedSubtypes,
 	effectiveIndexer,
 	emitsDefault,
+	encodeCycleOf,
 	encodedTypeOf,
 	inheritedAndOwnProperties,
 	isOptionalAt,
@@ -102,7 +105,12 @@ function refuse(program: Program, type: Type, why: string, remedy = ""): string 
 function scalarToTs(program: Program, scalar: Scalar): string {
 	// A scalar declaration can carry the encoding itself - see `scalarToZod`.
 	const encoded = encodedTypeOf(program, scalar);
-	if (encoded !== undefined && encoded !== scalar) return scalarToTs(program, encoded);
+	if (encoded !== undefined && encoded !== scalar) {
+		// Reported once, by the schema walk - see `encodeCycleOf`.
+		return encodeCycleOf(program, scalar) === undefined
+			? scalarToTs(program, encoded)
+			: UNREPRESENTABLE;
+	}
 	let current: Scalar | undefined = scalar;
 	// Walk `extends` so `scalar TrimmedString extends string` resolves to the primitive underneath.
 	while (current !== undefined) {
@@ -181,11 +189,26 @@ function modelToTs(program: Program, model: Model): string {
 	 * the emitter disagreeing with itself - one TypeSpec, walked twice - and this is the second defect
 	 * of that class it has found. The first was a vocabulary inlined by one walk and referenced by the
 	 * other.
+	 *
+	 * **An open base adds itself as the last arm**, as `modelToZod` does: a value whose discriminator
+	 * names no subtype is the base's own object. The base arm's discriminator keeps its declared type
+	 * here; TypeScript cannot say "a string other than these", and the validator's refinement does not
+	 * change what it accepts as input, so `z.input` and this type stay identical.
 	 */
-	const subtypes = discriminatedSubtypes(program, model);
-	if (subtypes.length > 0) {
-		return subtypes.map((derived) => typeToTs(program, derived)).join(" | ");
+	const base = discriminatedBaseOf(program, model);
+	if (base !== undefined) {
+		const arms = discriminatedSubtypes(program, model).map((derived) => typeToTs(program, derived));
+		if (base.open) arms.push(modelObjectToTs(program, model, base));
+		return arms.join(" | ");
 	}
+	return modelObjectToTs(program, model);
+}
+
+/**
+ * A model as the object of its own properties, inherited ones included - for a discriminated base,
+ * its base arm, with the `string` discriminator openapi3 adds where the base declares none.
+ */
+function modelObjectToTs(program: Program, model: Model, base?: DiscriminatedBase): string {
 	const indexer = effectiveIndexer(model);
 	const indexerKey = indexer?.key.name;
 	// Inherited properties included - see `inheritedAndOwnProperties`. Both artefacts describe the
@@ -244,6 +267,14 @@ function modelToTs(program: Program, model: Model): string {
 		.filter((property) => isPayloadProperty(program, property))
 		.filter((property) => !isNeverType(property.type))
 		.map((property) => `\t${withDeclarationSite(property, () => propertyToTs(program, property))}`);
+	if (
+		base !== undefined &&
+		!declared.some(
+			(property) => resolveEncodedName(program, property, "application/json") === base.propertyName,
+		)
+	) {
+		entries.push(`\t${objectKey(base.propertyName)}: string;`);
+	}
 	/**
 	 * **The indexer is deliberately NOT intersected in.**
 	 *

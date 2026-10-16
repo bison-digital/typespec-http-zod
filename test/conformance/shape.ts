@@ -320,6 +320,16 @@ export interface UnionShape {
 	readonly discriminator: string;
 	/** Sorted, so two artefacts listing subtypes in different orders still agree. */
 	readonly values: readonly string[];
+	/**
+	 * Whether a value no subtype claims is admitted - as the base model itself.
+	 *
+	 * The document publishes the base as an object of its own properties, so it admits any value its
+	 * own discriminator admits; the mapping only says which subtype a value naming one IS. Read from
+	 * the base's discriminator on the document side, and from the base arm beside the dispatch on the
+	 * validator side, so a validator refusing what the document admits - or admitting what it refuses -
+	 * is a divergence rather than a coincidence of values.
+	 */
+	readonly open: boolean;
 }
 
 /**
@@ -343,13 +353,32 @@ function discriminatorValues(schema: unknown, key: string, out: Set<string>): vo
 	}
 }
 
-/** `undefined` when the declaration is not a discriminated union. */
+/**
+ * `undefined` when the declaration is not a discriminated union.
+ *
+ * **Two forms.** A base whose discriminator every value of which a subtype claims is the dispatch
+ * itself, `z.discriminatedUnion`. An open one is `z.union([dispatch, ...nested bases, base arm])`:
+ * the property is the inner dispatch's, the values are walked across every arm - the base arm's
+ * guarded discriminator carries no literal, so it adds none - and the base arm is the one option that
+ * is an object rather than a union.
+ */
 export function describeZodDiscriminatedUnion(schema: unknown): UnionShape | undefined {
 	const def = defOf(schema);
-	if (def?.type !== "union" || typeof def.discriminator !== "string") return undefined;
+	if (def?.type !== "union") return undefined;
+	if (typeof def.discriminator === "string") {
+		const values = new Set<string>();
+		discriminatorValues(schema, def.discriminator, values);
+		return { discriminator: def.discriminator, values: [...values].toSorted(), open: false };
+	}
+	const options = def.options ?? [];
+	const dispatch = options
+		.map((option) => defOf(option)?.discriminator)
+		.find((discriminator) => typeof discriminator === "string");
+	const open = options.some((option) => defOf(option)?.type === "object");
+	if (dispatch === undefined || !open) return undefined;
 	const values = new Set<string>();
-	discriminatorValues(schema, def.discriminator, values);
-	return { discriminator: def.discriminator, values: [...values].toSorted() };
+	discriminatorValues(schema, dispatch, values);
+	return { discriminator: dispatch, values: [...values].toSorted(), open };
 }
 
 // --- Document side --------------------------------------------------------------------------
@@ -694,7 +723,10 @@ function elementOfDocument(
  * it an ordinary object and so does the emitter, because a union over zero options validates
  * nothing. `mapping` rather than `discriminator` is therefore the test.
  */
-export function describeDocumentDiscriminator(schema: JsonSchema): UnionShape | undefined {
+export function describeDocumentDiscriminator(
+	schema: JsonSchema,
+	resolve?: RefResolver,
+): UnionShape | undefined {
 	const declared = schema.discriminator;
 	if (typeof declared !== "object" || declared === null) return undefined;
 	const { propertyName, mapping } = declared as {
@@ -703,7 +735,34 @@ export function describeDocumentDiscriminator(schema: JsonSchema): UnionShape | 
 	};
 	if (typeof propertyName !== "string") return undefined;
 	if (typeof mapping !== "object" || mapping === null) return undefined;
-	return { discriminator: propertyName, values: Object.keys(mapping).toSorted() };
+	const values = Object.keys(mapping).toSorted();
+	const own = schema.properties?.[propertyName];
+	const admitted = own === undefined ? undefined : closedStringsOf(own, resolve);
+	return {
+		discriminator: propertyName,
+		values,
+		open: admitted === undefined || admitted.some((value) => !values.includes(value)),
+	};
+}
+
+/**
+ * The strings a schema admits where they are finite - `const`, `enum`, or an `anyOf` of those -
+ * and `undefined` where it admits any string. One `$ref` is followed per arm, which is as deep as
+ * openapi3 nests a discriminator's declared type.
+ */
+function closedStringsOf(schema: JsonSchema, resolve?: RefResolver): readonly string[] | undefined {
+	const target = schema.$ref === undefined ? schema : resolve?.(schema.$ref);
+	if (target === undefined) return undefined;
+	if (typeof target["const"] === "string") return [target["const"]];
+	if (Array.isArray(target["enum"])) {
+		const values = target["enum"] as unknown[];
+		return values.every((value) => typeof value === "string") ? (values as string[]) : undefined;
+	}
+	if (target.anyOf !== undefined) {
+		const arms = target.anyOf.map((arm) => closedStringsOf(arm, resolve));
+		return arms.every((arm) => arm !== undefined) ? arms.flat() : undefined;
+	}
+	return undefined;
 }
 
 /** `undefined` when the component is not a plain object schema - a union, an enum, a scalar. */

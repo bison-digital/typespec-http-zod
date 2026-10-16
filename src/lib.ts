@@ -509,6 +509,44 @@ const diagnostics = {
 			default: paramMessage`'${"type"}' closes a reference cycle without passing through anything this emitter can declare, so the cycle has no name to reference itself by. A template instantiation is inlined rather than declared, exactly as '@typespec/openapi3' inlines it, and that emitter refuses the same spec with its own 'inline-cycle' error. Give the type a name with '@friendlyName' so it becomes a declaration, or break the cycle.`,
 		},
 	},
+	/**
+	 * **An `@encode` chain that returns to where it started never reaches a wire type.**
+	 *
+	 * `@encode("x", Pong) scalar Ping` and `@encode("x", Ping) scalar Pong` compile cleanly - the
+	 * compiler checks neither the encoding's name nor where its type leads - and the walks here
+	 * followed `@encode` by calling themselves on the encoded type. Measured before this existed:
+	 * `RangeError: Maximum call stack size exceeded`, "Emitter crashed! This is a bug."
+	 *
+	 * **An error, as `inline-cycle` is.** A value of such a scalar has no form on the wire to validate,
+	 * so there is no validator to emit. openapi3 reads one link of the chain and publishes a schema
+	 * with no `type` at all - `{ format: "x" }` - which states nothing about the value either.
+	 */
+	"encode-cycle": {
+		severity: "error",
+		messages: {
+			default: paramMessage`'${"type"}' is encoded as ${"chain"}: the '@encode' chain returns to a scalar it already passed, so it never reaches a type that crosses the wire. Encode one of them as a standard scalar such as 'string', or break the cycle.`,
+		},
+	},
+	/**
+	 * **Two inputs of one operation handed to its handler under one key.**
+	 *
+	 * A handler's input is the path, query, header and cookie groups spread into one object, with the
+	 * body merged or named beside them. `@header("x") a: string` beside `@query("x") b: int32` therefore
+	 * reached the handler as one `x`, the header's string replacing the validated number, while the
+	 * input was typed `number & string`. `@typespec/http` refuses only a path and a query parameter of
+	 * one name; the rest compiled with no diagnostic (typespec-http-graphql, 2026-10-16).
+	 *
+	 * **A warning, because the spec is valid and openapi3 publishes it**: the parameters are distinct on
+	 * the wire. It is the input this package states that cannot carry both, so the key is typed and
+	 * validated as both declarations at once, and the contract types still compile. A server emitter
+	 * reading `EmittedRoute.sharedInputKeys` declines to mount the operation.
+	 */
+	"shared-input-key": {
+		severity: "warning",
+		messages: {
+			default: paramMessage`'${"operation"}' takes the ${"first"} '${"key"}' and the ${"second"} '${"key"}', and a handler's input holds one value under each key, so '${"key"}' is stated as both declarations at once and accepts only a value satisfying both. Give one of them a different name.`,
+		},
+	},
 	"duplicate-declaration": {
 		severity: "error",
 		messages: {

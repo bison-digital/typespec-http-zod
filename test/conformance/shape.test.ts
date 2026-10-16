@@ -306,7 +306,7 @@ describe("describes a POLYMORPHIC component as a choice, not as a shape", () => 
 
 	it("reads the discriminator property and every value it may take", () => {
 		const shape = describeZodDiscriminatedUnion(z.discriminatedUnion("kind", [cat, dog]));
-		expect(shape).toEqual({ discriminator: "kind", values: ["cat", "dog"] });
+		expect(shape).toEqual({ discriminator: "kind", values: ["cat", "dog"], open: false });
 	});
 
 	it("looks THROUGH a nested union, which is how multi-level discriminators arrive", () => {
@@ -320,6 +320,35 @@ describe("describes a POLYMORPHIC component as a choice, not as a shape", () => 
 		expect(describeZodDiscriminatedUnion(fish)).toEqual({
 			discriminator: "kind",
 			values: ["salmon", "shark"],
+			open: false,
+		});
+	});
+
+	it("reads an OPEN base: the dispatch, the nested bases beside it, and the base arm", () => {
+		// The emitted form for a base whose discriminator admits a value no subtype claims. The base
+		// arm's guarded discriminator carries no literal, so it adds no value; a nested base's own base
+		// arm keeps its literal `kind`, so it adds `shark`.
+		const guarded = z.string().refine((value) => value !== "salmon" && value !== "shark");
+		const saw = z.strictObject({ kind: z.literal("shark"), sharktype: z.literal("saw") });
+		const shark = z.union([
+			z.discriminatedUnion("sharktype", [saw]),
+			z.object({ kind: z.literal("shark"), sharktype: z.string() }),
+		]);
+		const salmon = z.strictObject({ kind: z.literal("salmon") });
+		const fish = z.union([
+			z.discriminatedUnion("kind", [salmon]),
+			shark,
+			z.object({ kind: guarded, age: z.number() }),
+		]);
+		expect(describeZodDiscriminatedUnion(fish)).toEqual({
+			discriminator: "kind",
+			values: ["salmon", "shark"],
+			open: true,
+		});
+		expect(describeZodDiscriminatedUnion(shark)).toEqual({
+			discriminator: "sharktype",
+			values: ["saw"],
+			open: true,
 		});
 	});
 
@@ -327,6 +356,10 @@ describe("describes a POLYMORPHIC component as a choice, not as a shape", () => 
 		expect(describeZodDiscriminatedUnion(cat)).toBeUndefined();
 		expect(describeZodDiscriminatedUnion(z.union([z.string(), z.number()]))).toBeUndefined();
 		expect(describeZodDiscriminatedUnion(z.string())).toBeUndefined();
+		// A union holding a dispatch and nothing else is not a base with a base arm.
+		expect(
+			describeZodDiscriminatedUnion(z.union([z.discriminatedUnion("kind", [cat]), z.string()])),
+		).toBeUndefined();
 	});
 
 	it("reads the document's discriminator from its MAPPING", () => {
@@ -335,7 +368,36 @@ describe("describes a POLYMORPHIC component as a choice, not as a shape", () => 
 				type: "object",
 				discriminator: { propertyName: "kind", mapping: { dog: "#/x/Dog", cat: "#/x/Cat" } },
 			}),
-		).toEqual({ discriminator: "kind", values: ["cat", "dog"] });
+		).toEqual({ discriminator: "kind", values: ["cat", "dog"], open: true });
+	});
+
+	it("reads from the base's own discriminator whether a value no subtype claims is admitted", () => {
+		const resolve = (ref: string): JsonSchema | undefined =>
+			({
+				"#/components/schemas/SnakeKind": { type: "string", enum: ["cobra"] },
+				"#/components/schemas/PetKind": { type: "string", enum: ["dog", "cat", "bird"] },
+				"#/components/schemas/DogKind": {
+					anyOf: [{ type: "string" }, { type: "string", enum: ["golden"] }],
+				},
+			})[ref];
+		const base = (kind: JsonSchema, mapping: Record<string, string>) =>
+			describeDocumentDiscriminator(
+				{
+					type: "object",
+					properties: { kind },
+					discriminator: { propertyName: "kind", mapping },
+				},
+				resolve,
+			)?.open;
+		// A closed enum, every member mapped: a value outside it is refused by the base itself.
+		expect(base({ $ref: "#/components/schemas/SnakeKind" }, { cobra: "#/x/Cobra" })).toBe(false);
+		expect(base({ type: "string", const: "cobra" }, { cobra: "#/x/Cobra" })).toBe(false);
+		// A closed enum with a member nothing maps, an extensible union, a plain string: admitted.
+		expect(base({ $ref: "#/components/schemas/PetKind" }, { dog: "#/x/D", cat: "#/x/C" })).toBe(
+			true,
+		);
+		expect(base({ $ref: "#/components/schemas/DogKind" }, { golden: "#/x/Golden" })).toBe(true);
+		expect(base({ type: "string" }, { golden: "#/x/Golden" })).toBe(true);
 	});
 
 	it("is undefined for a discriminator that maps NOWHERE, which is still an object", () => {

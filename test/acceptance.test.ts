@@ -112,15 +112,24 @@ describe("polymorphism", () => {
 		expect(accepts(service["shapeSchema"], { kind: "square", label: "s", side: 2 })).toBe(true);
 	});
 
-	it("refuses a variant's body under the wrong discriminator, and an unknown one", () => {
+	it("refuses a variant's body under the wrong discriminator", () => {
 		/**
 		 * **A base emitted as its own shape validates none of its polymorphism.** `{kind, label}`
 		 * would satisfy it while `radius` went unchecked - a polymorphic endpoint accepting anything
 		 * that names a kind.
 		 */
 		expect(accepts(service["shapeSchema"], { kind: "circle", label: "c", side: 2 })).toBe(false);
-		expect(accepts(service["shapeSchema"], { kind: "hexagon", label: "h" })).toBe(false);
 		expect(accepts(service["shapeSchema"], { kind: "circle", label: "", radius: 1 })).toBe(false);
+	});
+
+	it("validates a kind no variant names as the base, whose own rules still hold", () => {
+		/**
+		 * The document's `Shape` is an object of its own properties; its mapping names `circle` and
+		 * `square` and refuses nothing else. So a hexagon is a `Shape`, and `label` keeps its minimum.
+		 * See `test/polymorphism`, where each such verdict is graded against the document.
+		 */
+		expect(accepts(service["shapeSchema"], { kind: "hexagon", label: "h" })).toBe(true);
+		expect(accepts(service["shapeSchema"], { kind: "hexagon", label: "" })).toBe(false);
 	});
 });
 

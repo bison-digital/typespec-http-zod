@@ -77,6 +77,7 @@ export {
 } from "./results.js";
 import {
 	collectExternalImports,
+	encodedTypeOf,
 	isPayloadProperty,
 	noteDeclaredVocabularies,
 	noteKeyVocabularies,
@@ -530,19 +531,20 @@ function resolveResponses(program: Program, operation: HttpOperation): ResolvedR
 				file: false,
 			};
 			for (const content of response.responses) {
-				if (entry.body === undefined && content.body?.bodyKind === "single") {
-					entry.body = bodyTypeOf(content.body.type);
+				const body = presentBody(content.body);
+				if (entry.body === undefined && body?.bodyKind === "single") {
+					entry.body = body.type;
 				}
 				/**
 				 * **An `Http.File` response's body is its contents, served as bytes.** The same reading
 				 * as a file request body: a media type and nothing to serialise. Read only for
 				 * `"single"`, every download in `type/file` declared `image/png` and was served empty.
 				 */
-				if (entry.body === undefined && content.body?.bodyKind === "file") {
-					entry.body = content.body.contents.type;
+				if (entry.body === undefined && body?.bodyKind === "file") {
+					entry.body = body.contents.type;
 					entry.file = true;
 				}
-				for (const contentType of content.body?.contentTypes ?? []) {
+				for (const contentType of body?.contentTypes ?? []) {
 					entry.contentTypes.add(contentType);
 				}
 				for (const [name, property] of Object.entries(content.headers ?? {})) {
@@ -848,6 +850,30 @@ function bodyTypeOf(type: Type): Type | undefined {
 }
 
 /**
+ * A declared body as the wire carries it: `undefined` where it is `void` or `never`, so no media
+ * type is listed for it either.
+ *
+ * **`@typespec/http` keeps a body it was told is empty**, media types and all, whenever the response
+ * or request declares it explicitly - `@statusCode _: 409; @body body: void`. Every artefact read
+ * the media types off it, so a 409 with no body was published as `contentTypes:
+ * ["application/json"]` and `schema: undefined`, which a consumer reads as a body it cannot validate,
+ * and a `void` request body reached the Zod walk and refused the compile. openapi3 publishes no
+ * `content` for `void`. For `never` it publishes `schema: {}` - any value - because its body paths
+ * test only for `void`, while it omits a `never` PROPERTY from every schema; a type with no values is
+ * no body here, and `reference.md` records the divergence.
+ */
+function presentBody<B extends { readonly bodyKind: string; readonly type: Type }>(
+	body: B | undefined,
+): B | undefined {
+	return body?.bodyKind === "single" && bodyTypeOf(body.type) === undefined ? undefined : body;
+}
+
+/** The operation's request body, absent where it is declared `void` or `never`. */
+function requestBodyParameterOf(operation: HttpOperation): HttpOperation["parameters"]["body"] {
+	return presentBody(operation.parameters.body);
+}
+
+/**
  * The media types this operation's success response can be served as.
  *
  * **The fact that decides whether two operations are a collision or a CHOICE.** TypeSpec models
@@ -863,15 +889,25 @@ function responseContentTypesOf(operation: HttpOperation, status: number): strin
 	for (const response of operation.responses) {
 		if (response.statusCodes !== status) continue;
 		for (const content of response.responses) {
-			for (const contentType of content.body?.contentTypes ?? []) types.add(contentType);
+			for (const contentType of presentBody(content.body)?.contentTypes ?? []) {
+				types.add(contentType);
+			}
 		}
 	}
 	return [...types];
 }
 
-/** The type a parameter actually crosses the wire as, after any `@encode` on the property. */
+/**
+ * The type a parameter actually crosses the wire as, after any `@encode` on the property.
+ *
+ * **Read through `encodedTypeOf`, the rule the parameter's schema is built by.** This read
+ * `getEncode(...).type` directly, which for an array encoding on a query parameter is `string`: the
+ * schema kept the declared `int32[]`, as the document does, while the element decoder found no list
+ * and left `"1"` to meet `z.int32()`. Every path here that decides how a value is split, decoded or
+ * expanded reads this type, so none of them can disagree with the schema it feeds.
+ */
 function encodedParameterType(program: Program, property: ModelProperty): Type {
-	return getEncode(program, property)?.type ?? property.type;
+	return encodedTypeOf(program, property) ?? property.type;
 }
 
 /**
@@ -1120,7 +1156,7 @@ function isParseableMediaType(type: string): boolean {
 
 /** The declared request body type, if the operation takes one. */
 function requestBodyOf(operation: HttpOperation): Type | undefined {
-	const body = operation.parameters.body;
+	const body = requestBodyParameterOf(operation);
 	if (body?.bodyKind === "single") return body.type;
 	return undefined;
 }
@@ -1182,6 +1218,19 @@ export interface EmittedRoute {
 	 * a scalar. Empty when there is none, never `undefined`.
 	 */
 	readonly decodedPathParameters: readonly string[];
+	/**
+	 * Every pair of inputs a handler would be handed under ONE key - `@header("x")` beside
+	 * `@query("x")`, two `@query("x")`, a `@path id` beside a `@header("id")`, a parameter named as
+	 * the body is. Empty for almost every operation.
+	 *
+	 * **A server emitter spreads the parameter groups into one input, so the later group's value
+	 * silently replaced the earlier one**, after each had been validated against its own schema.
+	 * `@typespec/http` refuses only a path and a query parameter of one name. The handler input has
+	 * one value per key and cannot carry both, so a server should not mount such an operation; this
+	 * package reports it as `shared-input-key`, and states the key as both declarations at once. See
+	 * {@link SharedInputKey}.
+	 */
+	readonly sharedInputKeys: readonly SharedInputKey[];
 	/**
 	 * A query string written into the route itself, as the pairs it spells:
 	 * `/items?fixed=true{&param}` carries `[["fixed", "true"]]`. It identifies the route as much as
@@ -1395,9 +1444,17 @@ const COLLECTION_DELIMITERS: Readonly<Record<string, string>> = {
 	"ArrayEncoding.newlineDelimited": "\n",
 };
 
-/** Whether the declared type is a list, which is what makes a delimiter meaningful. */
-function isCollectionParameter(property: ModelProperty): boolean {
-	return isArrayType(property.type);
+/**
+ * Whether the parameter crosses the wire as a list, which is what makes a delimiter meaningful.
+ *
+ * **The encoded type, not the declared one.** `@header @encode(ArrayEncoding.commaDelimited) tags:
+ * string[]` is a string on the wire - the document publishes `type: string` - and its schema is
+ * `z.string()`; reading the declared list split `"a,b"` into an array and handed that to the string
+ * schema, so every request was refused. Only a query parameter keeps its list under an array
+ * encoding, and only there is a split undone.
+ */
+function isCollectionParameter(program: Program, property: ModelProperty): boolean {
+	return isArrayType(encodedParameterType(program, property));
 }
 
 /**
@@ -1409,13 +1466,16 @@ function isCollectionParameter(property: ModelProperty): boolean {
  * refused a conformant request while accepting the same list sent twice, which no document
  * describes. Found by the first consumer's `?topics=ip` (#1).
  */
-function isExplodedCollection(parameter: {
-	type: string;
-	param: ModelProperty;
-	explode?: boolean;
-}): boolean {
+function isExplodedCollection(
+	program: Program,
+	parameter: {
+		type: string;
+		param: ModelProperty;
+		explode?: boolean;
+	},
+): boolean {
 	return (
-		isCollectionParameter(parameter.param) &&
+		isCollectionParameter(program, parameter.param) &&
 		(parameter.type === "query" || parameter.type === "header") &&
 		parameter.explode === true
 	);
@@ -1432,7 +1492,7 @@ function collectionDelimiterOf(
 	program: Program,
 	parameter: { type: string; param: ModelProperty; explode?: boolean },
 ): string | undefined {
-	if (!isCollectionParameter(parameter.param)) return undefined;
+	if (!isCollectionParameter(program, parameter.param)) return undefined;
 	if (parameter.type !== "query" && parameter.type !== "header") return undefined;
 	if (parameter.explode === true) return undefined;
 	const encoding = getEncode(program, parameter.param)?.encoding;
@@ -1616,6 +1676,9 @@ function parameterSchemasOf(
 	accept: { name: string; value: string } | undefined;
 } {
 	const byTarget: Record<string, string[]> = {};
+	const add = (target: string, key: string, expression: string): void => {
+		(byTarget[target] ??= []).push(`\t${objectKey(key)}: ${expression},`);
+	};
 	let accept: { name: string; value: string } | undefined;
 	/** Form-exploded records and models, gathered back under their names around the query object. */
 	const gathered: string[] = [];
@@ -1655,8 +1718,22 @@ function parameterSchemasOf(
 		 * via `resolveEncodedName` - the document publishes one name per parameter, and it is this one.
 		 * The TypeSpec property name is an authoring convenience that does not survive to the contract.
 		 */
+		/**
+		 * **Two parameters of one location and one wire name are one value on the wire**, and both
+		 * declarations apply to it: their schemas are intersected and the value is decoded once, by
+		 * the first declaration's wire form, so each judges the same decoded value. Decoded by each
+		 * and then intersected, `@query("x") a: string` beside `@query("x") b: int32` would hand Zod
+		 * `"1"` and `1` to merge, which it does not refuse but throws on. An object literal cannot
+		 * hold the key twice either. `shared-input-key` reports it.
+		 */
+		const sharing = operation.parameters.parameters.filter(
+			(other) => other.type === parameter.type && other.name === parameter.name,
+		);
+		if (sharing[0] !== parameter) continue;
 		const delimiter = collectionDelimiterOf(program, parameter);
-		const declared = registry.expressionForProperty(parameter.param);
+		const declared = sharing
+			.map((other) => registry.expressionForProperty(other.param))
+			.reduce((first, other) => `${first}.and(${other})`);
 		/**
 		 * The wire form is decoded before it is validated, never instead of it. `z.preprocess` undoes
 		 * exactly the flattening the document's `style` describes and then applies the schema the
@@ -1690,7 +1767,7 @@ function parameterSchemasOf(
 		 * occurrences arrive already an array and pass through untouched, exactly as the delimiter
 		 * arm leaves a pre-split value alone.
 		 */
-		const boxedOrSplit = isExplodedCollection(parameter)
+		const boxedOrSplit = isExplodedCollection(program, parameter)
 			? `z.preprocess((raw) => (typeof raw === "string" ? [raw] : raw), ${decoded})`
 			: delimiter === undefined
 				? decoded
@@ -1700,11 +1777,12 @@ function parameterSchemasOf(
 		 * wire did: `array.a.b` becomes `["a", "b"]`, then the element decoder and the document's schema
 		 * run on that. See {@link uriExpansionCall}.
 		 */
-		const shape = expansionShapeOf(parameter.param.type);
-		const values = recordValuesOf(program, parameter.param.type);
+		const wire = encodedParameterType(program, parameter.param);
+		const shape = expansionShapeOf(wire);
+		const values = recordValuesOf(program, wire);
 		let expression = boxedOrSplit;
 		if (parameter.type === "path") {
-			const segment = decodedSegmentOf(parameter, segments);
+			const segment = decodedSegmentOf(program, parameter, segments);
 			if (segment !== undefined) {
 				expression = `z.preprocess(${uriExpansionCall({ ...segment, name: parameter.name, shape, values })}, ${decoded})`;
 			}
@@ -1714,10 +1792,7 @@ function parameterSchemasOf(
 				 * `{?param*}` over an object expands to the object's own keys, so there is no `param` key for
 				 * this entry to read; the gatherer around the query object puts one back.
 				 */
-				const model =
-					parameter.param.type.kind === "Model" && parameter.param.type.indexer === undefined
-						? parameter.param.type
-						: undefined;
+				const model = wire.kind === "Model" && wire.indexer === undefined ? wire : undefined;
 				const properties = model === undefined ? [] : modelPropertiesOf(model);
 				gathered.push(
 					explodedQueryCall({
@@ -1730,10 +1805,16 @@ function parameterSchemasOf(
 										resolveEncodedName(program, property, "application/json"),
 									),
 						numbers: properties
-							.filter((property) => wireKindOf(program, property.type) === "number")
+							.filter(
+								(property) =>
+									wireKindOf(program, encodedParameterType(program, property)) === "number",
+							)
 							.map((property) => resolveEncodedName(program, property, "application/json")),
 						booleans: properties
-							.filter((property) => wireKindOf(program, property.type) === "boolean")
+							.filter(
+								(property) =>
+									wireKindOf(program, encodedParameterType(program, property)) === "boolean",
+							)
 							.map((property) => resolveEncodedName(program, property, "application/json")),
 						values,
 					}),
@@ -1742,8 +1823,7 @@ function parameterSchemasOf(
 				expression = `z.preprocess(${uriExpansionCall({ prefix: "", suffix: "", operator: "", name: parameter.name, explode: false, shape, values })}, ${decoded})`;
 			}
 		}
-		const entry = `\t${objectKey(parameter.name)}: ${expression},`;
-		(byTarget[parameter.type] ??= []).push(entry);
+		add(parameter.type, parameter.name, expression);
 		/**
 		 * **On a route several operations share, `accept` SELECTS the operation - it is not a
 		 * constraint on one of them.** Each member declares its own literal, so validating against any
@@ -1756,15 +1836,15 @@ function parameterSchemasOf(
 			const declared = parameter.param.type;
 			if (declared.kind === "String") accept = { name: parameter.name, value: declared.value };
 		} else if (parameter.type === "header") {
-			(byTarget["header-without-accept"] ??= []).push(entry);
+			add("header-without-accept", parameter.name, expression);
 		}
 	}
 	const fileContentType = fileContentTypeOf(operation);
 	if (fileContentType !== undefined) {
 		// The same decoding a declared `Content-Type` header gets: parameters dropped, lowercased.
-		const entry = `\t${objectKey("Content-Type")}: ${mediaTypeDecoded(registry.expressionFor(fileContentType.type))},`;
-		(byTarget["header"] ??= []).push(entry);
-		(byTarget["header-without-accept"] ??= []).push(entry);
+		const expression = mediaTypeDecoded(registry.expressionFor(fileContentType.type));
+		add("header", "Content-Type", expression);
+		add("header-without-accept", "Content-Type", expression);
 	}
 	const shape = (target: string): string | undefined => {
 		const entries = byTarget[target];
@@ -1785,14 +1865,19 @@ function parameterSchemasOf(
 	};
 }
 
-/** What a parameter's value decodes into once its expansion is undone. */
 /**
  * The route segment a path parameter's validator decodes, or `undefined` where it validates the
  * segment's text as the value. The one rule for both the validator and
  * {@link EmittedRoute.decodedPathParameters}, so a consumer reading the route cannot disagree with
  * the validator it describes.
+ *
+ * **Shaped from the encoded type, as the validator's schema is.** `@path
+ * @encode(ArrayEncoding.commaDelimited) ids: string[]` is a string on the wire, published as `type:
+ * string`, and validated by `z.string()`; shaped from the declared list it was expanded into
+ * `["a", "b"]` first, and every request was refused.
  */
 function decodedSegmentOf(
+	program: Program,
 	parameter: HttpOperationParameter,
 	segments: readonly EmittedPathSegment[],
 ): Extract<EmittedPathSegment, { kind: "expression" }> | undefined {
@@ -1801,11 +1886,15 @@ function decodedSegmentOf(
 			candidate.kind === "expression" && candidate.parameter === parameter.name,
 	);
 	return segment !== undefined &&
-		needsExpansionDecoding(segment, expansionShapeOf(parameter.param.type))
+		needsExpansionDecoding(
+			segment,
+			expansionShapeOf(encodedParameterType(program, parameter.param)),
+		)
 		? segment
 		: undefined;
 }
 
+/** What a parameter's value decodes into once its expansion is undone. */
 function expansionShapeOf(type: Type): ExpansionShape {
 	if (isArrayType(type)) return "list";
 	return type.kind === "Model" ? "record" : "scalar";
@@ -1836,7 +1925,7 @@ function modelPropertiesOf(model: Model): ModelProperty[] {
  * `undefined` where the body is not a file, or where the operation already declares the header.
  */
 function fileContentTypeOf(operation: HttpOperation): ModelProperty | undefined {
-	const body = operation.parameters.body;
+	const body = requestBodyParameterOf(operation);
 	if (body?.bodyKind !== "file") return undefined;
 	const declared = operation.parameters.parameters.some(
 		(parameter) => parameter.type === "header" && parameter.name.toLowerCase() === "content-type",
@@ -1860,7 +1949,7 @@ function fileContentTypeOf(operation: HttpOperation): ModelProperty | undefined 
  * body. A read-only property is not sent, so it contributes nothing.
  */
 function mergedBodyKeysOf(program: Program, operation: HttpOperation): string[] {
-	const body = operation.parameters.body;
+	const body = requestBodyParameterOf(operation);
 	if (body?.bodyKind === "multipart") {
 		return body.parts.flatMap((part) => (part.name === undefined ? [] : [part.name]));
 	}
@@ -1876,6 +1965,98 @@ function mergedBodyKeysOf(program: Program, operation: HttpOperation): string[] 
 	);
 }
 
+/** Where a value reaches a handler's input from. */
+export type InputLocation = "path" | "query" | "header" | "cookie" | "body";
+
+/** Two inputs a handler would be handed under one key. See {@link EmittedRoute.sharedInputKeys}. */
+export interface SharedInputKey {
+	/** The key both arrive under, as the input spells it. */
+	readonly key: string;
+	/** Where the input declared first comes from. */
+	readonly first: InputLocation;
+	/** Where the input declared second comes from. */
+	readonly second: InputLocation;
+}
+
+const INPUT_LOCATION_NOUNS: Readonly<Record<InputLocation, string>> = {
+	path: "path parameter",
+	query: "query parameter",
+	header: "header",
+	cookie: "cookie",
+	body: "body",
+};
+
+/**
+ * The pairs of inputs an operation hands its handler under one key, reported once per pair and
+ * program.
+ *
+ * **Read from the same facts the input is rendered from**: each parameter under its wire name, the
+ * `Content-Type` of an `Http.File` body, and the body where {@link requestBodyPlacementOf} names it.
+ * A merged body is not listed, because that decision already names the body whenever one of its keys
+ * is a parameter's - which is how a `@query("body")` beside a body named `body` stays possible to
+ * write, and why it is caught here rather than there.
+ *
+ * Resolved once per operation, since the route walk and the contract walk both read it and the
+ * warning must be raised once.
+ */
+function sharedInputKeysOf(program: Program, operation: HttpOperation): readonly SharedInputKey[] {
+	const resolved = sharedInputKeys.get(operation);
+	if (resolved !== undefined) return resolved;
+	const inputs: { key: string; location: InputLocation; target: Type }[] = [];
+	for (const parameter of operation.parameters.parameters) {
+		if (
+			parameter.type === "path" ||
+			parameter.type === "query" ||
+			parameter.type === "header" ||
+			parameter.type === "cookie"
+		) {
+			inputs.push({ key: parameter.name, location: parameter.type, target: parameter.param });
+		}
+	}
+	const fileContentType = fileContentTypeOf(operation);
+	if (fileContentType !== undefined) {
+		inputs.push({ key: "Content-Type", location: "header", target: fileContentType });
+	}
+	const placement = requestBodyPlacementOf(program, operation);
+	const bodyKey = placement.rawBodyProperty ?? placement.bodyProperty;
+	if (bodyKey !== undefined) {
+		inputs.push({
+			key: bodyKey,
+			location: "body",
+			target: requestBodyParameterOf(operation)?.property ?? operation.operation,
+		});
+	}
+	const shared: SharedInputKey[] = [];
+	inputs.forEach((input, index) => {
+		const first = inputs.slice(0, index).find((earlier) => earlier.key === input.key);
+		if (first === undefined) return;
+		shared.push({ key: input.key, first: first.location, second: input.location });
+		const format = {
+			operation: operationIdOf(program, operation.operation),
+			key: input.key,
+			first: INPUT_LOCATION_NOUNS[first.location],
+			second: INPUT_LOCATION_NOUNS[input.location],
+		};
+		/**
+		 * **Once per program, keyed on what the warning says.** Each emitter that runs the library
+		 * collects its own operations, over types a visibility or version projection may have cloned,
+		 * so neither the operation nor the declaration is the same object twice: `typespec-hono` beside
+		 * `typespec-http-mcp` raised the warning twice per pair.
+		 */
+		const reported = sharedInputKeysReported.get(program) ?? new Set<string>();
+		sharedInputKeysReported.set(program, reported);
+		const said = JSON.stringify(format);
+		if (reported.has(said)) return;
+		reported.add(said);
+		reportDiagnostic(program, { code: "shared-input-key", target: input.target, format });
+	});
+	sharedInputKeys.set(operation, shared);
+	return shared;
+}
+
+const sharedInputKeys = new WeakMap<HttpOperation, readonly SharedInputKey[]>();
+const sharedInputKeysReported = new WeakMap<Program, Set<string>>();
+
 function requestBodyPlacementOf(
 	program: Program,
 	operation: HttpOperation,
@@ -1887,7 +2068,7 @@ function requestBodyPlacementOf(
 	readonly optionalBody: boolean;
 } {
 	const requestType = requestBodyOf(operation);
-	const bodyParameter = operation.parameters.body;
+	const bodyParameter = requestBodyParameterOf(operation);
 	const contentTypes = [...(bodyParameter?.contentTypes ?? [])];
 	/**
 	 * A `bytes` body means the BYTES are the contract.
@@ -2099,20 +2280,23 @@ export function collectRoutes(
 					.filter((parameter) => parameter.type === "path" && parameter.allowReserved)
 					.map((parameter) => parameter.name),
 				pathSegments: template.segments,
+				sharedInputKeys: sharedInputKeysOf(program, operation),
 				decodedPathParameters: operation.parameters.parameters
-					.filter((parameter) => decodedSegmentOf(parameter, template.segments) !== undefined)
+					.filter(
+						(parameter) => decodedSegmentOf(program, parameter, template.segments) !== undefined,
+					)
 					.map((parameter) => parameter.name),
 				literalQuery: template.literalQuery,
 				responseContentTypes:
 					statusCode === undefined ? [] : responseContentTypesOf(operation, statusCode),
-				requestContentTypes: [...(operation.parameters.body?.contentTypes ?? [])],
+				requestContentTypes: [...(requestBodyParameterOf(operation)?.contentTypes ?? [])],
 				// `isRawBinaryMediaType` is "every declared type is non-JSON", which is the same question
 				// here: a string body under `application/json` IS json, and its reader is the JSON one.
 				requestTextual:
 					requestType !== undefined &&
 					rawBodyProperty === undefined &&
 					isStringType(requestType) &&
-					isRawBinaryMediaType([...(operation.parameters.body?.contentTypes ?? [])]),
+					isRawBinaryMediaType([...(requestBodyParameterOf(operation)?.contentTypes ?? [])]),
 				/**
 				 * `@summary` first, `@doc` as the fallback.
 				 *
@@ -2132,7 +2316,7 @@ export function collectRoutes(
 				requestSchema: withVisibility(program, requestVisibility, () => {
 					// Multipart first: its body has no single type to walk, and skipping it left every
 					// such route mounted with nothing checking the request at all.
-					const parameterBody = operation.parameters.body;
+					const parameterBody = requestBodyParameterOf(operation);
 					if (parameterBody?.bodyKind === "multipart") {
 						return multipartSchemaOf(program, parameterBody, registry);
 					}
@@ -2859,7 +3043,7 @@ function collectRequestTypes(
 				const body = requestBodyOf(operation);
 				const placement = requestBodyPlacementOf(program, operation);
 				/** The parts of a multipart body, which `requestBodyOf` deliberately does not return. */
-				const parameterBody = operation.parameters.body;
+				const parameterBody = requestBodyParameterOf(operation);
 				/**
 				 * Headers are part of the input too.
 				 *
@@ -2882,13 +3066,26 @@ function collectRequestTypes(
 					 * `"x-thing"` here too: a consumer checking its handlers against these types otherwise
 					 * fails to typecheck against a server that is correct.
 					 */
-					.map((parameter) => registry.expressionForProperty(parameter.param, parameter.name));
+					.map((parameter) => ({
+						key: parameter.name,
+						line: registry.expressionForProperty(parameter.param, parameter.name),
+					}));
 				const fileContentType = fileContentTypeOf(operation);
 				if (fileContentType !== undefined) {
-					extraProperties.push(
-						`${objectKey("Content-Type")}: ${registry.expressionFor(fileContentType.type)};`,
-					);
+					extraProperties.push({
+						key: "Content-Type",
+						line: `${objectKey("Content-Type")}: ${registry.expressionFor(fileContentType.type)};`,
+					});
 				}
+				/**
+				 * **A key two parameters share is written once per declaration, each in its own part**,
+				 * so the intersection types it as both - what the validators beside it accept - where two
+				 * members of one object literal do not compile (TS2300). `shared-input-key` reports it.
+				 */
+				const repeated = extraProperties.filter((property, index) =>
+					extraProperties.slice(0, index).some((earlier) => earlier.key === property.key),
+				);
+				const distinct = extraProperties.filter((property) => !repeated.includes(property));
 				const parts: string[] = [];
 				let streamsBody = false;
 				let bodyRef: string | undefined;
@@ -2926,9 +3123,10 @@ function collectRequestTypes(
 						);
 					}
 				}
-				if (extraProperties.length > 0) {
-					parts.push(`{\n${extraProperties.map((line) => `\t${line}`).join("\n")}\n}`);
+				if (distinct.length > 0) {
+					parts.push(`{\n${distinct.map(({ line }) => `\t${line}`).join("\n")}\n}`);
 				}
+				for (const { line } of repeated) parts.push(`{\n\t${line}\n}`);
 				entries.push({
 					operationId: operationIdOf(program, operation.operation),
 					bodyRef,

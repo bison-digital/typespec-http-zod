@@ -110,6 +110,38 @@ optional. `@typespec/versioning` is an optional peer dependency, resolved behind
 
 ## Upgrading
 
+### To `0.30.0`
+
+**One change makes a validator accept values it refused, and the document already accepted them.**
+A `@discriminator` base whose discriminator admits a value no subtype claims - a `string`, a union
+with `string` in it, an enum with a member nothing maps - now validates such a value as the base. A
+value naming a subtype is that subtype, as before. Regenerate, then check two things:
+
+- **Narrowing on the discriminator.** The base's type is the subtypes and the base itself:
+
+  ```ts
+  type Bird = SeaGull | Sparrow | Goose | Eagle | { kind: string; wingspan: number };
+  ```
+
+  so `if (bird.kind === "eagle")` no longer narrows to `Eagle`, because the base arm's `kind` is any
+  string to TypeScript. Narrow with a type guard on what the subtype declares, or switch on `kind`
+  and handle the base in the `default`.
+
+- **A handler returning an unknown kind**, which used to answer 500 through its response contract,
+  is now served.
+
+**A body declared `void` or `never` lists no media type**, on a response and on a request. A consumer
+reading `EmittedResponse.contentTypes` gets `[]` for it, and `WireInputs` states no input for a
+request declared that way, where it said `{ body: never }`.
+
+**Two new diagnostics.** `shared-input-key` warns about two inputs a handler would be handed under
+one key; give one of them a different name. `encode-cycle` refuses an `@encode` chain that returns to
+where it started. Neither can appear for a spec that compiled correctly before.
+
+**A wrapping emitter building an `EmittedRoute` by hand** adds `sharedInputKeys: []`. One reading the
+routes the library produces declines to serve an operation whose `sharedInputKeys` is not empty, as
+`typespec-hono` and `typespec-http-mcp` do.
+
 ### To `0.29.0`
 
 **Three changes make a validator refuse values it accepted, and in each the document already refused

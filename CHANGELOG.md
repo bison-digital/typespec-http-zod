@@ -8,6 +8,61 @@ published types; a patch will not. The **emitted output is part of the API** - a
 validator's shape, to a declared identifier, or to the `EmittedRoute` a wrapping emitter reads is a
 change a consumer feels, and is treated as such here rather than as an implementation detail.
 
+## [0.30.0] - 2026-10-16
+
+Upgrading: [what to check before you take this](docs/guides.md#to-0300).
+
+### Changed, breaking
+
+- **A `@discriminator` base validates a value naming no subtype as the base itself.** The document
+  publishes the base as an object of its own properties beside `discriminator.mapping`, and OAS 3.1.1
+  section 4.8.25 says the keyword "MUST NOT change the validation outcome of the schema". The base was
+  a `z.discriminatedUnion` over its subtypes alone, so `{ "kind": "wrongKind", "weight": 8 }` was
+  refused for a `Dog` whose `kind` is `string | "golden"` - the response `@typespec/http-specs`
+  declares in `enum-discriminator`, `single-discriminator` and `nested-discriminator` - and a handler
+  returning it failed its own response contract. An open base is now
+  `z.union([dispatch, ...nested bases, base arm])`. The base arm's discriminator refuses every value a
+  subtype claims, so a value naming a subtype is still that subtype, sealed where it is sealed, and
+  never falls through to the base. A closed discriminator every member of which a subtype claims is
+  emitted as before, and refuses a value outside it. The base's TypeScript type gains the same arm,
+  `Golden | { kind: DogKind; weight: number }`, so narrowing on `kind` no longer excludes the base. A
+  differential arm, `discriminator-open`, compares the arm with what the document's base admits, over
+  the corpus.
+
+### Changed
+
+- **A body declared `void` or `never` lists no media type.** `@typespec/http` keeps an explicitly
+  declared empty body with its media types, so a 409 declared `@body body: void` was published as
+  `contentTypes: ["application/json"]` beside `schema: undefined`, which a consumer reads as a body it
+  cannot validate. The same on a request reached the Zod walk and refused the compile with
+  `unsupported-type`; it is now no body, and `WireInputs` states no input for it. openapi3 publishes no
+  `content` for `void`, and `schema: {}` for `never`, since its body paths test only for `void` while
+  it omits a `never` property from every schema; the divergence is in
+  [Known limits](docs/reference.md#known-limits).
+
+### Fixed
+
+- **An `@encode`d list parameter is decoded by the rule its schema is built by.** An array encoding
+  on a query parameter is a style and the declared list stays; any other `@encode` makes the wire type
+  the type it states. The schema followed that, while the split, the element decoder and the path
+  expansion each read `@encode` their own way: a comma-delimited header or path list and a
+  custom-encoded query list were split into an array and handed to `z.string()`, and a
+  pipe-delimited list of numbers was split but never decoded, so all four refused every request. The
+  same rule now decides each, so `EmittedRoute.decodedPathParameters` no longer lists such a path
+  parameter. A form-exploded query model's property reads its encoding too.
+- **Two scalars whose `@encode` name each other are reported** as `encode-cycle`, where the walk that
+  followed the chain overflowed the stack and crashed the emitter.
+
+### Added
+
+- **`EmittedRoute.sharedInputKeys`**, and the warning `shared-input-key`: two inputs of one operation
+  that a handler would be handed under one key, such as `@header("x")` beside `@query("x")`. The
+  handler input spreads the parameter groups into one object, so the later value replaced the earlier,
+  and `WireInputs` wrote both as members of one type, which does not compile. The key is now typed and
+  validated as both declarations at once, and a server emitter reading the field declines to mount
+  the operation. A route built by hand needs the field, empty for almost every operation.
+- **`encode-cycle`**, an error, for an `@encode` chain that returns to where it started.
+
 ## [0.29.0] - 2026-10-15
 
 Upgrading: [what to check before you take this](docs/guides.md#to-0290).

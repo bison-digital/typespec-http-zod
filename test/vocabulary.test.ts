@@ -48,6 +48,27 @@ const MULTIPART_FILE_REFINE =
 	/z\.unknown\(\)\.refine\(\(value\): value is \{ name: string; type: string; arrayBuffer: \(\) => Promise<ArrayBuffer> \} => typeof value === "object" && value !== null && "name" in value && typeof value\.name === "string" && "type" in value && typeof value\.type === "string" && "arrayBuffer" in value && typeof value\.arrayBuffer === "function"\)/g;
 
 /**
+ * The second permitted `.refine`: a discriminated base's own arm, refusing every discriminator value
+ * a subtype claims.
+ *
+ * **Derived from the document, value for value.** The base is published as an object of its own
+ * properties beside `discriminator.mapping`, and the mapping says what a value naming a subtype IS:
+ * that subtype. The base arm accepts a value naming none - which the base's own schema admits - and
+ * this refuses it the values the mapping assigns elsewhere, so a known kind is validated as its
+ * subtype and never falls through to the base, whose unsealed object would strip what the sealed
+ * subtype refuses. The values are exactly the mapping's keys.
+ *
+ * **JSON Schema can state it; Zod cannot without this.** It is `not: {enum: [...]}` on the
+ * discriminator, and Zod has no `not`. Nothing becomes inexpressible and no value the document assigns
+ * to the base is refused: alone it refuses only what the dispatch beside it decides.
+ *
+ * Written out as a shape, as the carve-out above is, so a guard testing anything other than "is not
+ * one of these literals" is still refused.
+ */
+const DISCRIMINATOR_GUARD =
+	/\.refine\(\(value\) => value !== "(?:[^"\\]|\\.)*"(?: && value !== "(?:[^"\\]|\\.)*")*, \{ abort: true, error: "Validated as the subtype this '(?:[^"\\]|\\.)*' names, not as '(?:[^"\\]|\\.)*'\." \}\)/g;
+
+/**
  * The permitted `z.preprocess` shapes - each written as the only form it may take.
  *
  * Every one of these undoes a TRANSPORT ENCODING before validation, so the document's own schema and
@@ -178,7 +199,9 @@ describe("the generated validator says only what the document can say", () => {
 		 */
 		const offenders = files.flatMap((file) => {
 			// The permitted shape is removed first, so anything left is by definition not it.
-			const source = readFileSync(file, "utf8").replaceAll(MULTIPART_FILE_REFINE, "");
+			const source = readFileSync(file, "utf8")
+				.replaceAll(MULTIPART_FILE_REFINE, "")
+				.replaceAll(DISCRIMINATOR_GUARD, "");
 			return [...source.matchAll(NOT_DERIVABLE)].map((match) => `${match[1]} in ${file}`);
 		});
 		expect(offenders).toEqual([]);
@@ -198,6 +221,19 @@ describe("the generated validator says only what the document can say", () => {
 		);
 		// Nine across the corpus when written; set at roughly half, this file's convention.
 		expect(refinements).toBeGreaterThanOrEqual(4);
+	});
+
+	it("finds the discriminator guards it is meant to permit", () => {
+		/**
+		 * Paired with the exemption for the same reason as the arm above: the corpus's open bases -
+		 * `Bird`, `Dinosaur`, `Dog`, `Fish`, `Shark` - each carry one, and an exemption that matched
+		 * nothing would be admitting a shape nobody produces.
+		 */
+		const guards = files.reduce(
+			(total, file) => total + (readFileSync(file, "utf8").match(DISCRIMINATOR_GUARD) ?? []).length,
+			0,
+		);
+		expect(guards).toBeGreaterThanOrEqual(5);
 	});
 
 	it("permits `z.preprocess` only as a wire decode of a known shape", () => {

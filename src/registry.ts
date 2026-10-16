@@ -540,8 +540,8 @@ export class SchemaRegistry {
 	 * them.
 	 *
 	 * **Subtypes are deliberately NOT walked here, because nothing would be walking them.** A
-	 * discriminated base renders as `z.discriminatedUnion` over its subtypes, and rendering that
-	 * already asks the registry for each one. A loop here looked load-bearing and was measured not to
+	 * discriminated base renders as a dispatch over its subtypes - `z.discriminatedUnion`, beside a base
+	 * arm where its discriminator is open - and rendering that already asks the registry for each one. A loop here looked load-bearing and was measured not to
 	 * be: removing it left all 23 polymorphism and differential arms green.
 	 *
 	 * **Wrapped in {@link captureBackEdges} and the result discarded.** This call can land on a

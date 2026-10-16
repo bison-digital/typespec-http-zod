@@ -222,9 +222,14 @@ describe("the emitted validator answers as the document does", () => {
 	 * `Retrieve.RetrievalEvents`). The corpus grew; the generator did not get worse. The keywords
 	 * those components carry are still compared structurally by `differential.test.ts`; what they lack
 	 * is a verdict on a value.
+	 *
+	 * 77 since a discriminated base gained its base arm. The one added is
+	 * `type/model/inheritance/enum-discriminator` `DogKind`, which had no validator before: the base
+	 * arm validates `Dog`'s own `kind`, so its type is declared. An `anyOf` of `string` and one
+	 * literal, it gives the sampler nothing to mutate. A component gained a validator; none lost a probe.
 	 */
 	it("leaves no more components unprobed than it did when this was measured", () => {
-		expect(tally.componentsUnbuildable).toBeLessThanOrEqual(76);
+		expect(tally.componentsUnbuildable).toBeLessThanOrEqual(77);
 	});
 
 	const named = (d: Disagreement) => `${d.scenario} ${d.component}: ${d.why}`;
@@ -245,14 +250,22 @@ describe("the emitted validator answers as the document does", () => {
 	});
 
 	/**
-	 * **The one asymmetry, and it is the document's rather than the emitter's.**
+	 * **The one asymmetry: a value naming a subtype is validated as that subtype.**
 	 *
-	 * A `@discriminator` base publishes as an ordinary object carrying OpenAPI's `discriminator`
-	 * annotation, and `discriminator` is not a JSON Schema validation keyword - so Ajv accepts a base
-	 * instance whose `kind` names no subtype at all. The emitter emits `z.discriminatedUnion`, which
-	 * accepts exactly the declared subtypes. OpenAPI's own prose says the discriminator value must
-	 * resolve to a schema, so the validator enforces what the document means and the document under-
-	 * states it.
+	 * A `@discriminator` base publishes as an object of its own properties carrying OpenAPI's
+	 * `discriminator`, and each subtype as `allOf` that base. OAS 3.1.1 section 4.8.25 is explicit that
+	 * the keyword "MUST NOT change the validation outcome of the schema", and section 4.8.25.2 that
+	 * validating the parent in this `allOf` form "does not perform a search for child schemas" - so
+	 * Ajv answers every instance as the base. The emitter takes the mapping as the hint it is and
+	 * validates a value naming `Cobra` as `Cobra`, whose own schema is `allOf` the base and so never
+	 * looser: what it adds is the subtype's declared properties and, sealed, its closedness.
+	 *
+	 * **A value naming no subtype is validated as the base**, exactly as the document does. Before the
+	 * base arm this was the larger half of the class: every open base in the corpus - `Bird`,
+	 * `Dinosaur`, `Dog`, `Fish`, `Shape` - refused `{kind: "a", ...}`, which the document accepts.
+	 * Measured since: one disagreement, `Snake`'s undeclared property, refused by the sealed `Cobra`
+	 * its `kind` names. Pinned as a number that may only shrink, so a base arm that stops answering
+	 * fails here as well as in `differential.test.ts`'s `discriminator-open`.
 	 *
 	 * **Asserted as a CLASS, not a list.** The claim is that this is the ONLY place the two disagree
 	 * and that it is always the SAFE direction - stricter, never looser. A disagreement anywhere else
@@ -262,6 +275,7 @@ describe("the emitted validator answers as the document does", () => {
 	it("every remaining disagreement is a discriminated base, and is STRICTER rather than looser", () => {
 		const discriminated = tally.disagreements.filter((d) => d.discriminated);
 		expect(discriminated.length).toBeGreaterThanOrEqual(1);
+		expect(discriminated.length).toBeLessThanOrEqual(1);
 		expect(discriminated.filter((d) => !d.document || d.validator).map(named)).toEqual([]);
 	});
 });

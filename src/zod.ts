@@ -1,8 +1,10 @@
 import {
 	getDiscriminatedUnion,
+	getDiscriminatedUnionFromInheritance,
 	getDiscriminator,
 	getDoc,
 	getEncode,
+	ignoreDiagnostics,
 	resolveEncodedName,
 	isNeverType,
 	isTemplateDeclaration,
@@ -28,7 +30,7 @@ import {
 	type MetadataInfo,
 	Visibility,
 } from "@typespec/http";
-import { applyConstraints } from "./constraints.js";
+import { applyConstraints, firstReportOf } from "./constraints.js";
 import { literal } from "./literal.js";
 import { reportDiagnostic } from "./lib.js";
 
@@ -528,10 +530,48 @@ export function scalarDocOf(program: Program, scalar: Scalar): string | undefine
 }
 
 /** A scalar's schema without its description, for a position that publishes its own. */
+/**
+ * The scalars an `@encode` chain passes through, when it returns to one it already passed - and
+ * `undefined` when it ends at a type that crosses the wire.
+ *
+ * **The one guard for every walk that follows `@encode`.** The schema, the wire kind and the contract
+ * type each follow the chain by calling themselves on the encoded type, and each one overflowed the
+ * stack on `Ping -> Pong -> Ping`. A scalar encoded as itself is no cycle: the chain ends there.
+ */
+export function encodeCycleOf(program: Program, scalar: Scalar): readonly Scalar[] | undefined {
+	const passed: Scalar[] = [];
+	for (let current: Scalar | undefined = scalar; current !== undefined;) {
+		if (passed.includes(current)) return [...passed, current];
+		passed.push(current);
+		const encoded = encodedTypeOf(program, current);
+		current = encoded === current ? undefined : encoded;
+	}
+	return undefined;
+}
+
 function scalarSchemaOf(program: Program, scalar: Scalar): string {
 	// `scalar unixTimestamp32 is utcDateTime;` with `@encode(int32)` on the SCALAR, not on each use.
 	const encoded = encodedTypeOf(program, scalar);
 	if (encoded !== undefined && encoded !== scalar) {
+		const cycle = encodeCycleOf(program, scalar);
+		if (cycle !== undefined) {
+			// Reached once per use; reported once per scalar.
+			if (firstReportOf(program, "encode-cycle", scalar)) {
+				reportDiagnostic(program, {
+					code: "encode-cycle",
+					target: scalar,
+					format: {
+						type: scalar.name,
+						// From the first link on: `Ping` is encoded as `'Pong' -> 'Ping'`.
+						chain: cycle
+							.slice(1)
+							.map((link) => `'${link.name}'`)
+							.join(" -> "),
+					},
+				});
+			}
+			return UNREPRESENTABLE;
+		}
 		return applyConstraints(program, scalarSchemaOf(program, encoded), scalar);
 	}
 	let current: Scalar | undefined = scalar;
@@ -828,31 +868,175 @@ export function discriminatedSubtypes(program: Program, model: Model): readonly 
 	return model.derivedModels.filter((derived) => includeDerivedModel(derived));
 }
 
+/**
+ * **How a `@discriminator` base is validated: a value whose discriminator names a subtype as that
+ * subtype, and any other value as the base model itself.**
+ *
+ * The document publishes the base as an object of its own properties carrying `discriminator:
+ * {propertyName, mapping}`, and every subtype as `allOf` that base. The mapping says which subtype a
+ * value naming it is; nothing in the document refuses a value naming none. This emitter dispatched
+ * on the mapping and stopped there, so `{ "kind": "wrongKind", "weight": 8 }` was refused for a
+ * `Dog` whose `kind` is `string | "golden"`, though `Dog` requires only `kind` and `weight`. That is
+ * the response `@typespec/http-specs` declares for `type/model/inheritance/enum-discriminator`,
+ * `single-discriminator` and `nested-discriminator`, and a handler returning it failed its own
+ * response contract (typespec-http-graphql, 2026-10-16).
+ *
+ * **A closed discriminator every value of which a subtype claims has no base arm**: a value outside
+ * it is refused by the base's own discriminator, and a value inside it always names a subtype. So a
+ * fixed enum fully covered by its subtypes is validated exactly as before.
+ */
+export interface DiscriminatedBase {
+	/** The discriminator's wire name. */
+	readonly propertyName: string;
+	/** The subtypes a `z.discriminatedUnion` dispatches to, each carrying literal discriminator values. */
+	readonly dispatched: readonly Model[];
+	/**
+	 * Subtypes that are themselves bases validated with a base arm. A `z.union` has no literal values
+	 * to dispatch on, so no `z.discriminatedUnion` can hold one; it sits beside the dispatch, where its
+	 * own literal discriminator keeps it exclusive.
+	 */
+	readonly beside: readonly Model[];
+	/** Every value a subtype claims, which are the keys of the document's `mapping`. */
+	readonly claimed: readonly string[];
+	/** Whether a value no subtype claims is validated as the base model. */
+	readonly open: boolean;
+}
+
+export function discriminatedBaseOf(program: Program, model: Model): DiscriminatedBase | undefined {
+	const discriminator = getDiscriminator(program, model);
+	const subtypes = discriminatedSubtypes(program, model);
+	if (discriminator === undefined || subtypes.length === 0) return undefined;
+	/**
+	 * The compiler's own reading of which subtype claims which value, which is what openapi3 writes
+	 * the `mapping` from.
+	 */
+	const claimed = [
+		...ignoreDiagnostics(
+			getDiscriminatedUnionFromInheritance(model, discriminator),
+		).variants.keys(),
+	];
+	const declared = discriminatorPropertyOf(program, model, discriminator.propertyName);
+	/**
+	 * Undeclared, the discriminator is the `string` openapi3 adds to the base - open. Declared, it is
+	 * closed only where its type is a finite set of strings.
+	 */
+	const values = declared === undefined ? undefined : closedValuesOf(declared.type);
+	const beside = subtypes.filter((subtype) => isValidatedWithBaseArm(program, subtype));
+	return {
+		propertyName: discriminator.propertyName,
+		dispatched: subtypes.filter((subtype) => !beside.includes(subtype)),
+		beside,
+		claimed,
+		open: values === undefined || values.some((value) => !claimed.includes(value)),
+	};
+}
+
+/** Whether a model is a base validated as a `z.union` rather than a `z.discriminatedUnion`. */
+function isValidatedWithBaseArm(program: Program, model: Model): boolean {
+	const base = discriminatedBaseOf(program, model);
+	return base !== undefined && (base.open || base.beside.length > 0);
+}
+
+/** The base's own discriminator property, matched by wire name as openapi3 matches it. */
+function discriminatorPropertyOf(
+	program: Program,
+	model: Model,
+	propertyName: string,
+): ModelProperty | undefined {
+	return inheritedAndOwnProperties(model).find(
+		(property) => rawPropertyKey(program, property) === propertyName,
+	);
+}
+
+/** The strings a type admits, where they are finite; `undefined` where it admits any string. */
+function closedValuesOf(type: Type): readonly string[] | undefined {
+	if (type.kind === "String") return [type.value];
+	if (type.kind === "EnumMember") {
+		const value = type.value ?? type.name;
+		return typeof value === "string" ? [value] : undefined;
+	}
+	const members =
+		type.kind === "Enum"
+			? [...type.members.values()]
+			: type.kind === "Union"
+				? [...type.variants.values()].map((variant) => variant.type)
+				: undefined;
+	if (members === undefined) return undefined;
+	const values: string[] = [];
+	for (const member of members) {
+		const closed = closedValuesOf(member);
+		if (closed === undefined) return undefined;
+		values.push(...closed);
+	}
+	return values;
+}
+
+/**
+ * The base arm's discriminator, refused for every value a subtype claims.
+ *
+ * **Without this a known kind falls through to the base.** `z.union` tries the dispatch and then the
+ * base arm, and a base with subtypes is never sealed, so `{kind: "sparrow", wingspan: 1, x: 1}` -
+ * refused by the sealed `Sparrow` - would be accepted as a `Bird` with `x` stripped. Guarded, a value
+ * naming a subtype is validated as that subtype and nothing else.
+ *
+ * `abort` keeps this refusal out of the error a caller reads: Zod reports the one arm that did not
+ * abort, which for a known kind is the subtype that was actually broken.
+ */
+function guardedDiscriminator(schema: string, base: DiscriminatedBase, model: Model): string {
+	if (base.claimed.length === 0) return schema;
+	const test = base.claimed.map((value) => `value !== ${literal(value)}`).join(" && ");
+	const error = literal(
+		`Validated as the subtype this '${base.propertyName}' names, not as '${model.name}'.`,
+	);
+	return `${schema}.refine((value) => ${test}, { abort: true, error: ${error} })`;
+}
+
 function modelToZod(program: Program, model: Model): string {
 	/**
-	 * **A `@discriminator` base is a CHOICE between its subtypes, not a shape of its own.**
+	 * **A `@discriminator` base is a CHOICE between its subtypes, and its own shape for any value
+	 * naming none of them.** See {@link DiscriminatedBase}.
 	 *
 	 * `@discriminator("kind") model Bird { kind: string; wingspan: int32 }` with four models extending
 	 * it reaches OpenAPI as a component carrying `discriminator: {propertyName, mapping}`, and the
 	 * mapping is an instruction: validate the body against whichever subtype the discriminator names.
-	 * Emitting the base's own properties instead produced `z.object({kind: z.string(), wingspan})`,
+	 * Emitting the base's own properties alone produced `z.object({kind: z.string(), wingspan})`,
 	 * which accepts `{kind: "eagle"}` while ignoring everything `Eagle` actually declares - a
 	 * polymorphic endpoint validating none of its polymorphism.
 	 *
-	 * `z.discriminatedUnion` is the faithful encoding and composes both ways this corpus needs.
-	 * Measured on Zod 4.4.3: a union may be an OPTION of another union, which is how
+	 * `z.discriminatedUnion` is the faithful encoding of the dispatch and composes both ways this
+	 * corpus needs. Measured on Zod 4.4.3: a union may be an OPTION of another union, which is how
 	 * `Fish -> Shark -> SawShark` works; and an option carrying a getter that refers back to the union
 	 * being defined does **not** throw, because the discriminator is read without enumerating the rest
 	 * of the shape. `Eagle.friends?: Bird[]` is exactly that, and it decides whether polymorphism and
 	 * recursion can coexist at all.
+	 *
+	 * **`z.discriminatedUnion` has no arm for "any other value"**, and `unionFallback` cannot add one:
+	 * it retries the same options, each of which must carry literal discriminator values. So an open
+	 * base is `z.union([dispatch, ...nested bases, base arm])`, every arm exclusive on the
+	 * discriminator - each subtype by its literal, the base arm by {@link guardedDiscriminator}.
 	 */
-	const subtypes = discriminatedSubtypes(program, model);
-	if (subtypes.length > 0) {
-		// `discriminatedSubtypes` is empty unless the model has a discriminator.
-		const discriminator = getDiscriminator(program, model)?.propertyName ?? "";
-		const options = subtypes.map((derived) => typeToZod(program, derived));
-		return `z.discriminatedUnion(${literal(discriminator)}, [${options.join(", ")}])`;
+	const base = discriminatedBaseOf(program, model);
+	if (base !== undefined) {
+		const arms: string[] = [];
+		if (base.dispatched.length > 0) {
+			const options = base.dispatched.map((derived) => typeToZod(program, derived));
+			arms.push(`z.discriminatedUnion(${literal(base.propertyName)}, [${options.join(", ")}])`);
+		}
+		arms.push(...base.beside.map((derived) => typeToZod(program, derived)));
+		if (base.open) arms.push(modelObjectToZod(program, model, base));
+		return arms.length === 1 ? (arms[0] ?? UNREPRESENTABLE) : `z.union([${arms.join(", ")}])`;
 	}
+	return modelObjectToZod(program, model);
+}
+
+/**
+ * A model as the object of its own properties, inherited ones included.
+ *
+ * **Given a discriminated base, this is its base arm**: the same object, with its discriminator
+ * refused for every value a subtype claims, and - where the base does not declare the discriminator -
+ * the required `string` openapi3 adds to the base's properties in its place.
+ */
+function modelObjectToZod(program: Program, model: Model, base?: DiscriminatedBase): string {
 	const indexer = effectiveIndexer(model);
 	const indexerKey = indexer?.key.name;
 	const declared = inheritedAndOwnProperties(model);
@@ -975,13 +1159,26 @@ function modelToZod(program: Program, model: Model): string {
 			 * parameters for the reason `renderSchemas` names both: one leaves the input side `unknown`.
 			 */
 			const annotation = deferred ? (annotateDeferred(property) ?? "") : "";
+			const guarded =
+				base !== undefined && rawPropertyKey(program, property) === base.propertyName
+					? guardedDiscriminator(value, base, model)
+					: value;
 			return {
 				deferred,
 				text: deferred
-					? `\tget ${key}()${annotation} {\n\t\treturn ${value};\n\t},`
-					: `\t${key}: ${value},`,
+					? `\tget ${key}()${annotation} {\n\t\treturn ${guarded};\n\t},`
+					: `\t${key}: ${guarded},`,
 			};
 		});
+	if (
+		base !== undefined &&
+		discriminatorPropertyOf(program, model, base.propertyName) === undefined
+	) {
+		members.push({
+			deferred: false,
+			text: `\t${objectKey(base.propertyName)}: ${guardedDiscriminator("z.string()", base, model)},`,
+		});
+	}
 	const entries = members.map((member) => member.text);
 	/**
 	 * A model-level `@refine` goes through the same path as every other constraint, so the predicate's
@@ -1062,7 +1259,10 @@ const NUMERIC_EXPRESSIONS = ["z.number()", "z.int(", "z.int32(", "z.uint32("] as
 export function wireKindOf(program: Program, type: Type): "number" | "boolean" | undefined {
 	if (type.kind === "Scalar") {
 		const encoded = encodedTypeOf(program, type);
-		if (encoded !== undefined && encoded !== type) return wireKindOf(program, encoded);
+		if (encoded !== undefined && encoded !== type) {
+			// Reported by the schema walk; a chain with no end has no kind to decode into.
+			return encodeCycleOf(program, type) === undefined ? wireKindOf(program, encoded) : undefined;
+		}
 		for (
 			let current: Scalar | undefined = type;
 			current !== undefined;
