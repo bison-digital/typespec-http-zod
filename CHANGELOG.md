@@ -8,6 +8,16 @@ published types; a patch will not. The **emitted output is part of the API** - a
 validator's shape, to a declared identifier, or to the `EmittedRoute` a wrapping emitter reads is a
 change a consumer feels, and is treated as such here rather than as an implementation detail.
 
+## [0.34.1] - 2026-10-22
+
+A patch: no validator, type or emitted code changes.
+
+### Changed
+
+- **Comments, documentation and test fixtures are rewritten in neutral terms.** The doc comments in
+  the emitted `requests.gen.ts` and `wire-contract.gen.ts` are reworded, so regenerated output
+  differs in those comments and nowhere else.
+
 ## [0.34.0] - 2026-10-21
 
 A minor, by this file's rule: the emitted files change for an unchanged spec, in order only. What a
