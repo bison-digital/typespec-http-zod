@@ -1,0 +1,369 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { compileEmittedSet } from "./support/emitted-set.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+/**
+ * **What a stranger gets when they install this package.**
+ *
+ * **Every other test here runs inside the checkout, where that question cannot be asked.** A
+ * package resolves its own devDependencies, so a source file importing something it never declared
+ * works perfectly - right up until somebody installs it on its own and gets `Cannot find package`.
+ * Measured before an arm like this existed: the emitter imported `resolveOperationId` from
+ * `@typespec/openapi`, which appeared in `devDependencies` and in no `peerDependencies` at all. The
+ * published package would not have run.
+ *
+ * The generated OUTPUT has the same problem one level out: it imports `zod` into the consumer's
+ * project, so that is the consumer's requirement too, and saying so is this manifest's job.
+ *
+ * **Asserted as a CLASS** - every specifier the source and the output reference - rather than as a
+ * list somebody remembers to extend.
+ */
+
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
+	name: string;
+	license?: string;
+	repository?: unknown;
+	files?: readonly string[];
+	publishConfig?: { access?: string; provenance?: boolean };
+	exports?: Record<string, string | Record<string, string>>;
+	peerDependencies?: Record<string, string>;
+	peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+	dependencies?: Record<string, string>;
+	devDependencies?: Record<string, string>;
+};
+
+/** `@scope/name/sub` -> `@scope/name`; `node:fs` and relative paths are not packages. */
+function packageOf(specifier: string): string | undefined {
+	if (specifier.startsWith(".") || specifier.startsWith("node:")) return undefined;
+	// An emitted import line is itself a template literal, so its specifier can be a placeholder -
+	// `${contractsPackage}` is decided by the consumer's option, not by this manifest.
+	if (specifier.includes("${")) return undefined;
+	const parts = specifier.split("/");
+	return specifier.startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0];
+}
+
+function sourceFiles(dir: string): string[] {
+	return readdirSync(dir)
+		.filter((entry) => entry.endsWith(".ts"))
+		.map((entry) => join(dir, entry));
+}
+
+/** Static `from "x"` and guarded `import("x")` alike - both resolve at run time. */
+function specifiersIn(source: string): string[] {
+	return [
+		...[...source.matchAll(/^import\s[^"']*from\s*"([^"]+)"/gm)].map((match) => match[1] ?? ""),
+		...[...source.matchAll(/\bimport\("([^"]+)"\)/g)].map((match) => match[1] ?? ""),
+	];
+}
+
+describe("the package declares what it needs to run outside this checkout", () => {
+	const declared = new Set([
+		...Object.keys(manifest.peerDependencies ?? {}),
+		...Object.keys(manifest.dependencies ?? {}),
+	]);
+	let emitted: string[] = [];
+
+	beforeAll(async () => {
+		emitted = await compileEmittedSet("packaging");
+	}, 600_000);
+
+	it("declares every package `src/` imports", () => {
+		const used = new Set<string>();
+		for (const file of sourceFiles(join(packageRoot, "src"))) {
+			for (const specifier of specifiersIn(readFileSync(file, "utf8"))) {
+				const owner = packageOf(specifier);
+				if (owner !== undefined && owner !== manifest.name) used.add(owner);
+			}
+		}
+		// Non-vacuity: a regex that stops matching would report perfect agreement.
+		expect(used.size).toBeGreaterThanOrEqual(3);
+		expect([...used].filter((name) => !declared.has(name)).toSorted()).toEqual([]);
+	});
+
+	it("declares every package the GENERATED output imports", () => {
+		/**
+		 * **The output's imports are the consumer's problem, and the consumer learns about them from
+		 * this manifest.** Generated validators importing `zod` into a project that does not have it
+		 * fail at their build, naming a package they never chose.
+		 */
+		/**
+		 * **Compiled by this suite, into a directory only this suite writes.** It used to walk
+		 * `test/` for whatever other suites had emitted, which made it read the previous run's build
+		 * on a populated tree and nothing at all on a fresh clone. See `support/emitted-set.ts`.
+		 */
+		expect(emitted.length).toBeGreaterThanOrEqual(20);
+
+		const used = new Set<string>();
+		for (const file of emitted) {
+			for (const specifier of specifiersIn(readFileSync(file, "utf8"))) {
+				const owner = packageOf(specifier);
+				// Whatever the consumer pointed `contracts-package` at is theirs.
+				if (owner === undefined || owner === manifest.name) continue;
+				used.add(owner);
+			}
+		}
+		expect(used.size).toBeGreaterThanOrEqual(1);
+		expect([...used].filter((name) => !declared.has(name)).toSorted()).toEqual([]);
+	});
+
+	/**
+	 * **The generated output imports no runtime module at all.**
+	 *
+	 * `schemas.gen.ts` used to import `ResponseArm` from wherever `runtime-module` pointed, and that
+	 * default shipped wrong in the sibling package: its generated files imported names this module does
+	 * not export, through a specifier its consumers could not resolve. The option is gone because the
+	 * arm shape is now declared in the file that uses it, so the class of defect has nothing left to
+	 * attach to - which is worth asserting rather than trusting, since re-adding an import is one line.
+	 */
+	it("imports no runtime module from any generated file", () => {
+		const runtimeImports = emitted.flatMap((file) =>
+			specifiersIn(readFileSync(file, "utf8"))
+				.filter((specifier) => /(^|\/)runtime(\.gen)?(\.js)?$/.test(specifier))
+				.map((specifier) => `${specifier} in ${file}`),
+		);
+		expect(runtimeImports).toEqual([]);
+	});
+
+	/**
+	 * **An import is emitted only when the file references the name, and that test is a pattern built
+	 * from the name itself.**
+	 *
+	 * The two directions are not symmetric. Reporting a name present that is absent leaves an unused
+	 * import, which lint refuses loudly. Reporting a name ABSENT that is present drops the import and
+	 * leaves the emitted module referencing an undeclared identifier, which is the failure the
+	 * detection exists to prevent.
+	 *
+	 * Interpolating an identifier straight into a regular expression gets the dangerous direction
+	 * wrong for any name carrying a metacharacter, and `$` is both a valid identifier character and an
+	 * anchor. Asserted here on the exported behaviour rather than on the emitted text, so the rule
+	 * holds for names no fixture happens to declare.
+	 */
+	it("detects a referenced identifier whatever characters it contains", async () => {
+		const { referencedIn } = (await import("../src/api.js")) as unknown as {
+			referencedIn?: (source: string, name: string) => boolean;
+		};
+		// Non-vacuity: an unexported helper would make every assertion below vacuously pass.
+		expect(typeof referencedIn).toBe("function");
+		const check = referencedIn as (source: string, name: string) => boolean;
+		for (const name of ["SPEC_VOCABULARIES", "isParsableInstant", "foo$bar", "$select"]) {
+			expect(check(`const x = ${name};`, name), `${name} present`).toBe(true);
+			expect(check("const x = other;", name), `${name} absent`).toBe(false);
+			expect(check(`const x = ${name}Extra;`, name), `${name} as a prefix`).toBe(false);
+		}
+	});
+
+	/**
+	 * **Spec-authored text sits in emitted source inside literals, and a word in it is not a
+	 * reference.** A description is a string, a pattern a regular expression. Read as code, a
+	 * parameter documented as naming `uriExpansion` declared the decoder in a service that never
+	 * called it, and the file failed `noUnusedLocals`. `test/descriptions` is the end-to-end arm; these
+	 * rows pin each literal form, and the code that sits between and inside them.
+	 */
+	it("reads only code: a name inside a literal or a comment is not referenced", async () => {
+		const { referencedIn } = await import("../src/api.js");
+		const rows: readonly (readonly [string, string, boolean])[] = [
+			['a: z.string().describe("uriExpansion here")', "uriExpansion", false],
+			['a: z.string().describe("say \\"uriExpansion\\"")', "uriExpansion", false],
+			["a: 'it\\'s uriExpansion' + real", "uriExpansion", false],
+			["a: 'it\\'s uriExpansion' + real", "real", true],
+			["a: z.preprocess(uriExpansion(x), z.string())", "uriExpansion", true],
+			[
+				"a: z.string().regex(/^uriExpansion\\/[a-z]$/u), b: explodedQuery(1)",
+				"uriExpansion",
+				false,
+			],
+			[
+				"a: z.string().regex(/^uriExpansion\\/[a-z]$/u), b: explodedQuery(1)",
+				"explodedQuery",
+				true,
+			],
+			["a: z.string().regex(/[/]uriExpansion/), b: c", "uriExpansion", false],
+			["x = `uriExpansion ${foo$bar({ a: 1 })} and ${baz}`; done", "uriExpansion", false],
+			["x = `uriExpansion ${foo$bar({ a: 1 })} and ${baz}`; done", "foo$bar", true],
+			["x = `uriExpansion ${foo$bar({ a: 1 })} and ${baz}`; done", "baz", true],
+			["x = `uriExpansion ${foo$bar({ a: 1 })} and ${baz}`; done", "done", true],
+			["// uriExpansion\nok", "uriExpansion", false],
+			["/* uriExpansion */ ok", "uriExpansion", false],
+			["/* uriExpansion */ ok", "ok", true],
+		];
+		for (const [source, name, expected] of rows) {
+			expect(referencedIn(source, name), `${name} in ${source}`).toBe(expected);
+		}
+	});
+
+	it("marks as optional exactly the peers behind a guarded import", () => {
+		/**
+		 * **A guarded `import()` that is a REQUIRED peer forces every consumer to install it.**
+		 * `@typespec/versioning` and `@typespec/streams` are resolved inside `try`/`catch` precisely so a
+		 * spec declaring neither needs neither - the same treatment `@typespec/openapi3` gives them.
+		 * Marking one and not the other is how that promise quietly stops being true.
+		 */
+		const guarded = new Set<string>();
+		for (const file of sourceFiles(join(packageRoot, "src"))) {
+			for (const match of readFileSync(file, "utf8").matchAll(/\bimport\("([^"]+)"\)/g)) {
+				const owner = packageOf(match[1] ?? "");
+				if (owner !== undefined) guarded.add(owner);
+			}
+		}
+		const optional = Object.entries(manifest.peerDependenciesMeta ?? {})
+			.filter(([, meta]) => meta.optional === true)
+			.map(([name]) => name);
+		expect(guarded.size).toBeGreaterThanOrEqual(2);
+		expect(optional.toSorted()).toEqual([...guarded].toSorted());
+	});
+
+	it("keeps the runtime free of every build-time import", () => {
+		/**
+		 * **`./runtime` is what an APPLICATION imports.** The main entry is an emitter and pulls in
+		 * `@typespec/compiler`; an Express service reading the response arms this package emitted must
+		 * not drag a compiler into its runtime graph for the sake of two declarations.
+		 */
+		const runtime = readFileSync(join(packageRoot, "src", "runtime.ts"), "utf8");
+		const specifiers = specifiersIn(runtime)
+			.map(packageOf)
+			.filter((name) => name !== undefined);
+		expect(specifiers.length).toBeGreaterThanOrEqual(1);
+		expect(specifiers.filter((name) => name.startsWith("@typespec/"))).toEqual([]);
+	});
+});
+
+describe("the package is configured to publish the way it claims", () => {
+	it("declares public access and provenance", () => {
+		/**
+		 * **Provenance is what lets a stranger verify the tarball came from this commit**, via a
+		 * signed attestation npm produces at publish time. It is off by default, its absence is
+		 * invisible on the published page, and nobody notices until somebody wants to check - which is
+		 * the shape of thing worth asserting rather than remembering.
+		 *
+		 * **`access: "public"` matters even for an unscoped name.** It is the default today; stating
+		 * it means a later rename to a scoped package cannot publish privately by accident.
+		 */
+		expect(manifest.publishConfig?.access).toBe("public");
+		expect(manifest.publishConfig?.provenance).toBe(true);
+	});
+
+	it("has a release workflow that can only publish deliberately", () => {
+		/**
+		 * **`id-token: write` is not optional.** Provenance is an OIDC exchange, so a workflow
+		 * without that permission fails the publish outright rather than quietly publishing unsigned -
+		 * which is the better failure, but only if the permission is there to begin with.
+		 *
+		 * The trigger is asserted too: publishing must follow a tag or a deliberate dispatch, never a
+		 * merge to the default branch.
+		 */
+		const workflow = readFileSync(join(packageRoot, ".github/workflows/release.yml"), "utf8");
+		expect(workflow).toMatch(/id-token:\s*write/);
+		expect(workflow).toMatch(/--provenance/);
+		expect(workflow).toMatch(/tags:\s*\["v\*"\]/);
+		expect(workflow).not.toMatch(/branches:\s*\[\s*["']?main/);
+	});
+});
+
+describe("the package is publishable", () => {
+	let extracted = "";
+
+	beforeAll(() => {
+		/**
+		 * **`pnpm pack` is the only thing that answers "what actually ships".** `files` is a set of
+		 * globs, and a glob that stops matching is indistinguishable from one that matches nothing -
+		 * an entry point outside it installs as a missing module. Reading the real tarball is the
+		 * difference between checking the manifest and checking the package.
+		 */
+		const workspace = mkdtempSync(join(tmpdir(), "tshz-pack-"));
+		const output = execFileSync("pnpm", ["pack", "--pack-destination", workspace], {
+			cwd: packageRoot,
+			encoding: "utf8",
+		});
+		const tarball = output
+			.split("\n")
+			.map((line) => line.trim())
+			.filter((line) => line.endsWith(".tgz"))
+			.at(-1);
+		expect(tarball, output).toBeDefined();
+		execFileSync("tar", ["-xzf", tarball ?? "", "-C", workspace]);
+		extracted = join(workspace, "package");
+	}, 300_000);
+
+	afterAll(() => {
+		if (extracted !== "") rmSync(join(extracted, ".."), { recursive: true, force: true });
+	});
+
+	it("ships every path its own entry points resolve to", () => {
+		// A target is a path, `"./package.json": "./package.json"`, or a path per condition.
+		const targets = Object.values(manifest.exports ?? {}).flatMap((entry) =>
+			typeof entry === "string" ? [entry] : Object.values(entry),
+		);
+		expect(targets.length).toBeGreaterThanOrEqual(4);
+		const missing = targets.filter((path) => !existsSync(join(extracted, path)));
+		expect(missing.toSorted(), `missing from the tarball`).toEqual([]);
+	});
+
+	it("ships no test material", () => {
+		/**
+		 * **Test material in a published package becomes de-facto public API, delivered to every
+		 * installer forever.** `@typespec/openapi3` excludes `dist/test/**` explicitly; so does this.
+		 * It is also why the shared reference fixture is vendored into the other repository rather than
+		 * shipped from here - see `test/reference/PROVENANCE.md`.
+		 */
+		const shipped: string[] = [];
+		const walk = (dir: string, prefix: string): void => {
+			for (const entry of readdirSync(dir)) {
+				const full = join(dir, entry);
+				if (statSync(full).isDirectory()) walk(full, `${prefix}${entry}/`);
+				else shipped.push(`${prefix}${entry}`);
+			}
+		};
+		walk(extracted, "");
+		expect(shipped.length).toBeGreaterThanOrEqual(10);
+		expect(
+			shipped.filter((path) => /(^|\/)test\//.test(path) || path.endsWith(".test.js")),
+		).toEqual([]);
+		expect(shipped.filter((path) => path.endsWith(".tsp") && !path.startsWith("lib/"))).toEqual([]);
+	});
+
+	it("carries a licence, a readme, and points at its source", () => {
+		expect(manifest.license).toBe("MIT");
+		expect(manifest.repository).toBeDefined();
+		expect(existsSync(join(extracted, "LICENSE"))).toBe(true);
+		expect(existsSync(join(extracted, "README.md"))).toBe(true);
+	});
+
+	it("declares no dependency by path", () => {
+		/**
+		 * **A `link:` or `file:` range is a local checkout, and publishing one breaks every
+		 * installer.** The arm exists because the arrangement that develops this package - sibling
+		 * repositories linked together - is exactly the one that invites the mistake. It has had
+		 * something to hold since `redos-detector` became the first runtime dependency; before that it
+		 * held the line on an empty set.
+		 */
+		for (const [name, range] of Object.entries(manifest.dependencies ?? {})) {
+			expect(range, `${name} is declared by path`).not.toMatch(/^(link|file|workspace):/);
+		}
+	});
+});
+
+describe("the manifest is exported", () => {
+	/**
+	 * A tool that finds a package's root or version through its `package.json`, such as a check that
+	 * two emitters resolve one copy of typespec-http-zod, resolves it by name. Asked of Node itself,
+	 * through the package's own self-reference, so the `exports` map is the one a consumer's Node reads.
+	 */
+	it("resolves typespec-http-zod/package.json by name, as Node reads the exports map", () => {
+		const resolved = execFileSync(
+			process.execPath,
+			[
+				"--input-type=module",
+				"--eval",
+				'console.log(import.meta.resolve("typespec-http-zod/package.json"))',
+			],
+			{ cwd: packageRoot, encoding: "utf8" },
+		).trim();
+		const found = JSON.parse(readFileSync(fileURLToPath(resolved), "utf8")) as { name: string };
+		expect(found.name).toBe("typespec-http-zod");
+	});
+});

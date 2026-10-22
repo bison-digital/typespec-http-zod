@@ -1,0 +1,19 @@
+{
+	"$schema": "https://json.schemastore.org/tsconfig",
+	"_comment": "Typecheck config. `tsconfig.build.json` emits `dist/` from `src/` alone; this one checks the tests too, which is where the emitter's evidence lives. It sets flags the build config deliberately does not - `noUnusedLocals`, `noUnusedParameters`, `allowUnreachableCode: false` - so `pnpm typecheck` catches what a green `pnpm test` does not. Run it LAST, before every commit.",
+	"extends": "./tsconfig.build.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"types": ["node"],
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noImplicitOverride": true,
+		"noFallthroughCasesInSwitch": true,
+		"allowUnreachableCode": false,
+		"verbatimModuleSyntax": true,
+		"isolatedModules": true,
+		"resolveJsonModule": true
+	},
+	"_include_comment": "No `exclude` for `*.fixture.ts`: no test imports the gitignored `.out/` from a hand-written fixture, so `pnpm typecheck` needs no build step and passes on a fresh clone. An exclude guarding nothing is a rule nobody can check.",
+	"include": ["src/**/*.ts", "test/**/*.ts"]
+}

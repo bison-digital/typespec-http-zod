@@ -1,0 +1,243 @@
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { beforeAll, describe, expect, it } from "vitest";
+import type { ZodType } from "zod";
+import { compileFixture, type CompiledFixture } from "../support/compile-fixture.js";
+
+/**
+ * **A multipart request body is validated, and validated as what the document says it is.**
+ *
+ * `requestBodyOf` returned a type only for `bodyKind === "single"`, so every multipart operation was
+ * mounted with no body validator at all - 19 routes across the conformance corpus and 12 components
+ * the document declares that nothing could check. Not a refusal and not a diagnostic: silently
+ * unchecked, which is the failure this emitter exists to remove.
+ *
+ * **A binary part must be `z.unknown()`, and that is the load-bearing choice.** `SCALARS` maps
+ * `bytes` to `z.string()`, which is right for a JSON body (base64) and wrong in a part, where the
+ * bytes are raw - openapi3 publishes `{}` for it, no type at all. `z.string()` would enforce a rule
+ * the document does not state AND reject what a server actually receives, since `c.req.parseBody()`
+ * hands back a `File`.
+ */
+
+const here = fileURLToPath(new URL(".", import.meta.url));
+
+describe("a multipart body is checked part by part", () => {
+	let schemas: Record<string, ZodType>;
+	let compiled: CompiledFixture;
+	const accepts = (name: string, value: unknown): boolean =>
+		(schemas[name] as ZodType).safeParse(value).success;
+	const body = (overrides: Record<string, unknown>): Record<string, unknown> => ({
+		id: "abc",
+		profileImage: new Uint8Array([1, 2, 3]),
+		address: { city: "London" },
+		pictures: [new Uint8Array([1])],
+		...overrides,
+	});
+
+	beforeAll(async () => {
+		compiled = await compileFixture(here, "upload");
+		schemas = (await import(join(compiled.outDir, "schemas.gen.ts"))) as Record<string, ZodType>;
+	});
+
+	it("compiles and emits a validator for the multipart body", () => {
+		expect(compiled.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+		// The defect, stated plainly: this used to be `undefined`.
+		expect(schemas.uploadSchema).toBeDefined();
+	});
+
+	it("accepts a body whose parts are all present and well typed", () => {
+		expect(accepts("uploadSchema", body({}))).toBe(true);
+	});
+
+	it("enforces a text part's type and its requiredness", () => {
+		expect(accepts("uploadSchema", body({ id: 42 }))).toBe(false);
+		expect(accepts("uploadSchema", body({ id: undefined }))).toBe(false);
+	});
+
+	it("accepts ANY value for a binary part, because the document constrains none", () => {
+		// Paired with the text-part arm above, so "accepts anything" is a statement about this part
+		// rather than about a validator that checks nothing.
+		for (const value of [new Uint8Array([1]), "base64ish", { name: "f.png" }]) {
+			expect(accepts("uploadSchema", body({ profileImage: value }))).toBe(true);
+		}
+		// ...but the part must still be PRESENT, which is the half `z.unknown()` alone would lose.
+		const { profileImage, ...without } = body({});
+		void profileImage;
+		expect(accepts("uploadSchema", without)).toBe(false);
+	});
+
+	it("validates INSIDE a JSON part", () => {
+		expect(accepts("uploadSchema", body({ address: { city: 42 } }))).toBe(false);
+		expect(accepts("uploadSchema", body({ address: {} }))).toBe(false);
+	});
+
+	it("reads a repeated part as an array, and an optional part as optional", () => {
+		expect(accepts("uploadSchema", body({ pictures: new Uint8Array([1]) }))).toBe(false);
+		const { caption, ...without } = body({});
+		void caption;
+		expect(accepts("uploadSchema", without)).toBe(true);
+	});
+
+	/**
+	 * **The request takes a repeated part sent once as the list of one it is**: a form hands one file
+	 * sent to a multi-file field over as the file, not a list of it, and the route answered 400. The
+	 * component stays the document's schema, above; only the route's validator boxes, and only text or
+	 * a file - what a form delivers for a part.
+	 */
+	it("boxes a repeated part sent once, in the request only", () => {
+		const file = {
+			name: "f.png",
+			type: "image/png",
+			arrayBuffer: () => Promise.resolve(new ArrayBuffer(1)),
+		};
+		for (const value of [file, "text"]) {
+			expect(accepts("uploadBody", body({ pictures: value })), JSON.stringify(value)).toBe(true);
+			expect(accepts("uploadSchema", body({ pictures: value })), JSON.stringify(value)).toBe(false);
+		}
+		expect(accepts("uploadBody", body({ pictures: [file, file] }))).toBe(true);
+		expect(accepts("uploadBody", body({ pictures: 5 }))).toBe(false);
+	});
+
+	it("keys a part on its WIRE name", () => {
+		// `identifier: HttpPart<string, #{name: "id"}>` goes on the wire as `id`.
+		expect(accepts("renamedSchema", { id: "abc" })).toBe(true);
+		expect(accepts("renamedSchema", { identifier: "abc" })).toBe(false);
+	});
+});
+
+/**
+ * **A text part is decoded the way a path, query or header value is, and for the same reason**: a
+ * form carries text, and `type: number` describes what the part means once decoded. The same rule as
+ * `wireDecoded` for parameters, so a malformed value still fails against the document's schema.
+ */
+describe("a number or boolean part arrives as the text a form carries", () => {
+	let schemas: Record<string, ZodType>;
+
+	beforeAll(async () => {
+		const compiled = await compileFixture(here, "upload", { outName: "upload-text-parts" });
+		schemas = (await import(join(compiled.outDir, "schemas.gen.ts"))) as Record<string, ZodType>;
+	});
+
+	const parse = (value: unknown) => (schemas["measurementsSchema"] as ZodType).safeParse(value);
+
+	it("accepts the request http-specs documents, decoded to the values the document means", () => {
+		const result = parse({ temperature: "0.5", count: "3", flag: "true" });
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({ temperature: 0.5, count: 3, flag: true });
+	});
+
+	/**
+	 * **The same values, as they actually arrive.** The arm above hands the schema strings, which is
+	 * only a claim about the wire until something parses a real body. These are the exact bytes the
+	 * Postman CLI sends for these parts (captured from its run, `Content-Type: text/plain` on each part
+	 * and no filename), parsed by `Request.formData()`, the WHATWG parser Hono's `parseBody` wraps.
+	 * Before the fix a server generated from `payload/multipart/non-string-float` answered this body
+	 * with `400 expected number, received string`.
+	 */
+	it("accepts the multipart body a client actually sends, parsed as a server parses it", async () => {
+		const boundary = "--------------------------116697384997113919143159";
+		const part = (name: string, value: string) =>
+			`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\nContent-Type: text/plain\r\n\r\n${value}\r\n`;
+		const bytes = `${part("temperature", "0.5")}${part("count", "3")}${part("flag", "true")}--${boundary}--\r\n`;
+		const form = await new Request("https://multipart.test/measurements", {
+			method: "POST",
+			headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+			body: bytes,
+		}).formData();
+		const arrived = Object.fromEntries(form.entries());
+		// Non-vacuity: what the parser produced is text, which is the whole point of the arm.
+		expect(arrived).toEqual({ temperature: "0.5", count: "3", flag: "true" });
+		const result = parse(arrived);
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({ temperature: 0.5, count: 3, flag: true });
+	});
+
+	it("still refuses text that is not the number or boolean the document declares", () => {
+		expect(parse({ temperature: "warm", count: "3", flag: "true" }).success).toBe(false);
+		// `Number("")` is 0; an empty part must not become a zero the document never received.
+		expect(parse({ temperature: "", count: "3", flag: "true" }).success).toBe(false);
+		expect(parse({ temperature: "0.5", count: "3.5", flag: "true" }).success).toBe(false);
+		expect(parse({ temperature: "0.5", count: "3", flag: "yes" }).success).toBe(false);
+	});
+});
+
+/**
+ * **A part whose media type is JSON arrives as JSON text**, and is decoded before the document's
+ * schema applies. `@typespec/http` resolves `application/json` for a model or array part; a client
+ * sends that part as text with `Content-Type: application/json` and no filename, so the parser hands
+ * the handler a string. Measured before the fix, on the bytes the Postman CLI sends for
+ * `address: HttpPart<Address>`: `expected object, received string`, and a server generated from the
+ * same spec answered 400.
+ */
+describe("a JSON part arrives as the JSON text a form carries", () => {
+	let schemas: Record<string, ZodType>;
+
+	beforeAll(async () => {
+		const compiled = await compileFixture(here, "upload", { outName: "upload-json-parts" });
+		schemas = (await import(join(compiled.outDir, "schemas.gen.ts"))) as Record<string, ZodType>;
+	});
+
+	const parse = (value: unknown) => (schemas["profileSchema"] as ZodType).safeParse(value);
+
+	/** The bytes the Postman CLI 1.56.1 sends for these parts, captured from its run against a socket. */
+	const sent = async (
+		address: string,
+		scores: string,
+		note = '"a note"',
+	): Promise<Record<string, unknown>> => {
+		const boundary = "--------------------------428824510061142568669433";
+		const part = (name: string, contentType: string, value: string) =>
+			`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\nContent-Type: ${contentType}\r\n\r\n${value}\r\n`;
+		const bytes = `${part("name", "text/plain", "name")}${part("address", "application/json", address)}${part("scores", "application/json", scores)}${part("note", "application/json", note)}--${boundary}--\r\n`;
+		const form = await new Request("https://multipart.test/profiles", {
+			method: "POST",
+			headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+			body: bytes,
+		}).formData();
+		return Object.fromEntries(form.entries());
+	};
+
+	it("accepts the multipart body a client actually sends, decoded to the values the document means", async () => {
+		const arrived = await sent('{"city":"London"}', "[1,2]");
+		// Non-vacuity: the parser produced text, which is what the schema has to accept.
+		expect(arrived).toEqual({
+			name: "name",
+			address: '{"city":"London"}',
+			scores: "[1,2]",
+			note: '"a note"',
+		});
+		const result = parse(arrived);
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({
+			name: "name",
+			address: { city: "London" },
+			scores: [1, 2],
+			note: "a note",
+		});
+	});
+
+	it("still refuses JSON text that is malformed, or not the shape the document declares", async () => {
+		expect(parse(await sent('{"city":', "[1,2]")).success).toBe(false);
+		expect(parse(await sent('{"city":42}', "[1,2]")).success).toBe(false);
+		expect(parse(await sent('{"city":"London"}', '["one"]')).success).toBe(false);
+		// The note's schema admits any string, so only the JSON decoding can refuse text that is not JSON.
+		expect(parse(await sent('{"city":"London"}', "[1,2]", "a note")).success).toBe(false);
+	});
+
+	it("does not decode a text part, so a string that happens to be JSON stays a string", async () => {
+		// `note` travels as JSON, so even its string value arrives as JSON text.
+		const result = parse({
+			name: "[1]",
+			address: { city: "London" },
+			scores: [1],
+			note: '"a note"',
+		});
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({
+			name: "[1]",
+			address: { city: "London" },
+			scores: [1],
+			note: "a note",
+		});
+	});
+});

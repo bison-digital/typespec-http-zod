@@ -1,0 +1,16 @@
+minimumReleaseAgeExclude:
+  - "@typespec/compiler@1.17.0"
+  - "@typespec/events@0.87.0"
+  - "@typespec/http-specs@0.1.0-alpha.44"
+  - "@typespec/http@1.17.0"
+  - "@typespec/openapi3@1.17.0"
+  - "@typespec/openapi@1.17.0"
+  - "@typespec/rest@0.87.0"
+  - "@typespec/spector@0.1.0-alpha.30"
+  - "@typespec/sse@0.87.0"
+  - "@typespec/streams@0.87.0"
+  - "@typespec/versioning@0.87.0"
+  - "@typespec/xml@0.87.0"
+  - redos-detector@6.1.4
+  - zod@4.6.5
+  - "@typespec/asset-emitter@0.79.3"
